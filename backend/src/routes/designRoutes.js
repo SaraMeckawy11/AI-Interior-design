@@ -28,7 +28,7 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     let generatedImageBase64;
     try {
-      const aiResponse = await axios.post(`${process.env.EXPO_PUBLIC_SERVER_URI}:5000/generate`, {
+      const aiResponse = await axios.post(`http://192.168.1.162:5000/generate`, {
         image: imageBase64,
         room_type: roomType,
         design_style: designStyle,

@@ -39,7 +39,7 @@ export default function AuthModal({ setModalVisible }) {
       const user = { name, email, avatar };
       const signedToken = JWT.encode(user, JWT_SECRET);
 
-      const res = await axios.post(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/auth/logi`, {
+      const res = await axios.post(`http://192.168.1.162:3000/api/auth/login`, {
         signedToken,
       });
 

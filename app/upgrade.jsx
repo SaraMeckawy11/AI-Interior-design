@@ -25,7 +25,7 @@ export default function Upgrade() {
 
     async function fetchExistingOrder() {
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/orders/latest`, {
+        const res = await fetch(`http://192.168.1.162:3000/api/orders/latest`, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -66,7 +66,7 @@ export default function Upgrade() {
             text: 'Yes, Change Plan',
             onPress: async () => {
               try {
-                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/orders/update-latest`, {
+                const res = await fetch(`http://192.168.1.162:3000/api/orders/update-latest`, {
                   method: 'PUT',
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -96,7 +96,7 @@ export default function Upgrade() {
       );
     } else {
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/orders`, {
+        const res = await fetch(`http://192.168.1.162:3000/api/orders`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

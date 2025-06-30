@@ -100,7 +100,7 @@ export default function Create() {
         requestBody.image = imageDataUrl;
       }
 
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/designs`, {
+      const response = await fetch(`http://192.168.1.162:3000/api/designs`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

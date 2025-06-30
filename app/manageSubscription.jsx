@@ -24,7 +24,7 @@ export default function Subscription() {
 
     async function fetchUserSubscription() {
       try {
-        const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/orders/latest`, {
+        const response = await fetch(`http://192.168.1.162:3000/api/orders/latest`, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -75,7 +75,7 @@ export default function Subscription() {
         text: 'Yes, Cancel',
         onPress: async () => {
           try {
-            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}:3000/api/orders/cancel-latest`, {
+            const res = await fetch(`http://192.168.1.162:3000/api/orders/cancel-latest`, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${token}`,
