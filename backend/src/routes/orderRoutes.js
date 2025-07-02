@@ -17,17 +17,17 @@ router.post("/", isAuthenticated, async (req, res) => {
       transactionId,
     } = req.body;
 
-    // ✅ Prevent multiple active subscriptions
-    const existing = await Order.findOne({
-      user: req.user._id,
-      isActive: true,
-      endDate: { $gte: new Date() },
-    });
+    // ✅ Deactivate all previous active subscriptions (to keep history intact)
+    await Order.updateMany(
+      {
+        user: req.user._id,
+        isActive: true,
+        endDate: { $gte: new Date() },
+      },
+      { $set: { isActive: false } }
+    );
 
-    if (existing) {
-      return res.status(400).json({ success: false, message: "Already subscribed." });
-    }
-
+    // ✅ Create new subscription (a new payment record)
     const newOrder = new Order({
       user: req.user._id,
       plan,
@@ -49,6 +49,7 @@ router.post("/", isAuthenticated, async (req, res) => {
   }
 });
 
+
 // ✅ GET latest active subscription
 router.get("/latest", isAuthenticated, async (req, res) => {
   try {
@@ -63,7 +64,7 @@ router.get("/latest", isAuthenticated, async (req, res) => {
       return res.status(404).json({ success: false, message: "No active subscription found." });
     }
 
-    res.status(200).json(latest);
+    res.status(200).json({ success: true, order: latest });
   } catch (err) {
     console.error("Failed to fetch latest order:", err);
     res.status(500).json({ success: false, message: "Failed to fetch subscription." });
@@ -71,7 +72,7 @@ router.get("/latest", isAuthenticated, async (req, res) => {
 });
 
 // ✅ UPDATE latest active order
-router.put('/update-latest', isAuthenticated, async (req, res) => {
+router.put("/update-latest", isAuthenticated, async (req, res) => {
   try {
     const latest = await Order.findOne({
       user: req.user._id,
@@ -81,7 +82,7 @@ router.put('/update-latest', isAuthenticated, async (req, res) => {
     }).sort({ createdAt: -1 });
 
     if (!latest) {
-      return res.status(404).json({ success: false, message: 'No active order to update.' });
+      return res.status(404).json({ success: false, message: "No active order to update." });
     }
 
     const {
@@ -103,32 +104,48 @@ router.put('/update-latest', isAuthenticated, async (req, res) => {
     await latest.save();
     res.status(200).json({ success: true, order: latest });
   } catch (err) {
-    console.error('Failed to update order:', err);
-    res.status(500).json({ success: false, message: 'Failed to update order.' });
+    console.error("Failed to update order:", err);
+    res.status(500).json({ success: false, message: "Failed to update order." });
   }
 });
 
 // ✅ CANCEL latest active subscription
-router.post('/cancel-latest', isAuthenticated, async (req, res) => {
+router.post("/cancel-latest", isAuthenticated, async (req, res) => {
   try {
     const latestOrder = await Order.findOne({
       user: req.user._id,
       isActive: true,
-      paymentStatus: 'paid',
+      paymentStatus: "paid",
       endDate: { $gte: new Date() },
     }).sort({ createdAt: -1 });
 
     if (!latestOrder) {
-      return res.status(404).json({ success: false, message: 'No active subscription found.' });
+      return res.status(404).json({ success: false, message: "No active subscription found." });
     }
 
     latestOrder.autoRenew = false;
+    latestOrder.canceledAt = new Date();
     await latestOrder.save();
 
-    res.json({ success: true, message: 'Auto-renew disabled.' });
+    res.json({ success: true, message: "Auto-renew disabled." });
   } catch (error) {
-    console.error('Cancel subscription failed:', error);
-    res.status(500).json({ success: false, message: 'Cancel failed.' });
+    console.error("Cancel subscription failed:", error);
+    res.status(500).json({ success: false, message: "Cancel failed." });
+  }
+});
+
+// ✅ GET all successful payment history for the user
+router.get("/history", isAuthenticated, async (req, res) => {
+  try {
+    const history = await Order.find({
+      user: req.user._id,
+      paymentStatus: "paid",
+    }).sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, orders: history });
+  } catch (err) {
+    console.error("Failed to fetch payment history:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch history." });
   }
 });
 
