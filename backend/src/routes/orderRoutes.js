@@ -17,12 +17,11 @@ router.post("/", isAuthenticated, async (req, res) => {
       transactionId,
     } = req.body;
 
-    // ✅ Deactivate all previous active subscriptions (to keep history intact)
+    // ✅ Deactivate all previous active subscriptions (keep history)
     await Order.updateMany(
       {
         user: req.user._id,
         isActive: true,
-        endDate: { $gte: new Date() },
       },
       { $set: { isActive: false } }
     );
@@ -49,19 +48,16 @@ router.post("/", isAuthenticated, async (req, res) => {
   }
 });
 
-
-// ✅ GET latest active subscription
+// ✅ GET latest subscription (even if expired or inactive)
 router.get("/latest", isAuthenticated, async (req, res) => {
   try {
     const latest = await Order.findOne({
       user: req.user._id,
-      isActive: true,
       paymentStatus: "paid",
-      endDate: { $gte: new Date() },
     }).sort({ createdAt: -1 });
 
     if (!latest) {
-      return res.status(404).json({ success: false, message: "No active subscription found." });
+      return res.status(404).json({ success: false, message: "No subscription found." });
     }
 
     res.status(200).json({ success: true, order: latest });
@@ -71,18 +67,16 @@ router.get("/latest", isAuthenticated, async (req, res) => {
   }
 });
 
-// ✅ UPDATE latest active order
+// ✅ UPDATE latest order (active or not)
 router.put("/update-latest", isAuthenticated, async (req, res) => {
   try {
     const latest = await Order.findOne({
       user: req.user._id,
-      isActive: true,
       paymentStatus: "paid",
-      endDate: { $gte: new Date() },
     }).sort({ createdAt: -1 });
 
     if (!latest) {
-      return res.status(404).json({ success: false, message: "No active order to update." });
+      return res.status(404).json({ success: false, message: "No order to update." });
     }
 
     const {
@@ -116,7 +110,6 @@ router.post("/cancel-latest", isAuthenticated, async (req, res) => {
       user: req.user._id,
       isActive: true,
       paymentStatus: "paid",
-      endDate: { $gte: new Date() },
     }).sort({ createdAt: -1 });
 
     if (!latestOrder) {
