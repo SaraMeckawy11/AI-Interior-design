@@ -2,7 +2,8 @@ import express from "express";
 import axios from "axios";
 import cloudinary from "../lib/cloudinary.js";
 import Design from "../models/Design.js";
-import { isAuthenticated } from "../middleware/auth.middleware.js"; // Named export
+import User from "../models/User.js";
+import { isAuthenticated } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
@@ -20,12 +21,25 @@ router.post("/", isAuthenticated, async (req, res) => {
       return res.status(400).json({ message: "Please provide all required fields" });
     }
 
+    // ✅ Fetch user and check usage
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!user.isSubscribed && user.freeDesignsUsed >= 2) {
+      return res.status(403).json({
+        message: "Upgrade required",
+        reason: "You have used your 2 free designs. Please upgrade to continue.",
+      });
+    }
+
+    // 🖼 Upload original image
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
+    // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
       const aiResponse = await axios.post(`http://192.168.1.162:5000/generate`, {
@@ -42,6 +56,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
+    // 🖼 Upload AI-generated image
     let generatedImageUrl = null;
     let generatedImagePublicId = null;
 
@@ -54,6 +69,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       generatedImagePublicId = generatedResponse.public_id;
     }
 
+    // 💾 Save design to DB
     const newDesign = new Design({
       roomType,
       designStyle,
@@ -68,6 +84,12 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     await newDesign.save();
 
+    // ➕ Increment freeDesignsUsed if not subscribed
+    if (!user.isSubscribed) {
+      user.freeDesignsUsed += 1;
+      await user.save();
+    }
+
     res.status(201).json({
       image: newDesign.image,
       generatedImage: newDesign.generatedImage,
@@ -75,7 +97,6 @@ router.post("/", isAuthenticated, async (req, res) => {
       designStyle: newDesign.designStyle,
       colorTone: newDesign.colorTone,
     });
-
   } catch (error) {
     console.error("POST /designs error:", error.message || error);
     res.status(500).json({ message: error.message || "Something went wrong" });

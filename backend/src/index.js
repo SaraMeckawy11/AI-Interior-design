@@ -21,6 +21,8 @@ app.use(cors());
 app.use("/api/auth", authRoutes);
 app.use("/api/designs", designRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/users", userRoutes);
+
 
 app.get("/me", isAuthenticated, async (req, res, next) => {
   try {

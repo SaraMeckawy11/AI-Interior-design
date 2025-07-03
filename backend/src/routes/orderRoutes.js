@@ -1,5 +1,6 @@
 import express from "express";
 import Order from "../models/Order.js";
+import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
@@ -17,16 +18,12 @@ router.post("/", isAuthenticated, async (req, res) => {
       transactionId,
     } = req.body;
 
-    // ✅ Deactivate all previous active subscriptions (keep history)
+    // ✅ Deactivate previous active subscriptions
     await Order.updateMany(
-      {
-        user: req.user._id,
-        isActive: true,
-      },
+      { user: req.user._id, isActive: true },
       { $set: { isActive: false } }
     );
 
-    // ✅ Create new subscription (a new payment record)
     const newOrder = new Order({
       user: req.user._id,
       plan,
@@ -41,6 +38,12 @@ router.post("/", isAuthenticated, async (req, res) => {
     });
 
     const savedOrder = await newOrder.save();
+
+    // ✅ Update user subscription status
+    await User.findByIdAndUpdate(req.user._id, {
+      isSubscribed: true,
+    });
+
     res.status(201).json({ success: true, order: savedOrder });
   } catch (err) {
     console.error("Failed to create order:", err);
@@ -57,8 +60,17 @@ router.get("/latest", isAuthenticated, async (req, res) => {
     }).sort({ createdAt: -1 });
 
     if (!latest) {
+      // Ensure user marked unsubscribed if no subscriptions
+      await User.findByIdAndUpdate(req.user._id, { isSubscribed: false });
       return res.status(404).json({ success: false, message: "No subscription found." });
     }
+
+    const isExpired = new Date(latest.endDate) < new Date();
+
+    // ✅ Sync subscription state with actual expiration
+    await User.findByIdAndUpdate(req.user._id, {
+      isSubscribed: !isExpired && latest.isActive,
+    });
 
     res.status(200).json({ success: true, order: latest });
   } catch (err) {
@@ -67,7 +79,7 @@ router.get("/latest", isAuthenticated, async (req, res) => {
   }
 });
 
-// ✅ UPDATE latest order (active or not)
+// ✅ UPDATE latest order
 router.put("/update-latest", isAuthenticated, async (req, res) => {
   try {
     const latest = await Order.findOne({
@@ -85,7 +97,7 @@ router.put("/update-latest", isAuthenticated, async (req, res) => {
       price,
       startDate,
       endDate,
-      autoRenew
+      autoRenew,
     } = req.body;
 
     latest.plan = plan || latest.plan;
@@ -96,6 +108,13 @@ router.put("/update-latest", isAuthenticated, async (req, res) => {
     latest.autoRenew = autoRenew ?? latest.autoRenew;
 
     await latest.save();
+
+    // ✅ Recalculate subscription status
+    const isExpired = new Date(latest.endDate) < new Date();
+    await User.findByIdAndUpdate(req.user._id, {
+      isSubscribed: !isExpired && latest.isActive,
+    });
+
     res.status(200).json({ success: true, order: latest });
   } catch (err) {
     console.error("Failed to update order:", err);
@@ -120,6 +139,12 @@ router.post("/cancel-latest", isAuthenticated, async (req, res) => {
     latestOrder.canceledAt = new Date();
     await latestOrder.save();
 
+    // ✅ Only set isSubscribed to false if endDate already passed
+    const isExpired = new Date(latestOrder.endDate) < new Date();
+    if (isExpired) {
+      await User.findByIdAndUpdate(req.user._id, { isSubscribed: false });
+    }
+
     res.json({ success: true, message: "Auto-renew disabled." });
   } catch (error) {
     console.error("Cancel subscription failed:", error);
@@ -127,7 +152,7 @@ router.post("/cancel-latest", isAuthenticated, async (req, res) => {
   }
 });
 
-// ✅ GET all successful payment history for the user
+// ✅ GET all successful payment history
 router.get("/history", isAuthenticated, async (req, res) => {
   try {
     const history = await Order.find({
