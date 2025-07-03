@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes.js";
 import designRoutes from "./routes/designRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
+import userRoutes from "./routes/user.routes.js";
+
 
 import { connectDB } from "./lib/db.js";
 import { isAuthenticated } from "./middleware/auth.middleware.js";
