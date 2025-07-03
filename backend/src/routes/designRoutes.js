@@ -109,13 +109,14 @@ router.get("/", isAuthenticated, async (req, res) => {
     const limit = Number(req.query.limit) || 5;
     const skip = (page - 1) * limit;
 
-    const designs = await Design.find()
+    // ✅ Filter designs by authenticated user
+    const designs = await Design.find({ user: req.user._id })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate("user", "username profileImage");
 
-    const totalDesigns = await Design.countDocuments();
+    const totalDesigns = await Design.countDocuments({ user: req.user._id });
 
     const output = designs.map(design => ({
       generatedImage: design.generatedImage,
@@ -139,6 +140,7 @@ router.get("/", isAuthenticated, async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
 
 router.get("/user", isAuthenticated, async (req, res) => {
   try {
