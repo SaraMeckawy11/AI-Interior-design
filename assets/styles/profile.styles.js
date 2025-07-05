@@ -1,4 +1,3 @@
-// styles/profile.styles.js
 import { StyleSheet } from "react-native";
 import COLORS from "../../constants/colors";
 
@@ -47,16 +46,18 @@ const styles = StyleSheet.create({
   },
   email: {
     fontSize: 14,
+    fontWeight: "400",
     color: COLORS.textSecondary,
     marginBottom: 4,
   },
   memberSince: {
     fontSize: 12,
+    fontWeight: "400",
     color: COLORS.textSecondary,
   },
   logoutButton: {
     backgroundColor: COLORS.primary,
-    borderRadius:16,
+    borderRadius: 16,
     padding: 8,
     flexDirection: "row",
     alignItems: "center",
@@ -73,43 +74,35 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 8,
   },
-
-itemIcon: {
-  marginRight: 12,
-},
-
-section: {
-  marginTop: 16,
-  paddingHorizontal: 16,
-  paddingVertical: 12,
-  backgroundColor: COLORS.white,
-},
-
-sectionTitle: {
-  fontSize: 16,
-  fontWeight: '700',
-  marginBottom: 8,
-  color: COLORS.textPrimary,
-  fontFamily: 'Poppins_500Medium',
-},
-
-item: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'flex-start',
-  paddingVertical: 16,
-  paddingHorizontal: 8,
-  borderBottomWidth: 1,
-  borderBottomColor: COLORS.border,
-},
-
-itemText: {
-  fontSize: 14,
-  fontWeight: '500',
-  color: COLORS.textSecondary,
-  fontFamily: 'Poppins_400Regular',
-},
-
+  itemIcon: {
+    marginRight: 12,
+  },
+  section: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: COLORS.white,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
+    color: COLORS.textPrimary,
+  },
+  item: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  itemText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+  },
 });
 
 export default styles;

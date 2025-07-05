@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-torch
-diffusers
-transformers
-opencv-python-headless
-pillow

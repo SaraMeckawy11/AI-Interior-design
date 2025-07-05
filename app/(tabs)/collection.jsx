@@ -26,7 +26,7 @@ export default function Collection() {
     else if (pageNum === 1) setLoading(true);
 
     const response = await fetch(
-      `http://192.168.1.162:3000/api/designs?page=${pageNum}&limit=5`,
+      `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs?page=${pageNum}&limit=5`,
       {
         headers: {
           Authorization: token ? `Bearer ${token}` : "",
@@ -59,7 +59,7 @@ export default function Collection() {
 
   const handleDeleteDesign = async (designId) => {
     try {
-      const response = await fetch(`http://192.168.1.162:3000/api/designs/${designId}`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/${designId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,

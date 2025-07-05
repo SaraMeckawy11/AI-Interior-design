@@ -5,12 +5,12 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import styles from '../assets/styles/upgrade.styles';
 import { useAuthStore } from '../authStore';
+import Loader from '../components/Loader'; // ✅ use Loader component
 
 export default function Subscription() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export default function Subscription() {
 
     async function fetchUserSubscription() {
       try {
-        const response = await fetch(`http://192.168.1.162:3000/api/orders/latest`, {
+        const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/latest`, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -36,7 +36,8 @@ export default function Subscription() {
           throw new Error(error || 'Subscription fetch failed');
         }
 
-        const latestOrder = await response.json();
+        const data = await response.json();
+        const latestOrder = data.order;
 
         const planName = `${capitalize(latestOrder.plan)} – ${capitalize(latestOrder.billingCycle)}`;
         const price = `${latestOrder.price} ${
@@ -75,7 +76,7 @@ export default function Subscription() {
         text: 'Yes, Cancel',
         onPress: async () => {
           try {
-            const res = await fetch(`http://192.168.1.162:3000/api/orders/cancel-latest`, {
+            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/cancel-latest`, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${token}`,
@@ -84,8 +85,6 @@ export default function Subscription() {
             });
 
             if (!res.ok) throw new Error('Cancel failed');
-
-            const result = await res.json();
 
             setCurrentPlan((prev) => ({
               ...prev,
@@ -108,12 +107,9 @@ export default function Subscription() {
     return text.charAt(0).toUpperCase() + text.slice(1);
   };
 
+  // ✅ Replace ActivityIndicator with Loader
   if (loading) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#888" />
-      </View>
-    );
+    return <Loader />;
   }
 
   if (!isSubscribed) {
@@ -142,7 +138,6 @@ export default function Subscription() {
         Easily manage your current plan, billing settings, or support.
       </Text>
 
-      {/* Current Plan Card */}
       <View style={[styles.card, styles.cardElevated]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Ionicons name="star" size={24} color="#f7b731" />
@@ -164,7 +159,6 @@ export default function Subscription() {
         </View>
       </View>
 
-      {/* Options */}
       <View style={{ marginTop: 12 }}>
         <TouchableOpacity
           style={[styles.card, styles.cardInteractive]}
@@ -179,6 +173,18 @@ export default function Subscription() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          style={[styles.card, styles.cardInteractive]}
+          activeOpacity={0.9}
+          onPress={() => router.push('/payment-history')}
+        >
+          <Ionicons name="time-outline" size={22} color="#444" />
+          <View style={{ marginLeft: 12 }}>
+            <Text style={styles.cardTitle}>Payment History</Text>
+            <Text style={styles.cardSmall}>View all your past payments</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={[styles.card, styles.cardDestructive]}
           activeOpacity={0.9}
           onPress={handleCancel}
@@ -187,18 +193,6 @@ export default function Subscription() {
           <View style={{ marginLeft: 12 }}>
             <Text style={[styles.cardTitle, { color: '#e74c3c' }]}>Cancel Subscription</Text>
             <Text style={styles.cardSmall}>Auto-renewal will be turned off</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.card, styles.cardInteractive]}
-          activeOpacity={0.9}
-          onPress={() => router.push('/support')}
-        >
-          <Ionicons name="help-circle-outline" size={22} color="#444" />
-          <View style={{ marginLeft: 12 }}>
-            <Text style={styles.cardTitle}>Billing Support</Text>
-            <Text style={styles.cardSmall}>Questions about payments or invoices?</Text>
           </View>
         </TouchableOpacity>
       </View>

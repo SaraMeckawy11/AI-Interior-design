@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import styles from '../../assets/styles/create/create.styles';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,9 +34,34 @@ export default function Create() {
   const [designStyle, setDesignStyle] = useState('Modern');
   const [colorTone, setColorTone] = useState('Neutral');
   const [generatedImage, setGeneratedImage] = useState(null);
+  const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
+  const [isSubscribed, setIsSubscribed] = useState(false);
 
   const router = useRouter();
   const { token } = useAuthStore();
+
+  useEffect(() => {
+    const fetchUserStatus = async () => {
+      try {
+        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setIsSubscribed(data.user?.isSubscribed || false);
+          setFreeDesignsUsed(data.user?.freeDesignsUsed || 0);
+        }
+      } catch (err) {
+        console.error('Failed to fetch user status:', err);
+      }
+    };
+
+    if (token) fetchUserStatus();
+  }, [token]);
 
   const pickImage = async () => {
     try {
@@ -78,6 +103,11 @@ export default function Create() {
       return;
     }
 
+    if (!isSubscribed && freeDesignsUsed >= 2) {
+      router.push('/upgrade');
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -100,7 +130,7 @@ export default function Create() {
         requestBody.image = imageDataUrl;
       }
 
-      const response = await fetch(`http://192.168.1.162:3000/api/designs`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -118,7 +148,7 @@ export default function Create() {
       if (imageUri) {
         router.push({
           pathname: '/outputScreen',
-          params: { imageUri }
+          params: { imageUri },
         });
       } else {
         Alert.alert('Error', 'No image URL received from the server.');
@@ -130,7 +160,6 @@ export default function Create() {
       // setRoomType('Living Room');
       // setDesignStyle('Modern');
       // setColorTone('Neutral');
-
     } catch (error) {
       console.error('Error generating design:', error);
       Alert.alert('Error', error.message || 'Something went wrong');
@@ -148,26 +177,6 @@ export default function Create() {
           </View>
 
           <View style={styles.form}>
-            {/* Old Image Picker (Commented for Reference)
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Add photo</Text>
-              <TouchableOpacity style={styles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
-                {image ? (
-                  <>
-                    <Image source={{ uri: image }} style={styles.previewImage} />
-                    <TouchableOpacity style={styles.removeButton} onPress={() => setImage(null)} hitSlop={10}>
-                      <Ionicons name="close-circle" size={24} color={COLORS.error} />
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <View style={styles.placeholderContainer}>
-                    <Ionicons name="image-outline" size={40} color={COLORS.textSecondary} />
-                    <Text style={styles.placeholderText}>Tap to select image</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            </View>
-            */}
 
             <View style={styles.formGroup}>
               <Text style={styles.label}>Add photo</Text>

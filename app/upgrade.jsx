@@ -12,7 +12,8 @@ export default function Upgrade() {
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [weeklyPrice, setWeeklyPrice] = useState(5.00);
   const [yearlyPrice, setYearlyPrice] = useState(50.00);
-  const [existingOrder, setExistingOrder] = useState(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
@@ -23,24 +24,26 @@ export default function Upgrade() {
       setYearlyPrice(449.99);
     }
 
-    async function fetchExistingOrder() {
+    async function fetchUserStatus() {
       try {
-        const res = await fetch(`http://192.168.1.162:3000/api/orders/latest`, {
+        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
         });
+
         if (res.ok) {
-          const order = await res.json();
-          if (order && order.isActive) setExistingOrder(order);
+          const data = await res.json();
+          setIsSubscribed(data.user?.isSubscribed || false);
+          setFreeDesignsUsed(data.user?.freeDesignsUsed || 0);
         }
       } catch (err) {
-        console.error('Failed to fetch existing order', err);
+        console.error('Failed to fetch user status:', err);
       }
     }
 
-    if (token) fetchExistingOrder();
+    if (token) fetchUserStatus();
   }, [token]);
 
   const handleUpgrade = async () => {
@@ -56,7 +59,7 @@ export default function Upgrade() {
       endDate.setFullYear(startDate.getFullYear() + 1);
     }
 
-    if (existingOrder) {
+    if (isSubscribed) {
       Alert.alert(
         'Already Subscribed',
         'You are already subscribed. Do you want to change your plan?',
@@ -66,7 +69,7 @@ export default function Upgrade() {
             text: 'Yes, Change Plan',
             onPress: async () => {
               try {
-                const res = await fetch(`http://192.168.1.162:3000/api/orders/update-latest`, {
+                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/update-latest`, {
                   method: 'PUT',
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -96,7 +99,7 @@ export default function Upgrade() {
       );
     } else {
       try {
-        const res = await fetch(`http://192.168.1.162:3000/api/orders`, {
+        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -130,6 +133,16 @@ export default function Upgrade() {
       <Text style={styles.subtitle}>
         Unlock the full Roomify experience with premium features.
       </Text>
+
+      {/* 🔴 Show warning if user hit 2 free designs and not subscribed */}
+      {freeDesignsUsed >= 2 && !isSubscribed && (
+        <View style={styles.warningBox}>
+          <Text style={styles.warningTitle}>You’ve used your 2 free designs.</Text>
+          <Text style={styles.warningText}>
+            Upgrade now to continue using Roomify without limits.
+          </Text>
+        </View>
+      )}
 
       <View style={styles.featureList}>
         {['Ad-free experience', 'Unlimited design renders'].map((feature, idx) => (
