@@ -39,34 +39,40 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // 🤖 Call AI generation API via Gradio
-let generatedImageBase64;
-try {
-  const aiResponse = await axios.post(
-    "https://SaraMeckawy-InteriorAI.hf.space/api/predict/",
-    {
-      data: [
-        `data:image/png;base64,${imageBase64}`,
-        roomType,
-        designStyle,
-        colorTone
-      ]
+    // 🤖 Call AI generation API
+    let generatedImageBase64;
+    try {
+      const aiResponse = await axios.post(
+  "https://SaraMeckawy-InteriorAI.hf.space/api/predict/",
+  {
+    data: [
+      `data:image/png;base64,${imageBase64}`,
+      roomType,
+      designStyle,
+      colorTone
+    ]
+  },
+  {
+    headers: {
+      "Content-Type": "application/json"
     },
-    {
-      headers: {
-        "Content-Type": "application/json"
-      }
-    }
-  );
+    timeout: 120000  // Optional: increase timeout in case of slow GPU startup
+  }
+);
 
-  generatedImageBase64 = aiResponse.data.data?.[1]?.split(",")[1];  // Get only base64 string
-} catch (err) {
-  console.error("AI server error:", err.response?.data || err.message);
-  return res.status(err.response?.status || 500).json({
-    message: err.response?.data?.message || "AI server error",
-  });
+const generatedImageDataUrl = aiResponse.data.data?.[1];
+if (!generatedImageDataUrl || !generatedImageDataUrl.startsWith("data:image")) {
+  throw new Error("Invalid response from AI server");
 }
 
+generatedImageBase64 = generatedImageDataUrl.split(",")[1];  // Extract base64
+
+    } catch (err) {
+      console.error("AI server error:", err.response?.data || err.message);
+      return res.status(err.response?.status || 500).json({
+        message: err.response?.data?.message || "AI server error",
+      });
+    }
 
     // 🖼 Upload AI-generated image
     let generatedImageUrl = null;
