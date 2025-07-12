@@ -42,31 +42,13 @@ router.post("/", isAuthenticated, async (req, res) => {
     // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
-      const aiResponse = await axios.post(
-  "https://SaraMeckawy-InteriorAI.hf.space/api/predict/",
-  {
-    data: [
-      `data:image/png;base64,${imageBase64}`,
-      roomType,
-      designStyle,
-      colorTone
-    ]
-  },
-  {
-    headers: {
-      "Content-Type": "application/json"
-    },
-    timeout: 120000  // Optional: increase timeout in case of slow GPU startup
-  }
-);
-
-const generatedImageDataUrl = aiResponse.data.data?.[1];
-if (!generatedImageDataUrl || !generatedImageDataUrl.startsWith("data:image")) {
-  throw new Error("Invalid response from AI server");
-}
-
-generatedImageBase64 = generatedImageDataUrl.split(",")[1];  // Extract base64
-
+      const aiResponse = await axios.post(`https://SaraMeckawy-InteriorAI.hf.space/generate`, {
+        image: imageBase64,
+        room_type: roomType,
+        design_style: designStyle,
+        color_tone: colorTone,
+      });
+      generatedImageBase64 = aiResponse.data.generatedImage;
     } catch (err) {
       console.error("AI server error:", err.response?.data || err.message);
       return res.status(err.response?.status || 500).json({
