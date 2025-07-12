@@ -1,9 +1,9 @@
-import express from "express";
 import axios from "axios";
+import express from "express";
 import cloudinary from "../lib/cloudinary.js";
+import { isAuthenticated } from "../middleware/auth.middleware.js";
 import Design from "../models/Design.js";
 import User from "../models/User.js";
-import { isAuthenticated } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
@@ -39,22 +39,34 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // 🤖 Call AI generation API
-    let generatedImageBase64;
-    try {
-      const aiResponse = await axios.post(`https://SaraMeckawy-Interior.hf.space/generate`, {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-      });
-      generatedImageBase64 = aiResponse.data.generatedImage;
-    } catch (err) {
-      console.error("AI server error:", err.response?.data || err.message);
-      return res.status(err.response?.status || 500).json({
-        message: err.response?.data?.message || "AI server error",
-      });
+    // 🤖 Call AI generation API via Gradio
+let generatedImageBase64;
+try {
+  const aiResponse = await axios.post(
+    "https://SaraMeckawy-InteriorAI.hf.space/api/predict/",
+    {
+      data: [
+        `data:image/png;base64,${imageBase64}`,
+        roomType,
+        designStyle,
+        colorTone
+      ]
+    },
+    {
+      headers: {
+        "Content-Type": "application/json"
+      }
     }
+  );
+
+  generatedImageBase64 = aiResponse.data.data?.[1]?.split(",")[1];  // Get only base64 string
+} catch (err) {
+  console.error("AI server error:", err.response?.data || err.message);
+  return res.status(err.response?.status || 500).json({
+    message: err.response?.data?.message || "AI server error",
+  });
+}
+
 
     // 🖼 Upload AI-generated image
     let generatedImageUrl = null;
