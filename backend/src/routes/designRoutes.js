@@ -42,12 +42,24 @@ router.post("/", isAuthenticated, async (req, res) => {
     // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
-      const aiResponse = await axios.post(`https://SaraMeckawy-InteriorAI.hf.space/generate`, {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-      });
+      const aiResponse = await axios.post(
+  `https://SaraMeckawy-InteriorAI.hf.space/api/predict/`,
+  {
+    data: [
+      `data:image/png;base64,${imageBase64}`,
+      roomType,
+      designStyle,
+      colorTone
+    ]
+  },
+  {
+    headers: {
+      "Content-Type": "application/json"
+    },
+    timeout: 120000
+  }
+);
+
       generatedImageBase64 = aiResponse.data.generatedImage;
     } catch (err) {
       console.error("AI server error:", err.response?.data || err.message);
