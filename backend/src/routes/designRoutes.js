@@ -42,34 +42,12 @@ router.post("/", isAuthenticated, async (req, res) => {
     // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
-  // Clean and validate base64
-  const cleanBase64 = imageBase64.replace(/(\r\n|\n|\r)/gm, '').trim();
-
-  if (!cleanBase64 || cleanBase64.length < 1000) {
-    throw new Error("Invalid or too short base64 image data.");
-  }
-
-  console.log("Calling AI API with base64 size:", cleanBase64.length);
-
-  // Make the POST request to HuggingFace Space
-  const aiResponse = await axios.post(
-    `https://SaraMeckawy-InteriorAI.hf.space/api/predict/`,
-    {
-      data: [
-        `data:image/png;base64,${cleanBase64}`,
-        roomType,
-        designStyle,
-        colorTone
-      ]
-    },
-    {
-      headers: {
-        "Content-Type": "application/json"
-      },
-      timeout: 120000
-    }
-  );
-
+      const aiResponse = await axios.post(`https://SaraMeckawy-Interior.hf.space/generate`, {
+        image: imageBase64,
+        room_type: roomType,
+        design_style: designStyle,
+        color_tone: colorTone,
+      });
       generatedImageBase64 = aiResponse.data.generatedImage;
     } catch (err) {
       console.error("AI server error:", err.response?.data || err.message);

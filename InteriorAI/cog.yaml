@@ -1,0 +1,12 @@
+build:
+  gpu: true
+  python_version: "3.9"
+  python_packages:
+    - torch
+    - diffusers
+    - transformers
+    - Pillow
+    - opencv-python
+    - numpy
+
+predict: "predict.py:Predictor"

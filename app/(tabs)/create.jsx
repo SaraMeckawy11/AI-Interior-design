@@ -75,7 +75,7 @@ export default function Create() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
+        quality: 0.3,
         base64: true,
       });
 

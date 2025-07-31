@@ -1,7 +1,8 @@
-flask
-flask-cors
 torch
 diffusers
 transformers
-opencv-python-headless
-pillow
+accelerate
+safetensors
+opencv-python
+numpy
+Pillow
