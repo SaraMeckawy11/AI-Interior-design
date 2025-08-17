@@ -45,14 +45,6 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // Prepare Base64 from the input image
-let cleanBase64 = image;
-
-// Remove the data:image/... prefix if it exists
-if (cleanBase64.startsWith("data:image")) {
-  cleanBase64 = cleanBase64.replace(/^data:image\/\w+;base64,/, "");
-}
-
 // 🤖 Call Replicate model
 let generatedImageUrl = null;
 let generatedImagePublicId = null;
@@ -62,7 +54,7 @@ try {
     "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
     {
       input: {
-        image_base64: cleanBase64,
+        image_base64: imageBase64,
         room_type: roomType,
         design_style: designStyle,
         color_tone: colorTone,
