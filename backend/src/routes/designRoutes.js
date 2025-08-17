@@ -38,21 +38,22 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-    // Upload the original image to Cloudinary (optional, if you want to store original)
+    // 🖼 Upload original image to Cloudinary
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
 
-    // Use the Base64 sent by frontend directly
-    let cleanBase64 = image;
+    const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // Remove the data:image/... prefix if it exists
-    if (cleanBase64.startsWith("data:image")) {
-      cleanBase64 = cleanBase64.replace(/^data:image\/\w+;base64,/, "");
-    }
+    // Prepare Base64 from the input image
+let cleanBase64 = image;
 
+// Remove the data:image/... prefix if it exists
+if (cleanBase64.startsWith("data:image")) {
+  cleanBase64 = cleanBase64.replace(/^data:image\/\w+;base64,/, "");
+}
 
-   // 🤖 Call Replicate model
+// 🤖 Call Replicate model
 let generatedImageUrl = null;
 let generatedImagePublicId = null;
 
@@ -79,19 +80,21 @@ try {
     aiImageUrl = output;
   }
 
-  if (aiImageUrl) {
-    // Upload AI-generated image directly from URL to Cloudinary
-    const generatedResponse = await cloudinary.uploader.upload(aiImageUrl, {
-      folder: "generated_images",
-    });
-
-    generatedImageUrl = generatedResponse.secure_url;
-    generatedImagePublicId = generatedResponse.public_id;
+  if (!aiImageUrl) {
+    throw new Error("Replicate did not return a valid image URL");
   }
+
+  // Upload AI-generated image directly from URL to Cloudinary
+  const generatedResponse = await cloudinary.uploader.upload(aiImageUrl, {
+    folder: "generated_images",
+  });
+
+  generatedImageUrl = generatedResponse.secure_url;
+  generatedImagePublicId = generatedResponse.public_id;
 
 } catch (err) {
   console.error("Replicate API error:", err.message || err);
-  return res.status(500).json({ message: "Error generating design" });
+  return res.status(500).json({ message: "Error generating design: " + (err.message || err) });
 }
 
 
