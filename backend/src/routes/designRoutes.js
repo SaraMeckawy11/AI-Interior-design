@@ -45,50 +45,42 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-// 🤖 Call Replicate model
-let generatedImageUrl = null;
-let generatedImagePublicId = null;
+    // 🤖 Call Replicate model
+    let generatedImageUrl = null;
+    let generatedImagePublicId = null;
+    try {
+      const output = await replicate.run(
+        "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
+        {
+          input: {
+            image_base64: imageBase64,
+            room_type: roomType,
+            design_style: designStyle,
+            color_tone: colorTone,
+            prompt: customPrompt || ""
+          }
+        }
+      );
 
-try {
-  const output = await replicate.run(
-    "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
-    {
-      input: {
-        image_base64: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-        prompt: customPrompt || ""
+      if (output && output.length > 0) {
+        // Replicate usually returns URLs
+        const aiImageUrl = output[0];
+
+        // Download AI image and convert to Base64
+        const aiImageBase64 = await getImageBase64FromUrl(aiImageUrl);
+
+        // Upload AI-generated image to Cloudinary
+        const generatedResponse = await cloudinary.uploader.upload(
+          `data:image/png;base64,${aiImageBase64}`,
+          { folder: "generated_images" }
+        );
+        generatedImageUrl = generatedResponse.secure_url;
+        generatedImagePublicId = generatedResponse.public_id;
       }
+    } catch (err) {
+      console.error("Replicate API error:", err.message || err);
+      return res.status(500).json({ message: "Error generating design" });
     }
-  );
-
-  let aiImageUrl = null;
-
-  // Handle both array and string responses from Replicate
-  if (Array.isArray(output) && output.length > 0) {
-    aiImageUrl = output[0];
-  } else if (typeof output === "string") {
-    aiImageUrl = output;
-  }
-
-  if (!aiImageUrl) {
-    throw new Error("Replicate did not return a valid image URL");
-  }
-
-  // Upload AI-generated image directly from URL to Cloudinary
-  const generatedResponse = await cloudinary.uploader.upload(aiImageUrl, {
-    folder: "generated_images",
-  });
-
-  generatedImageUrl = generatedResponse.secure_url;
-  generatedImagePublicId = generatedResponse.public_id;
-
-} catch (err) {
-  console.error("Replicate API error:", err.message || err);
-  return res.status(500).json({ message: "Error generating design: " + (err.message || err) });
-}
-
 
     // 💾 Save design to DB
     const newDesign = new Design({
