@@ -38,56 +38,62 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-    // 🖼 Upload original image to Cloudinary
+    // Upload the original image to Cloudinary (optional, if you want to store original)
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
 
-    const imageBase64 = await getImageBase64FromUrl(imageUrl);
-    
-    let cleanBase64 = imageBase64;
+    // Use the Base64 sent by frontend directly
+    let cleanBase64 = image;
 
-    // If it has the "data:image/..." prefix, strip it
+    // Remove the data:image/... prefix if it exists
     if (cleanBase64.startsWith("data:image")) {
       cleanBase64 = cleanBase64.replace(/^data:image\/\w+;base64,/, "");
     }
 
-    // 🤖 Call Replicate model
-    let generatedImageUrl = null;
-    let generatedImagePublicId = null;
-    try {
-      const output = await replicate.run(
-        "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
-        {
-          input: {
-            image_base64: cleanBase64,
-            room_type: roomType,
-            design_style: designStyle,
-            color_tone: colorTone,
-            prompt: customPrompt || ""
-          }
-        }
-      );
 
-      if (output && output.length > 0) {
-        // Replicate usually returns URLs
-        const aiImageUrl = output[0];
+   // 🤖 Call Replicate model
+let generatedImageUrl = null;
+let generatedImagePublicId = null;
 
-        // Download AI image and convert to Base64
-        const aiImageBase64 = await getImageBase64FromUrl(aiImageUrl);
-
-        // Upload AI-generated image to Cloudinary
-        const generatedResponse = await cloudinary.uploader.upload(
-          `data:image/png;base64,${aiImageBase64}`,
-          { folder: "generated_images" }
-        );
-        generatedImageUrl = generatedResponse.secure_url;
-        generatedImagePublicId = generatedResponse.public_id;
+try {
+  const output = await replicate.run(
+    "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
+    {
+      input: {
+        image_base64: cleanBase64,
+        room_type: roomType,
+        design_style: designStyle,
+        color_tone: colorTone,
+        prompt: customPrompt || ""
       }
-    } catch (err) {
-      console.error("Replicate API error:", err.message || err);
-      return res.status(500).json({ message: "Error generating design" });
     }
+  );
+
+  let aiImageUrl = null;
+
+  // Handle both array and string responses from Replicate
+  if (Array.isArray(output) && output.length > 0) {
+    aiImageUrl = output[0];
+  } else if (typeof output === "string") {
+    aiImageUrl = output;
+  }
+
+  if (aiImageUrl) {
+    // Upload AI-generated image directly from URL to Cloudinary
+    const generatedResponse = await cloudinary.uploader.upload(aiImageUrl, {
+      folder: "generated_images",
+    });
+
+    generatedImageUrl = generatedResponse.secure_url;
+    generatedImagePublicId = generatedResponse.public_id;
+  }
+
+} catch (err) {
+  console.error("Replicate API error:", err.message || err);
+  return res.status(500).json({ message: "Error generating design" });
+}
+
 
     // 💾 Save design to DB
     const newDesign = new Design({
