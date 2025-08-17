@@ -53,7 +53,7 @@ router.post("/", isAuthenticated, async (req, res) => {
         "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
         {
           input: {
-      image_base64: `data:image/png;base64,${imageBase64}`,
+            image_base64: imageBase64,
             room_type: roomType,
             design_style: designStyle,
             color_tone: colorTone,
