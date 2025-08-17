@@ -1,22 +1,17 @@
-import axios from "axios";
 import express from "express";
+import axios from "axios";
 import cloudinary from "../lib/cloudinary.js";
-import { isAuthenticated } from "../middleware/auth.middleware.js";
 import Design from "../models/Design.js";
 import User from "../models/User.js";
+import { isAuthenticated } from "../middleware/auth.middleware.js";
 import Replicate from "replicate";
 
 const router = express.Router();
-
-// Initialize Replicate
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN,
-});
+const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
 async function getImageBase64FromUrl(url) {
   const response = await axios.get(url, { responseType: "arraybuffer" });
-  const buffer = Buffer.from(response.data, "binary");
-  return buffer.toString("base64");
+  return Buffer.from(response.data, "binary").toString("base64");
 }
 
 router.post("/", isAuthenticated, async (req, res) => {
@@ -27,7 +22,6 @@ router.post("/", isAuthenticated, async (req, res) => {
       return res.status(400).json({ message: "Please provide all required fields" });
     }
 
-    // ✅ Fetch user and check usage
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -38,16 +32,18 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-    // 🖼 Upload original image to Cloudinary
+    // Upload original image
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
 
+    // Convert uploaded image to Base64
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // 🤖 Call Replicate model
+    // Call Replicate model
     let generatedImageUrl = null;
     let generatedImagePublicId = null;
+
     try {
       const output = await replicate.run(
         "sarameckawy11/interio:1fbfbf09617971b972bd0162345bad5277f46579d16b47ede789251ecaaa9cca",
@@ -57,32 +53,30 @@ router.post("/", isAuthenticated, async (req, res) => {
             room_type: roomType,
             design_style: designStyle,
             color_tone: colorTone,
-            prompt: customPrompt || ""
-          }
+            prompt: customPrompt || "",
+          },
         }
       );
 
-      if (output && output.length > 0) {
-        // Replicate usually returns URLs
-        const aiImageUrl = output[0];
+      // Replicate may return array or string
+      let aiImageUrl = Array.isArray(output) && output.length > 0 ? output[0] : typeof output === "string" ? output : null;
 
-        // Download AI image and convert to Base64
-        const aiImageBase64 = await getImageBase64FromUrl(aiImageUrl);
-
-        // Upload AI-generated image to Cloudinary
-        const generatedResponse = await cloudinary.uploader.upload(
-          `data:image/png;base64,${aiImageBase64}`,
-          { folder: "generated_images" }
-        );
-        generatedImageUrl = generatedResponse.secure_url;
-        generatedImagePublicId = generatedResponse.public_id;
+      if (!aiImageUrl) {
+        throw new Error("Replicate did not return a valid image URL");
       }
+
+      // Upload AI-generated image to Cloudinary
+      const generatedResponse = await cloudinary.uploader.upload(aiImageUrl, {
+        folder: "generated_images",
+      });
+      generatedImageUrl = generatedResponse.secure_url;
+      generatedImagePublicId = generatedResponse.public_id;
     } catch (err) {
       console.error("Replicate API error:", err.message || err);
-      return res.status(500).json({ message: "Error generating design" });
+      return res.status(500).json({ message: "Error generating design: " + (err.message || err) });
     }
 
-    // 💾 Save design to DB
+    // Save design to DB
     const newDesign = new Design({
       roomType,
       designStyle,
@@ -97,7 +91,6 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     await newDesign.save();
 
-    // ➕ Increment freeDesignsUsed if not subscribed
     if (!user.isSubscribed) {
       user.freeDesignsUsed += 1;
       await user.save();
@@ -115,6 +108,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     res.status(500).json({ message: error.message || "Something went wrong" });
   }
 });
+
 
 router.get("/", isAuthenticated, async (req, res) => {
   try {
