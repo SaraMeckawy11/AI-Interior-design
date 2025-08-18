@@ -1,12 +1,10 @@
+# Configuration for Cog ⚙️
+# Reference: https://cog.run/yaml
+
 build:
   gpu: true
-  python_version: "3.9"
-  python_packages:
-    - torch
-    - diffusers
-    - transformers
-    - Pillow
-    - opencv-python
-    - numpy
+  cuda: "11.8"  # or "12.1" depending on your torch version
+  python_version: "3.12"
+  python_requirements: requirements.txt
 
 predict: "predict.py:Predictor"

@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.3.1
+numpy
+torchvision
+diffusers
+transformers
+accelerate
+scipy
+ftfy
+tokenizers
