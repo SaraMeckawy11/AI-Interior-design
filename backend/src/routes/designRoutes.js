@@ -48,22 +48,23 @@ router.post("/", isAuthenticated, async (req, res) => {
 let generatedImageBase64;
 try {
   let prediction = await replicate.deployments.predictions.create(
-    "sarameckawy11/interio", // your username/model
+    "sarameckawy11",  // your username
+    "interio",        // your deployment name (exactly as it appears in Replicate)
     {
       input: {
         image: imageBase64,
         room_type: roomType,
         design_style: designStyle,
-        color_tone: colorTone,
-      },
+        color_tone: colorTone
+      }
     }
   );
 
   // Wait for the generation to complete
-  prediction = await replicate.predictions.wait(prediction);
+  prediction = await replicate.wait(prediction);
 
   // Replicate returns an array of outputs
-  generatedImageBase64 = prediction.output[0]; 
+  generatedImageBase64 = prediction.output[0];
 } catch (err) {
   console.error("Replicate server error:", err);
   return res.status(err.status || 500).json({
