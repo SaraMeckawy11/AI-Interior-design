@@ -52,7 +52,7 @@ try {
     "interio",        // your deployment name (exactly as it appears in Replicate)
     {
       input: {
-        image: imageBase64,
+        image_base64: imageBase64,
         room_type: roomType,
         design_style: designStyle,
         color_tone: colorTone
