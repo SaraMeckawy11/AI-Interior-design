@@ -4,11 +4,6 @@ import cloudinary from "../lib/cloudinary.js";
 import Design from "../models/Design.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
-import Replicate from "replicate";
-
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN,
-});
 
 const router = express.Router();
 
@@ -44,33 +39,22 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // 🤖 Call Replicate API
-let generatedImageBase64;
-try {
-  let prediction = await replicate.deployments.predictions.create(
-    "sarameckawy11",  // your username
-    "interio",        // your deployment name (exactly as it appears in Replicate)
-    {
-      input: {
-        image_base64: imageBase64,
+    // 🤖 Call AI generation API
+    let generatedImageBase64;
+    try {
+      const aiResponse = await axios.post(`https://SaraMeckawy-Interior.hf.space/generate`, {
+        image: imageBase64,
         room_type: roomType,
         design_style: designStyle,
-        color_tone: colorTone
-      }
+        color_tone: colorTone,
+      });
+      generatedImageBase64 = aiResponse.data.generatedImage;
+    } catch (err) {
+      console.error("AI server error:", err.response?.data || err.message);
+      return res.status(err.response?.status || 500).json({
+        message: err.response?.data?.message || "AI server error",
+      });
     }
-  );
-
-  // Wait for the generation to complete
-  prediction = await replicate.wait(prediction);
-
-  // Replicate returns an array of outputs
-  generatedImageBase64 = prediction.output[0];
-} catch (err) {
-  console.error("Replicate server error:", err);
-  return res.status(err.status || 500).json({
-    message: err.message || "Replicate server error",
-  });
-}
 
     // 🖼 Upload AI-generated image
     let generatedImageUrl = null;
