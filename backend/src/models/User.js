@@ -27,13 +27,18 @@ const userSchema = new mongoose.Schema(
         ref: "Order",
       },
     ],
-    // ✅ New field: track number of free designs used
+    // ✅ Track number of free designs used
     freeDesignsUsed: {
       type: Number,
       default: 0,
     },
-    // ✅ New field: subscription status
+    // ✅ Subscription status (paid users)
     isSubscribed: {
+      type: Boolean,
+      default: false,
+    },
+    // ✅ Manual Premium flag (friends/family accounts)
+    isPremium: {
       type: Boolean,
       default: false,
     },

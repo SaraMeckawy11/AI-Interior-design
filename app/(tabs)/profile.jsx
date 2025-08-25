@@ -9,7 +9,7 @@ import SubscriptionSection from '../../components/profile/SubscriptionSection';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function Profile() {
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore(); // ✅ make sure `user` is in your store
   const router = useRouter();
 
   useEffect(() => { }, []);
@@ -18,7 +18,11 @@ export default function Profile() {
     <View style={styles.container}>
       <ProfileHeader />
       <LogoutButton />
-      <SubscriptionSection />
+
+      {/*  Only show subscription section if NOT premium */}
+      { !user?.isPremium && (
+        <SubscriptionSection />
+      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Help & Legal</Text>

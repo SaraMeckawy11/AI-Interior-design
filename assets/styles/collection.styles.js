@@ -27,7 +27,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     //fontFamily: "JetBrainsMono-Medium",
     //letterSpacing: 0.5,
-    color: COLORS.primary,
+    color: COLORS.primaryDark,
     //marginBottom: 8,
   },
   headerSubtitle: {

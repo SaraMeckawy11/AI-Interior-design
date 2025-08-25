@@ -19,7 +19,7 @@ const styles = StyleSheet.create({
   },
   seeAllText: {
     fontSize: 14,
-    color: COLORS.primary,
+    color: COLORS.secondary,
   },
 
   iconGrid: {
@@ -49,7 +49,7 @@ iconCircle: {
 },
 
 iconCircleSelected: {
-  borderColor: COLORS.primary, // Only border highlights
+  borderColor: COLORS.secondary, // Only border highlights
 },
 
 iconLabel: {
@@ -62,7 +62,7 @@ iconLabel: {
 },
 iconLabelSelected: {
   fontWeight: 'bold',
-  color: COLORS.primary,
+  color: COLORS.secondary,
 },
 
 modalBackdrop: {

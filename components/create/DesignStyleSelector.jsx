@@ -13,8 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 const INITIAL_STYLES = ['Modern', 'Rustic', 'Bohemian'];
 
 const ALL_DESIGN_STYLES = [
-  'Modern', 'Classic', 'Cozy', 'Minimalist', 'Bohemian', 'Industrial',
-  'Scandinavian', 'Rustic', 'Traditional', 'Contemporary',
+  'Modern', 'Rustic','Bohemian','Classic', 'Cozy', 'Minimalist',  'Industrial',
+  'Scandinavian',  'Traditional', 'Contemporary',
   'Mediterranean', 'Japandi', 'Tropical'
 ];
 

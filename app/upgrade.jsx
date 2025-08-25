@@ -9,19 +9,39 @@ import { useAuthStore } from '../authStore';
 export default function Upgrade() {
   const { token } = useAuthStore();
   const [selectedPlan, setSelectedPlan] = useState('weekly');
-  const [currencySymbol, setCurrencySymbol] = useState('$');
-  const [weeklyPrice, setWeeklyPrice] = useState(5.00);
-  const [yearlyPrice, setYearlyPrice] = useState(50.00);
+  const [currencyCode, setCurrencyCode] = useState('USD'); // <-- use code, not symbol
+  const [weeklyPrice, setWeeklyPrice] = useState(5.99);   // base in USD
+  const [yearlyPrice, setYearlyPrice] = useState(50.99);  // base in USD
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
-    const userCountry = 'EG';
-    if (userCountry === 'EG') {
-      setCurrencySymbol('EGP');
-      setWeeklyPrice(49.99);
-      setYearlyPrice(449.99);
+    async function fetchExchangeRate() {
+      try {
+        // 1️⃣ Get user country via IP
+        const countryRes = await fetch('https://ipapi.co/json/');
+        const countryData = await countryRes.json();
+        const code = countryData.currency || 'USD';
+
+        // 2️⃣ Fetch exchange rates (USD → target currency)
+        const rateRes = await fetch('https://open.er-api.com/v6/latest/USD');
+        const rateData = await rateRes.json();
+
+        if (rateData && rateData.rates && rateData.rates[code]) {
+          const rate = rateData.rates[code];
+
+          setCurrencyCode(code); // <-- save currency code directly (e.g. EGP, USD, EUR)
+
+          // Convert base USD prices → local
+          setWeeklyPrice(5.99 * rate);
+          setYearlyPrice(59.99 * rate);
+        } else {
+          console.warn('Exchange rate not found, fallback to USD');
+        }
+      } catch (err) {
+        console.error('Failed to fetch exchange rate:', err);
+      }
     }
 
     async function fetchUserStatus() {
@@ -43,6 +63,7 @@ export default function Upgrade() {
       }
     }
 
+    fetchExchangeRate();
     if (token) fetchUserStatus();
   }, [token]);
 
@@ -131,15 +152,14 @@ export default function Upgrade() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Upgrade to Pro</Text>
       <Text style={styles.subtitle}>
-        Unlock the full Roomify experience with premium features.
+        Unlock the full LIVINAI experience with premium features.
       </Text>
 
-      {/* 🔴 Show warning if user hit 2 free designs and not subscribed */}
       {freeDesignsUsed >= 2 && !isSubscribed && (
         <View style={styles.warningBox}>
           <Text style={styles.warningTitle}>You’ve used your 2 free designs.</Text>
           <Text style={styles.warningText}>
-            Upgrade now to continue using Roomify without limits.
+            Upgrade now to continue using LIVINAI without limits.
           </Text>
         </View>
       )}
@@ -160,7 +180,9 @@ export default function Upgrade() {
           onPress={() => setSelectedPlan('weekly')}
         >
           <Text style={styles.planTitle}>Weekly</Text>
-          <Text style={styles.planPrice}>{currencySymbol} {weeklyPrice.toFixed(2)} / week</Text>
+          <Text style={styles.planPrice}>
+            {weeklyPrice.toFixed(2)} {currencyCode} / week
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -171,7 +193,9 @@ export default function Upgrade() {
             <Text style={styles.bestValueText}>Best Value</Text>
           </View>
           <Text style={styles.planTitle}>Yearly</Text>
-          <Text style={styles.planPrice}>{currencySymbol} {yearlyPrice.toFixed(2)} / year</Text>
+          <Text style={styles.planPrice}>
+            {yearlyPrice.toFixed(2)} {currencyCode} / year
+          </Text>
           <Text style={styles.planSavings}>Save 80%</Text>
         </TouchableOpacity>
       </View>

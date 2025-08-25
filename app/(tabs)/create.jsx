@@ -41,6 +41,20 @@ export default function Create() {
   const { token } = useAuthStore();
 
   useEffect(() => {
+  const wakeHFSpace = async () => {
+    try {
+      await fetch('https://SaraMeckawy-Interior.hf.space/generate', { method: 'GET' });
+      console.log('HF Space wake-up ping sent!');
+    } catch (err) {
+      console.error('Failed to wake HF Space:', err);
+    }
+  };
+
+  wakeHFSpace();
+}, []);
+
+
+  useEffect(() => {
     const fetchUserStatus = async () => {
       try {
         const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
@@ -173,7 +187,7 @@ export default function Create() {
       <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
         <View>
           <View style={styles.header}>
-            <Text style={styles.title}>Roomify</Text>
+            <Text style={styles.title}>LIVINAI</Text>
           </View>
 
           <View style={styles.form}>
@@ -231,7 +245,7 @@ export default function Create() {
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
               {loading ? (
                 <LinearGradient
-                  colors={[COLORS.primary, COLORS.secondary]}
+                  colors={[COLORS.primary, COLORS.primary]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
@@ -240,7 +254,7 @@ export default function Create() {
                 </LinearGradient>
               ) : (
                 <LinearGradient
-                  colors={[COLORS.primary, COLORS.secondary]}
+                  colors={[COLORS.primaryDark, COLORS.primary]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}

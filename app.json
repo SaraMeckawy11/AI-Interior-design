@@ -1,29 +1,29 @@
 {
   "expo": {
-    "name": "Roomify",
-    "slug": "Roomify",
-    "scheme": "roomify",
+    "name": "Livinai",
+    "slug": "Livinai",
+    "scheme": "livinai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon.jpg",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.roomify.app",
+      "bundleIdentifier": "com.livinai.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.roomify.app",
+      "package": "com.livinai.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/adaptive-icon.jpg",
         "backgroundColor": "#ffffff"
       }
     },
     "extra": {
       "eas": {
-        "projectId": "7e16d559-0ada-4217-89da-a4aae3692d94"
+        "projectId": "75932d07-1ba3-43be-ae06-e2494b4c805a"
       }
     },
     "plugins": [

@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.roomify.app'
+    namespace 'com.livinai.app'
     defaultConfig {
-        applicationId 'com.roomify.app'
+        applicationId 'com.livinai.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

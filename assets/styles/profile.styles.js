@@ -17,7 +17,7 @@ const styles = StyleSheet.create({
   profileHeader: {
     flexDirection: "column",
     alignItems: "center",
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.roomCard,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
   sectionTitle: {
     fontSize: 16,
@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.line,
   },
   itemText: {
     fontSize: 14,

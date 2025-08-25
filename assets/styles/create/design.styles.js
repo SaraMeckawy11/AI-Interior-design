@@ -19,7 +19,7 @@ const styles = StyleSheet.create({
   },
   seeAllText: {
     fontSize: 14,
-    color: COLORS.primary,
+    color: COLORS.secondary,
   },
   iconGrid: {
     flexDirection: 'row',
@@ -55,7 +55,7 @@ const styles = StyleSheet.create({
   },
   iconImageSelected: {
     borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderColor: COLORS.secondary,
   },
   iconImage: {
     width: 96,
@@ -71,7 +71,7 @@ const styles = StyleSheet.create({
   },
   iconLabelSelected: {
     fontWeight: 'bold',
-    color: COLORS.primary,
+    color: COLORS.secondary,
   },
   modalBackdrop: {
     flex: 1,

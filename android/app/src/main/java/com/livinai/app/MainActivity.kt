@@ -1,4 +1,4 @@
-package com.roomify.app
+package com.livinai.app
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

@@ -29,14 +29,39 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: "center",
-    marginBottom: 8,
+    // marginBottom: 8,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: "500",
-    color: COLORS.primary,
-    //marginBottom: 8,
-  },
+  // title: {
+  //   fontSize: 24,
+  //   fontWeight: "500",
+  //   color: COLORS.primaryDark,
+  //   //marginBottom: 8,
+  // },
+
+ title: {
+  fontSize: 26,                     // prominent but not oversized
+  fontWeight: '400',                // regular/light, for elegance
+  color: COLORS.primaryDark,        // keep brand color subtle
+  letterSpacing: 2,                 // modern airy feel
+  textTransform: 'uppercase',       // sleek, minimalist
+  fontFamily: 'Poppins_400Regular', // geometric, premium sans-serif
+  textAlign: 'center',
+
+},
+title: {
+  fontSize: 26,
+  fontWeight: '400',
+  color: COLORS.primaryDark,
+  letterSpacing: 2.5,
+  textTransform: 'uppercase',
+  fontFamily: 'Poppins_400Regular',
+  textAlign: 'center',
+  textShadowColor: 'rgba(0,0,0,0.03)',
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 1,
+},
+
+
   subtitle: {
     fontSize: 14,
     color: COLORS.textSecondary,
@@ -83,7 +108,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   buttonText: {
-    color:COLORS.white,
+    color:COLORS.background,
     fontWeight: '600',
     fontSize: 16,
   },
@@ -134,7 +159,7 @@ imagePickerModern: {
   borderRadius: 16,
   borderWidth: 1,
   borderColor: '#e0e0e0', // lighter, more modern than #ccc
-  backgroundColor: '#fafafa', // closer to neutral light
+  backgroundColor: COLORS.roomCard, // closer to neutral light
   justifyContent: 'center',
   alignItems: 'center',
   position: 'relative',

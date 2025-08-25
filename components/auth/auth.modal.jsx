@@ -104,7 +104,7 @@ export default function AuthModal({ setModalVisible }) {
           marginTop: 16,
           fontFamily: "Poppins_500Medium",
         }}>
-          Join to Roomify
+          Join to LIVINAI
         </Text>
         <Text style={{
           fontSize: fontSizes.FONT17,

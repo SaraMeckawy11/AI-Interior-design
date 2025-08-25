@@ -62,7 +62,7 @@ export default function Slide({ slide, index, setIndex, totalSlides }) {
 
       {/* Get Started / Next Button */}
       {index <= totalSlides - 1 && (
-        <LinearGradient colors={[COLORS.primary, COLORS.secondary]} style={styles.nextButton}>
+        <LinearGradient colors={[COLORS.primary, COLORS.primaryDark]} style={styles.nextButton}>
           <Pressable
             style={styles.nextPressable}
             onPress={() => handlePress(index, setIndex)}

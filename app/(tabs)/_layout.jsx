@@ -12,7 +12,7 @@ export default function TabLayout() {
     <Tabs
         screenOptions={{
             headerShown: false,
-            tabBarActiveTintColor: COLORS.primary,
+            tabBarActiveTintColor: COLORS.primaryDark,
             headerTitleStyle:{
               color: COLORS.textPrimary,
               fontWeight:"600",
@@ -20,7 +20,7 @@ export default function TabLayout() {
             headerShadowVisible:false,
 
             tabBarStyle:{
-              backgroundColor:COLORS.cardBackground,
+              backgroundColor:COLORS.background,
               //borderTopWidth:1,
               elevation:4,
               borderTopColor: COLORS.border,

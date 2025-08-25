@@ -1,66 +1,38 @@
 import React from 'react';
 import { ScrollView, View, Text, StyleSheet, Linking, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import COLORS from '../constants/colors';
 
 const Contact = () => {
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Contact Us</Text>
+    <LinearGradient
+      colors={[COLORS.background, '#ffffff']} // gradient background
+      style={styles.gradient}
+    >
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Contact Us</Text>
 
-      <Section title="Customer Support">
         <Text style={styles.text}>
-          For help with using Roomify, bug reports, feature requests, or general questions, please contact our support team.
+          Have a question, feedback, or need help with LIVINAI?  
+          Feel free to reach out — we’d love to hear from you.
         </Text>
-        <TouchableOpacity onPress={() => Linking.openURL('mailto:support@roomify.app')}>
-          <Text style={styles.link}>support@roomify.app</Text>
-        </TouchableOpacity>
-      </Section>
 
-      <Section title="Privacy Concerns">
-        <Text style={styles.text}>
-          If you have questions or concerns about how your data is handled or want to exercise your privacy rights, email our privacy team.
-        </Text>
-        <TouchableOpacity onPress={() => Linking.openURL('mailto:privacy@roomify.app')}>
-          <Text style={styles.link}>privacy@roomify.app</Text>
+        <TouchableOpacity onPress={() => Linking.openURL('mailto:livinai2025@gmail.com')}>
+          <Text style={styles.link}>livinai2025@gmail.com</Text>
         </TouchableOpacity>
-      </Section>
-
-      <Section title="Business Inquiries">
-        <Text style={styles.text}>
-          For partnerships, collaborations, press, or investment inquiries, feel free to reach out.
-        </Text>
-        <TouchableOpacity onPress={() => Linking.openURL('mailto:business@roomify.app')}>
-          <Text style={styles.link}>business@roomify.app</Text>
-        </TouchableOpacity>
-      </Section>
-
-      <Section title="Head Office">
-        <Text style={styles.text}>
-          [Insert Legal Business Name]{'\n'}
-          [Insert Street Address]{'\n'}
-          [Insert City, Country, Postal Code]
-        </Text>
-      </Section>
-
-      <Section title="Website">
-        <TouchableOpacity onPress={() => Linking.openURL('https://www.roomify.app')}>
-          <Text style={styles.link}>www.roomify.app</Text>
-        </TouchableOpacity>
-      </Section>
-    </ScrollView>
+      </ScrollView>
+    </LinearGradient>
   );
 };
 
-const Section = ({ title, children }) => (
-  <View style={styles.section}>
-    <Text style={styles.heading}>{title}</Text>
-    {children}
-  </View>
-);
-
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+  },
   container: {
     padding: 20,
-    backgroundColor: '#fff',
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 28,
@@ -68,25 +40,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
-  heading: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginTop: 20,
-    marginBottom: 10,
-  },
   text: {
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 22,
-    marginBottom: 10,
+    marginBottom: 20,
+    textAlign: 'center',
+    color: COLORS.textSecondary,
   },
   link: {
-    fontSize: 15,
+    fontSize: 16,
     color: '#007aff',
     textDecorationLine: 'underline',
-    marginBottom: 10,
-  },
-  section: {
-    marginBottom: 20,
+    textAlign: 'center',
   },
 });
 

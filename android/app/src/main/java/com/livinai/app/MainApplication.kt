@@ -1,4 +1,4 @@
-package com.roomify.app
+package com.livinai.app
 
 import android.app.Application
 import android.content.res.Configuration
