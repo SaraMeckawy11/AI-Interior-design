@@ -117,7 +117,7 @@ export default function Create() {
       return;
     }
 
-    if (!isSubscribed && freeDesignsUsed >= 2) {
+    if (!isSubscribed && !isPremium && freeDesignsUsed >= 2) {
       router.push('/upgrade');
       return;
     }

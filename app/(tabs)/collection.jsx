@@ -129,7 +129,7 @@ export default function Collection() {
           style={styles.deleteButton}
           onPress={() => confirmDelete(item._id)}
         >
-          <Ionicons name="trash-outline" size={20} color={COLORS.primary} />
+          <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
@@ -163,7 +163,7 @@ export default function Collection() {
         }
         ListHeaderComponent={
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Roomify</Text>
+            <Text style={styles.title}>LIVINAI</Text>
             {/* <Text style={styles.headerSubtitle}>Design your dream home</Text> */}
           </View>
         }

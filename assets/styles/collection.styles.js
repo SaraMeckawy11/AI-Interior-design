@@ -30,6 +30,18 @@ const styles = StyleSheet.create({
     color: COLORS.primaryDark,
     //marginBottom: 8,
   },
+  title: {
+  fontSize: 26,
+  fontWeight: '400',
+  color: COLORS.primaryDark,
+  letterSpacing: 2.5,
+  textTransform: 'uppercase',
+  fontFamily: 'Poppins_400Regular',
+  textAlign: 'center',
+  textShadowColor: 'rgba(0,0,0,0.03)',
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 1,
+},
   headerSubtitle: {
     fontSize: 14,
     color: COLORS.textSecondary,

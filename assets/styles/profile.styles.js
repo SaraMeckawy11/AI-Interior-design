@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   logoutButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryDark,
     borderRadius: 16,
     padding: 8,
     flexDirection: "row",
@@ -103,6 +103,33 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: COLORS.textSecondary,
   },
+
+familyMessage: {
+  backgroundColor: '#E6F0E4', // lighter version of #B5CBB7
+  paddingVertical: 16,
+  paddingHorizontal: 16,
+  borderRadius: 16,
+  marginVertical: 12,
+  borderWidth: 0.5,
+  borderColor: COLORS.primaryDark, // subtle darker green for border
+  shadowColor: COLORS.shadow,
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.08,
+  shadowRadius: 4,
+  elevation: 2,
+  overflow: 'hidden', // ensures text doesn't get cut
+},
+familyText: {
+  fontSize: 16,
+  fontWeight: "500",
+  color: COLORS.textPrimary, // dark text for readability
+  textAlign: "auto",
+  lineHeight: 24,
+  paddingLeft:16,
+  margin: 0,
+},
+
+
 });
 
 export default styles;
