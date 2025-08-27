@@ -96,22 +96,26 @@ android {
         versionName "1.0.0"
     }
     signingConfigs {
-        debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
-        }
-        release {
-        // Leave empty; EAS Build will inject the signing config automatically
-        }
+    debug {
+        storeFile file('debug.keystore')
+        storePassword 'android'
+        keyAlias 'androiddebugkey'
+        keyPassword 'android'
     }
+    release {
+        storeFile file("credentials/android/keystore.jks")
+        storePassword "970f6503d9acf3c781fd580397097c87"
+        keyAlias "3ba779c9cd2f5a78c894029bd70ab06d"
+        keyPassword "4d9a6373cebcdeb44e0fb984db267544"
+    }
+}
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-    signingConfig signingConfigs.release  // EAS will inject the correct keystore
+    signingConfig signingConfigs.release  // ✅ use release keystore
     shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
     minifyEnabled enableProguardInReleaseBuilds
     proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
