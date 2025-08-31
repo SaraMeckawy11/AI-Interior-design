@@ -58,16 +58,15 @@ export default function AuthModal({ setModalVisible }) {
   const handleGoogleSignIn = async () => {
   try {
     await GoogleSignin.hasPlayServices();
-    await GoogleSignin.signOut(); // force fresh login
 
     const userInfo = await GoogleSignin.signIn();
     console.log("userInfo:", userInfo);
 
-    //  Destructure safely from userInfo.data
-    const { name, email, photo } = userInfo?.data?.user || {};
+    const { name, email, photo } = userInfo?.user || {};
 
     if (!name || !email) {
       console.warn("Incomplete user info from Google.");
+      alert("Could not get full profile info from Google.");
       return;
     }
 
@@ -78,8 +77,10 @@ export default function AuthModal({ setModalVisible }) {
     });
   } catch (error) {
     console.log("Google sign-in error:", error.message || error);
+    alert("Google Sign-In failed: " + (error.message || "Unknown error"));
   }
 };
+
 
 
   return (
