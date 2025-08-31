@@ -7,16 +7,25 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios":{
+      "ios": {
         "resourceClass": "m-medium",
         "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+      }
     }
   },
   "submit": {
