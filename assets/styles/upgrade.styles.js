@@ -100,7 +100,7 @@ export default StyleSheet.create({
     fontWeight: '700',
   },
   upgradeButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryDark,
     paddingVertical: verticalScale(8),
     paddingHorizontal: scale(24),
     borderRadius: 24,

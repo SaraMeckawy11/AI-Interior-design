@@ -8,9 +8,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Purchases from 'react-native-purchases';
 import styles from '../assets/styles/upgrade.styles';
 import { useAuthStore } from '../authStore';
-import Loader from '../components/Loader'; // ✅ use Loader component
+import Loader from '../components/Loader';
 
 export default function Subscription() {
   const router = useRouter();
@@ -18,10 +19,30 @@ export default function Subscription() {
   const [currentPlan, setCurrentPlan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [offerings, setOfferings] = useState(null);
 
+  // fetch RevenueCat offerings
+  useEffect(() => {
+    let mounted = true;
+    async function fetchOfferings() {
+      try {
+        const rc = await Purchases.getOfferings();
+        if (mounted) setOfferings(rc);
+      } catch (err) {
+        console.error('Failed to fetch offerings:', err);
+      }
+    }
+    fetchOfferings();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // fetch user's latest subscription from backend and map to RC pricing
   useEffect(() => {
     if (!token) return;
 
+    let mounted = true;
     async function fetchUserSubscription() {
       try {
         const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/latest`, {
@@ -32,42 +53,69 @@ export default function Subscription() {
         });
 
         if (!response.ok) {
-          const error = await response.text();
-          throw new Error(error || 'Subscription fetch failed');
+          const errorText = await response.text();
+          throw new Error(errorText || 'Subscription fetch failed');
         }
 
         const data = await response.json();
         const latestOrder = data.order;
 
+        // Try to find matching RC package to show localized price (best-effort)
+        let rcPrice = '';
+        if (offerings?.current?.availablePackages?.length) {
+          const candidates = offerings.current.availablePackages;
+          // crude match by billingCycle words (weekly/yearly) or plan id in product identifier
+          const match = candidates.find(p => {
+            const id = (p?.product?.identifier || '').toLowerCase();
+            if (latestOrder.billingCycle === 'weekly') {
+              return id.includes('week') || id.includes('weekly');
+            }
+            if (latestOrder.billingCycle === 'yearly' || latestOrder.billingCycle === 'annual') {
+              return id.includes('year') || id.includes('annual');
+            }
+            return false;
+          });
+          if (match) rcPrice = match.product?.priceString || '';
+        }
+
         const planName = `${capitalize(latestOrder.plan)} – ${capitalize(latestOrder.billingCycle)}`;
-        const price = `${latestOrder.price} ${
-          latestOrder.billingCycle === 'weekly' ? '/ week' : '/ year'
-        }`;
-        const endDate = new Date(latestOrder.endDate).toLocaleDateString();
-        const canceledAt = latestOrder.canceledAt
-          ? new Date(latestOrder.canceledAt).toLocaleDateString()
-          : null;
+        const price =
+          rcPrice ||
+          `${latestOrder.price} ${latestOrder.billingCycle === 'weekly' ? '/ week' : '/ year'}`;
 
-        setCurrentPlan({
-          name: planName,
-          price,
-          nextBilling: endDate,
-          autoRenew: latestOrder.autoRenew,
-          isActive: latestOrder.isActive,
-          canceledAt,
-        });
+        const endDate = latestOrder.endDate ? new Date(latestOrder.endDate).toLocaleDateString() : '—';
+        const canceledAt = latestOrder.canceledAt ? new Date(latestOrder.canceledAt).toLocaleDateString() : null;
 
-        setIsSubscribed(latestOrder.isActive);
+        if (mounted) {
+          setCurrentPlan({
+            name: planName,
+            price,
+            nextBilling: endDate,
+            autoRenew: latestOrder.autoRenew,
+            isActive: latestOrder.isActive,
+            canceledAt,
+            // keep raws if needed
+            plan: latestOrder.plan,
+            billingCycle: latestOrder.billingCycle,
+            priceRaw: latestOrder.price,
+          });
+
+          setIsSubscribed(Boolean(latestOrder.isActive));
+        }
       } catch (error) {
-        console.error('Failed to load subscription:', error.message);
-        setIsSubscribed(false);
+        console.error('Failed to load subscription:', error);
+        if (mounted) setIsSubscribed(false);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
 
     fetchUserSubscription();
-  }, [token]);
+
+    return () => {
+      mounted = false;
+    };
+  }, [token, offerings]);
 
   const handleCancel = () => {
     Alert.alert('Cancel Subscription', 'Are you sure you want to cancel?', [
@@ -86,7 +134,7 @@ export default function Subscription() {
 
             if (!res.ok) throw new Error('Cancel failed');
 
-            setCurrentPlan((prev) => ({
+            setCurrentPlan(prev => ({
               ...prev,
               autoRenew: false,
               canceledAt: new Date().toLocaleDateString(),
@@ -95,7 +143,7 @@ export default function Subscription() {
             Alert.alert('Canceled', 'Auto-renewal has been turned off.');
           } catch (err) {
             Alert.alert('Error', 'Failed to cancel subscription.');
-            console.error('Cancel error:', err.message);
+            console.error('Cancel error:', err);
           }
         },
       },
@@ -107,10 +155,7 @@ export default function Subscription() {
     return text.charAt(0).toUpperCase() + text.slice(1);
   };
 
-  // ✅ Replace ActivityIndicator with Loader
-  if (loading) {
-    return <Loader />;
-  }
+  if (loading) return <Loader />;
 
   if (!isSubscribed) {
     return (
@@ -142,17 +187,17 @@ export default function Subscription() {
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Ionicons name="star" size={24} color="#f7b731" />
           <View style={{ marginLeft: 12 }}>
-            <Text style={styles.cardTitle}>{currentPlan.name}</Text>
-            <Text style={styles.cardSubtitle}>{currentPlan.price}</Text>
+            <Text style={styles.cardTitle}>{currentPlan?.name}</Text>
+            <Text style={styles.cardSubtitle}>{currentPlan?.price}</Text>
             <Text style={styles.cardSmall}>
-              {currentPlan.autoRenew
-                ? `Next billing: ${currentPlan.nextBilling}`
-                : `Subscription ends: ${currentPlan.nextBilling}`}
+              {currentPlan?.autoRenew
+                ? `Next billing: ${currentPlan?.nextBilling}`
+                : `Subscription ends: ${currentPlan?.nextBilling}`}
             </Text>
             <Text style={styles.cardSmall}>
-              Auto-renewal: {currentPlan.autoRenew ? 'ON' : 'OFF'}
+              Auto-renewal: {currentPlan?.autoRenew ? 'ON' : 'OFF'}
             </Text>
-            {currentPlan.canceledAt && (
+            {currentPlan?.canceledAt && (
               <Text style={styles.cardSmall}>Canceled at: {currentPlan.canceledAt}</Text>
             )}
           </View>

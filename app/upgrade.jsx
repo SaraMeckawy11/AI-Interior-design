@@ -5,42 +5,40 @@ import styles from '../assets/styles/upgrade.styles';
 import COLORS from '../constants/colors';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../authStore';
+import purchases, { LOG_LEVEL } from 'react-native-purchases';
 
 export default function Upgrade() {
   const { token } = useAuthStore();
   const [selectedPlan, setSelectedPlan] = useState('weekly');
-  const [currencyCode, setCurrencyCode] = useState('USD'); // <-- use code, not symbol
-  const [weeklyPrice, setWeeklyPrice] = useState(5.99);   // base in USD
-  const [yearlyPrice, setYearlyPrice] = useState(50.99);  // base in USD
+  const [currencyCode, setCurrencyCode] = useState('USD');
+  const [weeklyPrice, setWeeklyPrice] = useState(5.99);
+  const [yearlyPrice, setYearlyPrice] = useState(50.99);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
+  const [offerings, setOfferings] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
-    async function fetchExchangeRate() {
+    try {
+      purchases.setLogLevel(LOG_LEVEL.DEBUG);
+    } catch (e) {}
+
+    async function initOfferings() {
       try {
-        // 1️⃣ Get user country via IP
-        const countryRes = await fetch('https://ipapi.co/json/');
-        const countryData = await countryRes.json();
-        const code = countryData.currency || 'USD';
+        const o = await purchases.getOfferings();
+        if (o?.current?.availablePackages?.length > 0) {
+          setOfferings(o);
 
-        // 2️⃣ Fetch exchange rates (USD → target currency)
-        const rateRes = await fetch('https://open.er-api.com/v6/latest/USD');
-        const rateData = await rateRes.json();
+          const weeklyPkg = o.current.weekly || o.current.availablePackages.find(p => p.packageType === 'WEEKLY');
+          const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
 
-        if (rateData && rateData.rates && rateData.rates[code]) {
-          const rate = rateData.rates[code];
-
-          setCurrencyCode(code); // <-- save currency code directly (e.g. EGP, USD, EUR)
-
-          // Convert base USD prices → local
-          setWeeklyPrice(5.99 * rate);
-          setYearlyPrice(59.99 * rate);
-        } else {
-          console.warn('Exchange rate not found, fallback to USD');
+          const product = weeklyPkg?.product || annualPkg?.product;
+          if (product?.currencyCode) {
+            setCurrencyCode(product.currencyCode);
+          }
         }
       } catch (err) {
-        console.error('Failed to fetch exchange rate:', err);
+        console.error('Failed to fetch offerings:', err);
       }
     }
 
@@ -55,30 +53,53 @@ export default function Upgrade() {
 
         if (res.ok) {
           const data = await res.json();
-          setIsSubscribed(data.user?.isSubscribed || false);
-          setFreeDesignsUsed(data.user?.freeDesignsUsed || 0);
+          setIsSubscribed(Boolean(data.user?.isSubscribed));
+          setFreeDesignsUsed(Number(data.user?.freeDesignsUsed || 0));
         }
       } catch (err) {
         console.error('Failed to fetch user status:', err);
       }
     }
 
-    fetchExchangeRate();
+    initOfferings();
     if (token) fetchUserStatus();
   }, [token]);
 
-  const handleUpgrade = async () => {
-    const price = selectedPlan === 'weekly' ? weeklyPrice : yearlyPrice;
-    const plan = 'pro';
-    const billingCycle = selectedPlan;
-    const startDate = new Date();
-    const endDate = new Date();
-
-    if (billingCycle === 'weekly') {
-      endDate.setDate(startDate.getDate() + 7);
+  const getPackageForPlan = (plan) => {
+    if (!offerings?.current) return undefined;
+    const current = offerings.current;
+    if (plan === 'weekly') {
+      return current.weekly || current.availablePackages.find(p => p.packageType === 'WEEKLY');
     } else {
-      endDate.setFullYear(startDate.getFullYear() + 1);
+      return current.annual || current.availablePackages.find(p => p.packageType === 'ANNUAL');
     }
+  };
+
+  const getPriceStringForPlan = (plan) => {
+    const pkg = getPackageForPlan(plan);
+    if (pkg?.product?.priceString) {
+      return pkg.product.priceString;
+    }
+    return `${(plan === 'weekly' ? weeklyPrice : yearlyPrice).toFixed(2)} ${currencyCode}`;
+  };
+
+  const handleUpgrade = async () => {
+    const chosenPackage = getPackageForPlan(selectedPlan);
+    if (!chosenPackage) {
+      Alert.alert('Error', 'Selected plan not available right now.');
+      return;
+    }
+
+    // get values for backend
+    const plan = selectedPlan === 'weekly' ? 'Weekly Plan' : 'Yearly Plan';
+    const billingCycle = selectedPlan;
+    const price = chosenPackage.product?.price || 0;
+    const startDate = new Date();
+    const endDate = new Date(
+      billingCycle === 'weekly'
+        ? startDate.getTime() + 7 * 24 * 60 * 60 * 1000
+        : startDate.getTime() + 365 * 24 * 60 * 60 * 1000
+    );
 
     if (isSubscribed) {
       Alert.alert(
@@ -90,6 +111,10 @@ export default function Upgrade() {
             text: 'Yes, Change Plan',
             onPress: async () => {
               try {
+                // RevenueCat purchase
+                await purchases.purchasePackage(chosenPackage);
+
+                // Backend update
                 const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/update-latest`, {
                   method: 'PUT',
                   headers: {
@@ -120,6 +145,10 @@ export default function Upgrade() {
       );
     } else {
       try {
+        // RevenueCat purchase
+        await purchases.purchasePackage(chosenPackage);
+
+        // Backend create
         const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`, {
           method: 'POST',
           headers: {
@@ -180,9 +209,7 @@ export default function Upgrade() {
           onPress={() => setSelectedPlan('weekly')}
         >
           <Text style={styles.planTitle}>Weekly</Text>
-          <Text style={styles.planPrice}>
-            {weeklyPrice.toFixed(2)} {currencyCode} / week
-          </Text>
+          <Text style={styles.planPrice}>{getPriceStringForPlan('weekly')} / week</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -193,9 +220,7 @@ export default function Upgrade() {
             <Text style={styles.bestValueText}>Best Value</Text>
           </View>
           <Text style={styles.planTitle}>Yearly</Text>
-          <Text style={styles.planPrice}>
-            {yearlyPrice.toFixed(2)} {currencyCode} / year
-          </Text>
+          <Text style={styles.planPrice}>{getPriceStringForPlan('yearly')} / year</Text>
           <Text style={styles.planSavings}>Save 80%</Text>
         </TouchableOpacity>
       </View>
