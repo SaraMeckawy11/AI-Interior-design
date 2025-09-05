@@ -36,22 +36,51 @@ export default function Create() {
   const [generatedImage, setGeneratedImage] = useState(null);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+
 
   const router = useRouter();
   const { token } = useAuthStore();
 
   useEffect(() => {
-  const wakeHFSpace = async () => {
+  const fetchUserStatus = async () => {
     try {
-      await fetch('https://SaraMeckawy-Interior.hf.space/generate', { method: 'GET' });
-      console.log('HF Space wake-up ping sent!');
+      const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const subscribed = data.user?.isSubscribed || false;
+        const freeUsed = data.user?.freeDesignsUsed || 0;
+
+        setIsSubscribed(subscribed);
+        setFreeDesignsUsed(freeUsed);
+
+        if (subscribed || freeUsed < 2) {
+          try {
+            await fetch('https://SaraMeckawy-Interior.hf.space/generate', { method: 'GET' });
+            console.log('✅ HF Space wake-up ping sent (user eligible)');
+          } catch (err) {
+            console.error('❌ Failed to wake HF Space:', err);
+          }
+        } else {
+          console.log('⏭️ HF Space not woken (user not eligible)');
+        }
+      } else {
+        console.error('Failed to fetch user status: HTTP', res.status);
+      }
     } catch (err) {
-      console.error('Failed to wake HF Space:', err);
+      console.error('Failed to fetch user status:', err);
     }
   };
 
-  wakeHFSpace();
-}, []);
+  if (token) fetchUserStatus();
+}, [token]);
+
 
 
   useEffect(() => {
@@ -67,6 +96,7 @@ export default function Create() {
         if (res.ok) {
           const data = await res.json();
           setIsSubscribed(data.user?.isSubscribed || false);
+          setIsPremium(data.user?.isPremium || false);
           setFreeDesignsUsed(data.user?.freeDesignsUsed || 0);
         }
       } catch (err) {

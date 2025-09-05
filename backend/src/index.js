@@ -5,6 +5,7 @@ import authRoutes from "./routes/authRoutes.js";
 import designRoutes from "./routes/designRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import job from "./lib/cron.js";
 
 
 import { connectDB } from "./lib/db.js";
@@ -16,6 +17,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+job.start();
 app.use(express.json({ limit: '100mb' }));
 //app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use(cors());
