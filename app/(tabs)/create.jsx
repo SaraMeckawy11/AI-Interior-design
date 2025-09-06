@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import styles from '../../assets/styles/create/create.styles';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,87 +25,59 @@ import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
 
 export default function Create() {
+  const router = useRouter();
+  const { token } = useAuthStore();
+
   const [prompt, setPrompt] = useState('');
   const [image, setImage] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
   const [loading, setLoading] = useState(false);
-
   const [roomType, setRoomType] = useState('Living Room');
   const [designStyle, setDesignStyle] = useState('Modern');
   const [colorTone, setColorTone] = useState('Neutral');
-  const [generatedImage, setGeneratedImage] = useState(null);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
 
+  const fetchUserStatus = useCallback(async () => {
+    if (!token) return;
 
-  const router = useRouter();
-  const { token } = useAuthStore();
-
-  useEffect(() => {
-  const fetchUserStatus = async () => {
     try {
       const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        const subscribed = data.user?.isSubscribed || false;
-        const freeUsed = data.user?.freeDesignsUsed || 0;
+      if (!res.ok) {
+        console.error('Failed to fetch user status:', res.status);
+        return;
+      }
 
-        setIsSubscribed(subscribed);
-        setFreeDesignsUsed(freeUsed);
+      const data = await res.json();
+      const { isSubscribed, freeDesignsUsed, isPremium } = data.user || {};
 
-        if (subscribed || freeUsed < 2) {
-          try {
-            await fetch('https://SaraMeckawy-Interior.hf.space/generate', { method: 'GET' });
-            console.log('✅ HF Space wake-up ping sent (user eligible)');
-          } catch (err) {
-            console.error('❌ Failed to wake HF Space:', err);
-          }
-        } else {
-          console.log('⏭️ HF Space not woken (user not eligible)');
+      setIsSubscribed(isSubscribed || false);
+      setFreeDesignsUsed(freeDesignsUsed || 0);
+      setIsPremium(isPremium || false);
+
+      // Wake HF Space if user is eligible
+      if (isSubscribed || freeDesignsUsed < 2 || isPremium) {
+        try {
+          await fetch('https://SaraMeckawy-Interior.hf.space/generate', { method: 'GET' });
+          console.log('✅ HF Space wake-up ping sent (user eligible)');
+        } catch (err) {
+          console.error('❌ Failed to wake HF Space:', err);
         }
       } else {
-        console.error('Failed to fetch user status: HTTP', res.status);
+        console.log('⏭️ HF Space not woken (user not eligible)');
       }
     } catch (err) {
       console.error('Failed to fetch user status:', err);
     }
-  };
-
-  if (token) fetchUserStatus();
-}, [token]);
-
-
+  }, [token]);
 
   useEffect(() => {
-    const fetchUserStatus = async () => {
-      try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          setIsSubscribed(data.user?.isSubscribed || false);
-          setIsPremium(data.user?.isPremium || false);
-          setFreeDesignsUsed(data.user?.freeDesignsUsed || 0);
-        }
-      } catch (err) {
-        console.error('Failed to fetch user status:', err);
-      }
-    };
-
-    if (token) fetchUserStatus();
-  }, [token]);
+    fetchUserStatus();
+  }, [fetchUserStatus]);
 
   const pickImage = async () => {
     try {
