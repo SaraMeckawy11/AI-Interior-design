@@ -16,7 +16,7 @@ export default function SubscriptionSection() {
         activeOpacity={0.8}
         onPress={() => router.push('/upgrade')}
       >
-        <Ionicons name="star-outline" size={20} color="#888" style={styles.itemIcon} />
+        <Ionicons name="star-outline" size={18} color="#888" style={styles.itemIcon} />
         <Text style={styles.itemText}>Upgrade to Pro</Text>
       </TouchableOpacity>
 
@@ -25,7 +25,7 @@ export default function SubscriptionSection() {
         activeOpacity={0.8}
         onPress={() => router.push('/manageSubscription')}
       >
-        <Ionicons name="settings-outline" size={20} color="#888" style={styles.itemIcon} />
+        <Ionicons name="settings-outline" size={18} color="#888" style={styles.itemIcon} />
         <Text style={styles.itemText}>Manage Subscription</Text>
       </TouchableOpacity>
     </View>

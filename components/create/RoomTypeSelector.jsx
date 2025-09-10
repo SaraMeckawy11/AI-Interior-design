@@ -136,7 +136,7 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
                   isCustom && styles.customRoomBackground
                 ]}
               >
-                <Ionicons name={getRoomIcon(type)} size={20} color="gray" />
+                <Ionicons name={getRoomIcon(type)} size={18} color="gray" />
               </View>
               <Text
                 style={[
@@ -172,7 +172,7 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
             onChangeText={setManualRoomInput}
           />
           <TouchableOpacity style={styles.addButton} onPress={handleAddRoom}>
-            <Text style={styles.addButtonText}>Add Room</Text>
+            <Text style={styles.addButtonText}>Add</Text>
           </TouchableOpacity>
         </View>
       )}

@@ -1,6 +1,12 @@
-// styles/home.styles.js
-import { StyleSheet } from "react-native";
+import { StyleSheet, Dimensions } from "react-native";
 import COLORS from "../../constants/colors";
+
+const { width, height } = Dimensions.get("window");
+// Scaling functions
+const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
+const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
+const moderateScale = (size, factor = 0.5) =>
+  size + (scale(size) - size) * factor;
 
 const styles = StyleSheet.create({
   container: {
@@ -14,79 +20,50 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   listContainer: {
-    padding: 16,
-    paddingBottom: 72, 
+    padding: moderateScale(16),
+    paddingBottom: verticalScale(16), 
   },
   header: {
-    marginBottom: 16,
+    marginBottom: verticalScale(10),
     alignItems: "center",
   },
-  headerTitle: {
-    //marginTop:8,
-    fontSize: 24,
-    fontWeight: "500",
-    //fontFamily: "JetBrainsMono-Medium",
-    //letterSpacing: 0.5,
-    color: COLORS.primaryDark,
-    //marginBottom: 8,
-  },
   title: {
-  fontSize: 26,
-  fontWeight: '400',
-  color: COLORS.primaryDark,
-  letterSpacing: 2.5,
-  textTransform: 'uppercase',
-  fontFamily: 'Poppins_400Regular',
-  textAlign: 'center',
-  textShadowColor: 'rgba(0,0,0,0.03)',
-  textShadowOffset: { width: 0, height: 1 },
-  textShadowRadius: 1,
-},
-  headerSubtitle: {
-    fontSize: 14,
+    fontSize: moderateScale(25),
+    fontWeight: '400',
+    color: COLORS.primaryDark,
+    letterSpacing: 2.5,
+    textTransform: 'uppercase',
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.03)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+  },
+  subtitle: {
+    fontSize: moderateScale(14),
     color: COLORS.textSecondary,
     textAlign: "center",
   },
   bookCard: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: 16,
-    marginBottom: 16,
-    padding: 16,
+    borderRadius: moderateScale(16),
+    marginBottom: verticalScale(12),
+    padding: moderateScale(16),
     shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
+    shadowRadius: moderateScale(8),
+    elevation: moderateScale(3),
+    borderWidth: moderateScale(1),
     borderColor: COLORS.border,
   },
-  bookHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  userInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 10,
-  },
-  username: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: COLORS.textPrimary,
-  },
+
   bookImageContainer: {
     width: "100%",
-    height: 200,
-    borderRadius: 12,
+    height: moderateScale(190),
+    borderRadius: moderateScale(12),
     overflow: "hidden",
-    marginBottom: 12,
+    marginBottom: verticalScale(8),
     backgroundColor: COLORS.border,
   },
   bookImage: {
@@ -101,47 +78,48 @@ const styles = StyleSheet.create({
   },
 
   bookDetails: {
-    padding: 8,
+    padding: moderateScale(8),
   },
   bookTitle: {
-    fontSize: 16,
+    fontSize: moderateScale(15),
     fontWeight: "600",
     color: COLORS.textPrimary,
     marginBottom: 6,
   },
   caption: {
-    fontSize: 14,
+    fontSize: moderateScale(13),
     color: COLORS.textDark,
-    marginBottom: 8,
-    lineHeight: 20,
+    marginBottom: verticalScale(6),
+    lineHeight: verticalScale(16),
   },
   date: {
-    fontSize: 12,
+    fontSize: moderateScale(11),
     color: COLORS.textSecondary,
   },
   emptyContainer: {
     alignItems: "center",
     justifyContent: "center",
-    padding: 40,
-    marginTop: 40,
+    padding: moderateScale(40),
+    marginTop: moderateScale(40),
   },
   emptyText: {
-    fontSize: 18,
+    fontSize: moderateScale(16),
     fontWeight: "600",
     color: COLORS.textPrimary,
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: verticalScale(8),
+    marginBottom: verticalScale(8),
+    marginHorizontal: moderateScale(8),
   },
   emptySubtext: {
-    fontSize: 14,
+    fontSize: verticalScale(14),
     color: COLORS.textSecondary,
     textAlign: "center",
   },
   footerLoader: {
-    marginVertical: 20,
+    marginVertical: verticalScale(20),
   },
   deleteButton: {
-    padding: 8,
+    padding: moderateScale(8),
     justifyContent: "flex-end",
   },
 });

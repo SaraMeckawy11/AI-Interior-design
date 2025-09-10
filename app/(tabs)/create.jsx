@@ -214,7 +214,7 @@ export default function Create() {
                   </>
                 ) : (
                   <View style={styles.placeholderContainerModern}>
-                    <Ionicons name="cloud-upload-outline" size={42} color={COLORS.textSecondary} />
+                    <Ionicons name="cloud-upload-outline" size={40} color={COLORS.textSecondary} />
                     <Text style={styles.placeholderTextModern}>Tap to upload an image</Text>
                   </View>
                 )}

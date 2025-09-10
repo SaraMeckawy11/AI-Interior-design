@@ -1,13 +1,21 @@
 // styles/create.styles.js
-import { StyleSheet } from "react-native";
+import { StyleSheet, Dimensions } from "react-native";
 import COLORS from "../../../constants/colors";
+
+const { width, height } = Dimensions.get("window");
+
+// Scaling functions
+const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
+const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
+const moderateScale = (size, factor = 0.5) =>
+  size + (scale(size) - size) * factor;
 
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     backgroundColor: COLORS.background,
-    padding: 24,
-    paddingTop:16
+    padding: moderateScale(24),
+    paddingTop:verticalScale(12)
   },
   scrollViewStyle: {
     flex: 1,
@@ -15,10 +23,9 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: COLORS.cardBackground,
-    borderRadius: 16,
-    padding: 16,
-    //paddingTop:16,
-    marginVertical: 16,
+    borderRadius: moderateScale(16),
+    padding: moderateScale(16),
+    marginVertical: verticalScale(16),
     shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -29,53 +36,36 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: "center",
-    // marginBottom: 8,
+    //marginBottom: verticalScale(1),
   },
-  // title: {
-  //   fontSize: 24,
-  //   fontWeight: "500",
-  //   color: COLORS.primaryDark,
-  //   //marginBottom: 8,
-  // },
 
- title: {
-  fontSize: 26,                     // prominent but not oversized
-  fontWeight: '400',                // regular/light, for elegance
-  color: COLORS.primaryDark,        // keep brand color subtle
-  letterSpacing: 2,                 // modern airy feel
-  textTransform: 'uppercase',       // sleek, minimalist
-  fontFamily: 'Poppins_400Regular', // geometric, premium sans-serif
-  textAlign: 'center',
-
-},
-title: {
-  fontSize: 26,
-  fontWeight: '400',
-  color: COLORS.primaryDark,
-  letterSpacing: 2.5,
-  textTransform: 'uppercase',
-  fontFamily: 'Poppins_400Regular',
-  textAlign: 'center',
-  textShadowColor: 'rgba(0,0,0,0.03)',
-  textShadowOffset: { width: 0, height: 1 },
-  textShadowRadius: 1,
-},
-
+  title: {
+    fontSize: moderateScale(25),
+    fontWeight: '400',
+    color: COLORS.primaryDark,
+    letterSpacing: 2.5,
+    textTransform: 'uppercase',
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.03)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+  },
 
   subtitle: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     color: COLORS.textSecondary,
     textAlign: "center",
   },
   form: {
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   formGroup: {
-    marginBottom: 32,
+    marginBottom: verticalScale(24),
   },
   label: {
-    fontSize: 14,
-    marginBottom: 8,
+    fontSize: moderateScale(13),
+    marginBottom: verticalScale(6),
     color: COLORS.textPrimary,
     fontWeight: "500",
   },
@@ -87,11 +77,11 @@ title: {
   },
   placeholderText: {
     color: COLORS.textSecondary,
-    marginTop: 8,
+    marginTop: verticalScale(8),
   },
   buttonWrapper: {
-    marginTop: 8,
-    borderRadius: 24,
+    marginTop: verticalScale(6),
+    borderRadius: moderateScale(24),
     overflow: 'hidden',
     shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 2 },
@@ -101,50 +91,49 @@ title: {
   },
 
   buttonGradient: {
-    paddingVertical: 12,
+    paddingVertical:verticalScale(9),
     flexDirection: "row",
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 24,
+    borderRadius: moderateScale(24),
   },
   buttonText: {
     color:COLORS.background,
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: moderateScale(15),
   },
   buttonIcon: {
-    marginRight: 8,
+    marginRight: moderateScale(8),
   },
   removeButton: {
-  position: 'absolute',
-  top: 8,
-  right: 8,
-  //backgroundColor: 'rgba(0,0,0,0.4)', // subtle translucent background
-  borderRadius: 12,
-  width: 24,
-  height: 24,
-  justifyContent: 'center',
-  alignItems: 'center',
-  },
+    position: 'absolute',
+    top:verticalScale(8),
+    right: moderateScale(8),
+    borderRadius: moderateScale(12),
+    width: moderateScale(24),
+    height: moderateScale(24),
+    justifyContent: 'center',
+    alignItems: 'center',
+    },
   textGroup: {
-    marginBottom: 8,
-    padding:8
+    marginBottom: verticalScale(8),
+    padding: moderateScale(8),
   },
   textArea:{
-    marginTop: 8,
+    marginTop: verticalScale(8),
     backgroundColor: '#f9f9f9',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 16,
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: moderateScale(16),
+    borderRadius: moderateScale(16),
     borderColor: '#ccc',
     borderWidth: 1,
   },
 
-    imagePicker: {
+  imagePicker: {
     width: "100%",
-    height:160,
+    height:verticalScale(160),
     backgroundColor: COLORS.inputBackground,
-    borderRadius: 12,
+    borderRadius: moderateScale(12),
     borderWidth: 1,
     borderColor: COLORS.border,
     overflow: "hidden",
@@ -155,8 +144,8 @@ title: {
   },
 
 imagePickerModern: {
-  height: 160,
-  borderRadius: 16,
+  height: verticalScale(120),
+  borderRadius: moderateScale(16),
   borderWidth: 1,
   borderColor: '#e0e0e0', // lighter, more modern than #ccc
   backgroundColor: COLORS.roomCard, // closer to neutral light
@@ -169,7 +158,7 @@ imagePickerModern: {
   shadowOpacity: 0.05,   // very subtle shadow
   shadowRadius: 2,
   elevation: 0.5,        // minimal elevation on Android
-  marginTop: 8,
+  marginTop: verticalScale(6),
 },
 
 imagePickerSelected: {
@@ -181,7 +170,7 @@ previewImageModern: {
   width: '100%',
   height: '100%',
   resizeMode: 'cover',
-  borderRadius: 16,
+  borderRadius: moderateScale(16),
 },
 
 placeholderContainerModern: {
@@ -190,19 +179,19 @@ placeholderContainerModern: {
 },
 
 placeholderTextModern: {
-  marginTop: 8,
-  fontSize: 14,
+  marginTop: verticalScale(6),
+  fontSize: moderateScale(13),
   color: COLORS.textSecondary,
   fontWeight: '500',
 },
 
 removeButtonModern: {
   position: 'absolute',
-  top: 8,
-  right: 8,
+  top: verticalScale(6),
+  right:  moderateScale(8),
   backgroundColor: '#fff',
-  borderRadius: 20,
-  padding: 2,
+  borderRadius: moderateScale(20),
+  padding: moderateScale(2),
   elevation: 4,
   shadowColor: '#000',
   shadowOffset: { width: 0, height: 2 },
@@ -224,8 +213,8 @@ loadingOverlay: {
 
 loadingContainer: {
   backgroundColor: 'white',
-  padding: 24,
-  borderRadius: 16,
+  padding: moderateScale(24),
+  borderRadius: moderateScale(16),
   alignItems: 'center',
   justifyContent: 'center',
   shadowColor: '#000',
@@ -236,15 +225,15 @@ loadingContainer: {
 },
 
 loadingText: {
-  marginTop: 16,
-  fontSize: 16,
+  marginTop: verticalScale(14),
+  fontSize: moderateScale(14),
   fontWeight: '600',
   color: COLORS.primary,
 },
 
 loadingSubtext: {
-  marginTop: 6,
-  fontSize: 13,
+  marginTop: verticalScale(4),
+  fontSize: moderateScale(12),
   color: COLORS.textSecondary,
 },
 
