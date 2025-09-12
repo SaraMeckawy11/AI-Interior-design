@@ -196,7 +196,7 @@ export default function Upgrade() {
       <View style={styles.featureList}>
         {['Ad-free experience', 'Unlimited design renders'].map((feature, idx) => (
           <View key={idx} style={styles.featureItem}>
-            <Ionicons name="checkmark-circle-outline" size={20} color={COLORS.primary} />
+            <Ionicons name="checkmark-circle-outline" size={20} color={COLORS.primaryDark} />
             <Text style={styles.featureText}>{feature}</Text>
           </View>
         ))}

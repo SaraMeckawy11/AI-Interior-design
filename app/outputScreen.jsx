@@ -9,10 +9,14 @@ import { Share } from 'expo-sharing' ;
 import * as Sharing from 'expo-sharing';
 import { useEffect, useState } from 'react'; 
 import { Dimensions } from 'react-native';
+import { Modal, TouchableWithoutFeedback } from 'react-native';
 
   export default function OutputScreen() {
   const { imageUri } = useLocalSearchParams();
   const [imageHeight, setImageHeight] = useState(240);
+  const [modalVisible, setModalVisible] = useState(false);
+const [modalMessage, setModalMessage] = useState("");
+
 
   useEffect(() => {
     if (imageUri) {
@@ -40,34 +44,72 @@ import { Dimensions } from 'react-native';
       const downloadRes = await FileSystem.downloadAsync(imageUri, fileUri);
 
       const isAvailable = await Sharing.isAvailableAsync();
+      // if (!isAvailable) {
+      //   Alert.alert('Not available', 'Sharing is not available on this device.');
+      //   return;
+      // }
       if (!isAvailable) {
-        Alert.alert('Not available', 'Sharing is not available on this device.');
+        setModalMessage("Sharing is not available on this device.");
+        setModalVisible(true);
         return;
       }
 
       await Sharing.shareAsync(downloadRes.uri);
       } catch (error) {
-        console.log('Sharing error:', error);
-        Alert.alert('Error', 'Failed to share image.');
+        // console.log('Sharing error:', error);
+        // Alert.alert('Error', 'Failed to share image.');
+        setModalMessage("Failed to share image.");
+        setModalVisible(true);
       }
     };
+
 
   const handleDownload = async () => {
     try {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission denied', 'Cannot save image without permission.');
+        // Alert.alert('Permission denied', 'Cannot save image without permission.');
+        setModalMessage("Cannot save image without permission.");
+        setModalVisible(true);
         return;
       }
 
       const fileUri = FileSystem.documentDirectory + 'generated-image.jpg';
       const downloadRes = await FileSystem.downloadAsync(imageUri, fileUri);
       await MediaLibrary.saveToLibraryAsync(downloadRes.uri);
-      Alert.alert('Downloaded', 'Image saved to your gallery.');
-      } catch (error) {
-        Alert.alert('Error', 'Failed to download image.');
-      }
-    };
+      //Alert.alert('Downloaded', 'Image saved to your gallery.');
+      setModalMessage("Image saved to your gallery.");
+      setModalVisible(true);
+    } catch (error) {
+      //Alert.alert('Error', 'Failed to download image.');
+      setModalMessage("Failed to download image.");
+      setModalVisible(true);
+    }
+  };
+
+  const FeedbackModal = () => (
+  <Modal
+    visible={modalVisible}
+    transparent
+    animationType="fade"
+    onRequestClose={() => setModalVisible(false)}
+  >
+    <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalMessage}>{modalMessage}</Text>
+          <TouchableOpacity
+            style={styles.modalButton}
+            onPress={() => setModalVisible(false)}
+          >
+            <Text style={styles.modalButtonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </TouchableWithoutFeedback>
+  </Modal>
+);
+
 
     return (
       <View style={styles.container}>
@@ -90,6 +132,7 @@ import { Dimensions } from 'react-native';
             <Text style={styles.buttonText}>Share</Text>
           </TouchableOpacity>
         </View>
+        <FeedbackModal />
       </View>
     );
 }

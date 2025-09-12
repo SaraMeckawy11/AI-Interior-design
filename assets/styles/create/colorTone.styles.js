@@ -43,9 +43,9 @@ iconButton: {
 },
 
 iconCircle: {
-  width: moderateScale(40),
-  height: moderateScale(40) ,
-  borderRadius: moderateScale(20),
+  width: verticalScale(40),
+  height: verticalScale(40),
+  borderRadius: verticalScale (20),
   backgroundColor:COLORS.roomCard,
   justifyContent: 'center',
   alignItems: 'center',

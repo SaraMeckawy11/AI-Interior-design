@@ -1,5 +1,5 @@
 // styles/create.styles.js
-import { StyleSheet, Dimensions } from "react-native";
+import { StyleSheet, Dimensions,PixelRatio } from "react-native";
 import COLORS from "../../../constants/colors";
 
 const { width, height } = Dimensions.get("window");
@@ -15,7 +15,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     backgroundColor: COLORS.background,
     padding: moderateScale(24),
-    paddingTop:verticalScale(12)
+    paddingTop:verticalScale(12),
   },
   scrollViewStyle: {
     flex: 1,
@@ -129,22 +129,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
 
-  imagePicker: {
-    width: "100%",
-    height:verticalScale(160),
-    backgroundColor: COLORS.inputBackground,
-    borderRadius: moderateScale(12),
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: "hidden",
-  },
-  previewImage: {
-    width: "100%",
-    height: "100%",
-  },
-
 imagePickerModern: {
-  height: verticalScale(120),
+  height: moderateScale(140),
   borderRadius: moderateScale(16),
   borderWidth: 1,
   borderColor: '#e0e0e0', // lighter, more modern than #ccc
@@ -236,6 +222,86 @@ loadingSubtext: {
   fontSize: moderateScale(12),
   color: COLORS.textSecondary,
 },
+modalOverlay: {
+  flex: 1,
+  justifyContent: 'flex-end',
+  backgroundColor: 'rgba(0,0,0,0.4)',
+},
+
+modalContainer: {
+  backgroundColor: COLORS.cardBackground,
+  borderTopLeftRadius: moderateScale(20),
+  borderTopRightRadius: moderateScale(20),
+  padding: moderateScale(20),
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: -2 },
+  shadowOpacity: 0.15,
+  shadowRadius: 6,
+  elevation: 6,
+},
+modalTitle: {
+  fontSize: moderateScale(16),
+  fontWeight: '600',
+  color: COLORS.primaryDark,
+  textAlign: 'center',
+  marginBottom: verticalScale(4),
+},
+modalSubtitle: {
+  fontSize: moderateScale(13),
+  color: COLORS.textSecondary,
+  textAlign: 'center',
+  marginBottom: verticalScale(16),
+},
+modalButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: COLORS.primaryDark,
+  borderRadius: moderateScale(16),
+  paddingVertical: verticalScale(10),
+  marginBottom: verticalScale(10),
+},
+modalCancelButton: {
+  backgroundColor: COLORS.roomCard,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+},
+modalButtonText: {
+  fontSize: moderateScale(14),
+  fontWeight: '600',
+  color: COLORS.white,
+},
+modalIcon: {
+  marginRight: moderateScale(8),
+},
+
+modalMissingOverlay: {
+  flex: 1,
+  justifyContent: 'center',
+  alignItems: "center",
+  backgroundColor: 'rgba(0,0,0,0.4)',
+},
+modalMissingContainer: {
+  backgroundColor: COLORS.cardBackground,
+  width: "80%",
+  borderRadius: moderateScale(20),  
+  padding: moderateScale(20),
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: -2 },
+  shadowOpacity: 0.15,
+  shadowRadius: 6,
+  elevation: 6,
+},
+modalMissingButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: COLORS.primaryDark,
+  borderRadius: moderateScale(16),
+  paddingVertical: verticalScale(8),
+  marginBottom: verticalScale(10),
+},
+
 
 
 });

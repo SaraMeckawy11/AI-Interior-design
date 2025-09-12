@@ -11,6 +11,14 @@ import JWT from "expo-jwt";
 import axios from "axios";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "../../authStore";
+import { requestTrackingPermissionAsync } from 'expo-tracking-transparency';
+import {
+  Settings,
+  LoginButton,
+  AccessToken,
+  GraphRequest,
+  GraphRequestManager,
+} from "react-native-fbsdk-next";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
@@ -28,6 +36,22 @@ export default function AuthModal({ setModalVisible }) {
       });
     }
   };
+
+  useEffect(() => {
+    // Initialize Facebook SDK (Android + iOS)
+    Settings.initializeSDK();
+
+    // Tracking transparency (iOS only)
+    if (Platform.OS === "ios") {
+      const requestTracking = async () => {
+        const { status } = await requestTrackingPermissionAsync();
+        if (status === "granted") {
+          await Settings.setAdvertiserTrackingEnabled(true);
+        }
+      };
+      requestTracking();
+    }
+  }, []);
 
   useEffect(() => {
     configureGoogleSignIn();
@@ -128,6 +152,46 @@ export default function AuthModal({ setModalVisible }) {
               }}
             />
           </Pressable>
+           <LoginButton
+            onLogoutFinished={() => console.log("Logged out")}
+            onLoginFinished={(error, result) => {
+              if (error) {
+                console.log("FB login error:", error.message);
+              } else if (result.isCancelled) {
+                console.log("FB login cancelled.");
+              } else {
+                AccessToken.getCurrentAccessToken().then((data) => {
+                  const accessToken = data?.accessToken?.toString();
+
+                  const request = new GraphRequest(
+                    "/me",
+                    {
+                      accessToken,
+                      parameters: {
+                        fields: {
+                          string: "id,name,email,picture.type(large)",
+                        },
+                      },
+                    },
+                    (err, res) => {
+                      if (err) {
+                        console.log("Graph error:", err);
+                      } else {
+                        console.log("FB profile:", res);
+                        authHandler({
+                          name: res.name,
+                          email: res.email,
+                          avatar: res.picture?.data?.url,
+                        });
+                      }
+                    }
+                  );
+
+                  new GraphRequestManager().addRequest(request).start();
+                });
+              }
+            }}
+          />
         </View>
       </Pressable>
     </BlurView>

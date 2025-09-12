@@ -12,7 +12,7 @@ export default function Loader({ size = "large" }) {
         backgroundColor: COLORS.background,
       }}
     >
-      <ActivityIndicator size={size} color={COLORS.primary} />
+      <ActivityIndicator size={size} color={COLORS.primaryDark} />
     </View>
   );
 }

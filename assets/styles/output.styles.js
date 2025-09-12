@@ -1,12 +1,20 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Dimensions } from 'react-native';
 import COLORS from '../../constants/colors';
+const { width, height } = Dimensions.get("window");
+
+// Scaling functions
+const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
+const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
+const moderateScale = (size, factor = 0.5) =>
+  size + (scale(size) - size) * factor;
+
 
 export default StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
     paddingTop:64,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.background,
     justifyContent: 'flex-start',
     alignItems: 'center',
   },
@@ -34,7 +42,7 @@ export default StyleSheet.create({
   },
   button: {
     flexDirection: 'row',
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryDark,
     paddingVertical:8,
     paddingHorizontal:16,
     borderRadius: 16,
@@ -44,7 +52,7 @@ export default StyleSheet.create({
     width:120
   },
   buttonText: {
-    color: '#fff',
+    color: COLORS.background,
     fontWeight: '600',
   },
   bookDetails: {
@@ -66,4 +74,35 @@ export default StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
   },
+  modalOverlay: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.5)",
+  justifyContent: "center",
+  alignItems: "center",
+},
+modalContent: {
+  backgroundColor: COLORS.cardBackground,
+  borderRadius: moderateScale(20),  
+  padding: moderateScale(20),
+  width: "80%",
+  alignItems: "center",
+},
+modalMessage: {
+  fontSize: moderateScale(16),
+  textAlign: "center",
+  marginBottom: moderateScale(16),
+  marginTop: verticalScale(4),
+},
+modalButton: {
+  backgroundColor: COLORS.primaryDark,
+  paddingVertical: verticalScale(8),
+  paddingHorizontal: moderateScale(24),
+  borderRadius: moderateScale(20),
+},
+modalButtonText: {
+  color: COLORS.cardBackground,
+  fontSize: moderateScale(14),
+  fontWeight: "600",
+},
+
 });

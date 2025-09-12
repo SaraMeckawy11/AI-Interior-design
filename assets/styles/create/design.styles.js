@@ -28,11 +28,14 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(13),
     color: COLORS.secondary,
   },
+
   iconGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent:'space-evenly',
     alignItems:'center',
+    // gap:moderateScale(2),
+    // margin:moderateScale(8),
     // marginTop:8,
     // marginBottom:8,
   },
@@ -52,7 +55,7 @@ const styles = StyleSheet.create({
   },
   iconImageWrapper: {
     width: moderateScale(92),
-    height: moderateScale(92),
+    height:moderateScale(92),
     borderRadius: moderateScale(16),
     overflow: 'hidden',
     justifyContent: 'center',

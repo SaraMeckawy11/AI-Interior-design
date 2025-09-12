@@ -26,7 +26,7 @@ const COLORS = {
   textPrimary: "#111827",
   textSecondary: "#6B7280",
   placeholderText: "#9CA3AF",
-  inputBackground: "#FAF9F6", 
+  inputBackground: "#f9f9f9", 
   roomCard:'#FAF9F6',
   border: "#E5E7EB",
   line: "#D1D5DB",

@@ -10,6 +10,8 @@ import {
   Image,
   ActivityIndicator,
   Modal,
+  TouchableWithoutFeedback,
+  Dimensions
 } from 'react-native';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
@@ -23,6 +25,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import RoomTypeSelector from '../../components/create/RoomTypeSelector';
 import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+const { width, height } = Dimensions.get("window");
+
+// Scaling functions
+const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
+const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
+const moderateScale = (size, factor = 0.5) =>
+  size + (scale(size) - size) * factor;
 
 export default function Create() {
   const router = useRouter();
@@ -38,6 +49,8 @@ export default function Create() {
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
+  const [showImageSourceModal, setShowImageSourceModal] = useState(false);
+  const [showMissingValueModal, setShowMissingValueModal] = useState(false);
 
   const fetchUserStatus = useCallback(async () => {
     if (!token) return;
@@ -113,9 +126,57 @@ export default function Create() {
     }
   };
 
+  const takePhoto = async () => {
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Denied', 'We need camera permissions to take a photo');
+          return;
+        }
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.3,
+        base64: true,
+      });
+
+      if (!result.canceled) {
+        setImage(result.assets[0].uri);
+
+        if (result.assets[0].base64) {
+          setImageBase64(result.assets[0].base64);
+        } else {
+          const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          setImageBase64(base64);
+        }
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Error', 'There was a problem taking your photo');
+    }
+  };
+
+  const chooseImageSource = () => {
+    Alert.alert(
+      "Upload Photo",
+      "Choose an option",
+      [
+        { text: "Take Photo", onPress: takePhoto },
+        { text: "Choose from Gallery", onPress: pickImage },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
+  };
+
+
   const handleSubmit = async () => {
-    if (!roomType || !designStyle || !colorTone) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!roomType || !designStyle || !colorTone || !image) {
+      // Alert.alert('Error', 'Please fill in all fields');
+      setShowMissingValueModal(true);
       return;
     }
 
@@ -198,7 +259,9 @@ export default function Create() {
               <Text style={styles.label}>Add photo</Text>
               <TouchableOpacity
                 style={[styles.imagePickerModern, image && styles.imagePickerSelected]}
-                onPress={pickImage}
+                // onPress={pickImage}
+                //  
+                onPress={() => setShowImageSourceModal(true)}
                 activeOpacity={0.9}
               >
                 {image ? (
@@ -214,7 +277,7 @@ export default function Create() {
                   </>
                 ) : (
                   <View style={styles.placeholderContainerModern}>
-                    <Ionicons name="cloud-upload-outline" size={40} color={COLORS.textSecondary} />
+                    <Ionicons name="cloud-upload-outline" size={moderateScale(38)} color={COLORS.textSecondary} />
                     <Text style={styles.placeholderTextModern}>Tap to upload an image</Text>
                   </View>
                 )}
@@ -269,6 +332,53 @@ export default function Create() {
           </View>
         </View>
       </ScrollView>
+      {/* Image Source Picker Modal */}
+      <Modal
+        visible={showImageSourceModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowImageSourceModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>{/* prevent closing when tapping inside */}
+              <View style={styles.modalContainer}>
+                <Text style={styles.modalTitle}>Upload Photo</Text>
+                <Text style={styles.modalSubtitle}>Choose an option</Text>
+
+                <TouchableOpacity
+                  style={styles.modalButton}
+                  onPress={() => {
+                    setShowImageSourceModal(false);
+                    takePhoto();
+                  }}
+                >
+                  <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                  <Text style={styles.modalButtonText}>Take Photo</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.modalButton}
+                  onPress={() => {
+                    setShowImageSourceModal(false);
+                    pickImage();
+                  }}
+                >
+                  <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                  <Text style={styles.modalButtonText}>Choose from Gallery</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalCancelButton]}
+                  onPress={() => setShowImageSourceModal(false)}
+                >
+                  <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* Fullscreen Loading Modal */}
       <Modal transparent animationType="fade" visible={loading}>
@@ -280,6 +390,33 @@ export default function Create() {
           </View>
         </View>
       </Modal>
+
+      {/* Missing Value Modal */}
+      <Modal
+        visible={showMissingValueModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMissingValueModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowMissingValueModal(false)}>
+          <View style={styles.modalMissingOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalMissingContainer}>
+                <Text style={styles.modalTitle}>Missing Information</Text>
+                <Text style={styles.modalSubtitle}>Please fill in all fields before continuing.</Text>
+
+                <TouchableOpacity
+                  style={[styles.modalMissingButton, styles.modalConfirmButton]}
+                  onPress={() => setShowMissingValueModal(false)}
+                >
+                  <Text style={styles.modalButtonText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 }

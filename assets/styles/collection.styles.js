@@ -122,6 +122,68 @@ const styles = StyleSheet.create({
     padding: moderateScale(8),
     justifyContent: "flex-end",
   },
+  modalOverlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0,0,0,0.4)',
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+modalContent: {
+  width: '80%',
+  backgroundColor: COLORS.background,
+  borderRadius: moderateScale(20),
+  padding: moderateScale(20),
+  alignItems: 'center',
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.2,
+  shadowRadius: 6,
+  elevation: 8,
+},
+modalTitle: {
+  fontSize:  moderateScale(16),
+  fontWeight: '600',
+  color: COLORS.primaryDark,
+  marginBottom: verticalScale(4),
+  textAlign: 'center',
+},
+modalMessage: {
+  fontSize: moderateScale(13),
+  color: COLORS.textSecondary,
+  textAlign: 'center',
+  marginBottom: verticalScale(16),
+},
+modalActions: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  width: '100%',
+},
+modalButton: {
+  flex: 1,
+  paddingVertical: verticalScale(6),
+  marginHorizontal: moderateScale(5),
+  borderRadius: moderateScale(12),
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+cancelButton: {
+  backgroundColor: COLORS.roomCard,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+},
+deleteConfirmButton: {
+  backgroundColor: COLORS.primaryDark,
+},
+modalButtonText: {
+  fontSize: moderateScale(13),
+  fontWeight: '600',
+  color: COLORS.primaryDark,
+},
+cancelButtonText: {
+  color: COLORS.textSecondary,
+  fontWeight: "500",
+},
 });
 
 export default styles;

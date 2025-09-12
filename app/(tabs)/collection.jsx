@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react'; 
-import { View, FlatList, ActivityIndicator, Text, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import {
+  View,
+  FlatList,
+  ActivityIndicator,
+  Text,
+  RefreshControl,
+  TouchableOpacity,
+  Modal,
+  TouchableWithoutFeedback
+} from 'react-native';
 import { useAuthStore } from '../../authStore';
 import styles from '../../assets/styles/collection.styles';
 import { Image } from 'expo-image';
@@ -17,6 +26,10 @@ export default function Collection() {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [selectedDesignId, setSelectedDesignId] = useState(null);
+
 
   const router = useRouter();
 
@@ -57,9 +70,9 @@ export default function Collection() {
     fetchDesigns();
   }, []);
 
-  const handleDeleteDesign = async (designId) => {
+  const handleDeleteDesign = async () => {
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/${designId}`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/${selectedDesignId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -67,27 +80,20 @@ export default function Collection() {
       });
 
       const data = await response.json();
-
       if (!response.ok) throw new Error(data.message || "Failed to delete design");
 
-      // Update state to remove the deleted item from the UI
-      setDesigns((prevDesigns) => prevDesigns.filter((design) => design._id !== designId));
-
-      Alert.alert("Success", "Design deleted successfully");
+      setDesigns((prev) => prev.filter((design) => design._id !== selectedDesignId));
+      setDeleteModalVisible(false);
     } catch (error) {
-      Alert.alert("Error", error.message || "Failed to delete design");
+      console.log("Delete error:", error.message);
+      setDeleteModalVisible(false);
     }
   };
 
+
   const confirmDelete = (designId) => {
-    Alert.alert(
-      "Delete design",
-      "Are you sure you want to delete this design and all its associated images?",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => handleDeleteDesign(designId) },
-      ]
-    );
+    setSelectedDesignId(designId);
+    setDeleteModalVisible(true);
   };
 
 
@@ -176,6 +182,41 @@ export default function Collection() {
           )
         }
       />
+      {/* Delete Confirmation Modal */}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={deleteModalVisible}
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setDeleteModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalContent}>
+                {/* <Ionicons name="trash-outline" size={36} color={COLORS.primary} /> */}
+                <Text style={styles.modalTitle}>Delete Design</Text>
+                <Text style={styles.modalMessage}>
+                  Are you sure you want to delete this design?
+                </Text>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.cancelButton]}
+                    onPress={() => setDeleteModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.deleteConfirmButton]}
+                    onPress={handleDeleteDesign}
+                  >
+                    <Text style={[styles.modalButtonText, { color: COLORS.white }]}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 }

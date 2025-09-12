@@ -131,6 +131,65 @@ familyText: {
   paddingLeft: moderateScale(16),
   margin: 0,
 },
+modalOverlay: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.4)",
+  justifyContent: "center",
+  alignItems: "center",
+},
+logoutModalContainer: {
+  backgroundColor: COLORS.cardBackground,
+  borderRadius: moderateScale(20),
+  padding: moderateScale(20),
+  width: "80%",
+  alignItems: "center",
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.2,
+  shadowRadius: 6,
+  elevation: 6,
+},
+logoutModalTitle: {
+  fontSize: moderateScale(16),
+  fontWeight: "600",
+  color: COLORS.primaryDark,
+  marginBottom: verticalScale(4),
+},
+logoutModalSubtitle: {
+  fontSize: moderateScale(13),
+  color: COLORS.textSecondary,
+  textAlign: "center",
+  marginBottom:  verticalScale(16),
+},
+logoutModalButtons: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  width: "100%",
+},
+logoutModalButton: {
+  flex: 1,
+  paddingVertical:verticalScale(6),
+  borderRadius: moderateScale(12),
+  alignItems: "center",
+  marginHorizontal:moderateScale(5),
+},
+cancelButton: {
+  backgroundColor: COLORS.roomCard,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+},
+confirmButton: {
+  backgroundColor: COLORS.primaryDark,
+},
+cancelButtonText: {
+  color: COLORS.textSecondary,
+  fontWeight: "500",
+},
+confirmButtonText: {
+  color: COLORS.white,
+  fontWeight: "600",
+},
+
 
 });
 
