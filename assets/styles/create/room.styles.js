@@ -94,7 +94,7 @@ manualCard: {
 
 addButton: {
     marginTop: verticalScale(6),
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryDark,
     paddingVertical: verticalScale(6),
     borderRadius: moderateScale(16),
     alignItems: 'center',
@@ -111,6 +111,77 @@ cancelText: {
     textAlign: 'center',
     fontSize: moderateScale(14),
 },
+overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  errorModalContainer: {
+    width: '80%',
+    backgroundColor: COLORS.background,
+    borderRadius: moderateScale(20),
+    padding: moderateScale(20),
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: moderateScale(16),
+    fontWeight: '600',
+    color: COLORS.primaryDark,
+    marginBottom: verticalScale(4),
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: moderateScale(14),
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: moderateScale(16),
+  },
+
+  modalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+
+  cancelButton: {
+    flex: 1,
+    paddingVertical: verticalScale(6),
+    marginHorizontal: moderateScale(5),
+    borderRadius: moderateScale(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.roomCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  deleteButton: {
+    flex: 1,
+    paddingVertical: verticalScale(6),
+    marginHorizontal: moderateScale(5),
+    borderRadius: moderateScale(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    backgroundColor: COLORS.primaryDark,
+    alignItems: "center",
+  },
+
+  deleteText: {
+    color: COLORS.white,
+    fontWeight: "500",
+  },
+  cancelButtonText: {
+    color: COLORS.textSecondary,
+    fontWeight: "500",
+  },
 
 });
 

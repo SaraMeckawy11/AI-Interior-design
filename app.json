@@ -42,21 +42,7 @@
       "expo-image-picker",
       "expo-media-library",
       "expo-file-system",
-      "expo-localization",
-      [
-        "react-native-fbsdk-next",
-        {
-          "appID": "1444289796874883",
-          "clientToken": "dbceb222dfc628cbebfe0169873866e5",
-          "displayName": "Livinai",
-          "scheme": "fb1444289796874883",
-          "advertiserIDCollectionEnabled": false,
-          "autoLogAppEventsEnabled": false,
-          "isAutoInitEnabled": true,
-          "iosUserTrackingPermission": "requestWhenInUseAuthorization"
-        }
-      ],    
-      "expo-tracking-transparency"
+      "expo-localization"
     ]
   }
 }

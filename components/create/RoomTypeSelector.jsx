@@ -3,19 +3,26 @@ import {
   Text,
   TouchableOpacity,
   TextInput,
-  Alert
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import React, { useState } from 'react';
 import styles from '../../assets/styles/create/room.styles';
 import { Ionicons } from '@expo/vector-icons';
 
 const MAX_VISIBLE_ICONS = 4;
+const MAX_CUSTOM_ROOMS = 1;
 
 const RoomTypeSelector = ({ roomType, setRoomType }) => {
   const [showAllRooms, setShowAllRooms] = useState(false);
   const [customRoomTypes, setCustomRoomTypes] = useState([]);
   const [manualRoomInput, setManualRoomInput] = useState('');
   const [showInputField, setShowInputField] = useState(false);
+
+  // Modal state
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState(null);
 
   const defaultRoomTypes = [
     'Living Room', 'Bedroom', 'Kitchen', 'Bathroom',
@@ -26,20 +33,14 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
 
   const allRoomTypes = [...defaultRoomTypes, ...customRoomTypes];
 
-  const isRoomTypeVisible = () => {
-    return allRoomTypes.slice(0, MAX_VISIBLE_ICONS).includes(roomType);
-  };
-
   const getVisibleRoomTypes = () => {
     const base = allRoomTypes.slice(0, MAX_VISIBLE_ICONS);
 
     if (!showAllRooms && roomType && !base.includes(roomType)) {
-      // Replace last visible item with the selected room
       const modified = [...base];
       modified[modified.length - 1] = roomType;
       return modified;
     }
-
     return showAllRooms ? allRoomTypes : base;
   };
 
@@ -66,20 +67,21 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
     }
   };
 
-  const MAX_CUSTOM_ROOMS = 1;
-
   const handleAddRoom = () => {
     const trimmed = manualRoomInput.trim();
-
     if (!trimmed) return;
 
     if (allRoomTypes.includes(trimmed)) {
-      alert("This room type already exists.");
+      setErrorMessage("This room type already exists.");
+      setShowErrorModal(true);
       return;
     }
 
     if (customRoomTypes.length >= MAX_CUSTOM_ROOMS) {
-      alert(`You've reached the maximum of ${MAX_CUSTOM_ROOMS} custom room types. Please delete one to add another.`);
+      setErrorMessage(
+        `You've reached the maximum of ${MAX_CUSTOM_ROOMS} custom room types. Please delete one to add another.`
+      );
+      setShowErrorModal(true);
       return;
     }
 
@@ -91,21 +93,15 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
   };
 
   const handleDeleteRoom = (room) => {
-    Alert.alert(
-      'Delete Room',
-      `Are you sure you want to delete "${room}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            setCustomRoomTypes((prev) => prev.filter((r) => r !== room));
-            if (roomType === room) setRoomType(null);
-          }
-        }
-      ]
-    );
+    setRoomToDelete(room);
+  };
+
+  const confirmDelete = () => {
+    if (roomToDelete) {
+      setCustomRoomTypes((prev) => prev.filter((r) => r !== roomToDelete));
+      if (roomType === roomToDelete) setRoomType(null);
+      setRoomToDelete(null);
+    }
   };
 
   return (
@@ -150,7 +146,7 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
           );
         })}
 
-        {showAllRooms && (
+        {showAllRooms && customRoomTypes.length < MAX_CUSTOM_ROOMS && (
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => setShowInputField(!showInputField)}
@@ -176,6 +172,67 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Error Modal */}
+      <Modal
+        transparent
+        visible={showErrorModal}
+        animationType="fade"
+        onRequestClose={() => setShowErrorModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowErrorModal(false)}>
+          <View style={styles.overlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.errorModalContainer}>
+                <Text style={styles.modalMessage}>{errorMessage}</Text>
+                <View style={styles.modalButtonRow}>
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => setShowErrorModal(false)}
+                  >
+                    <Text style={styles.deleteText}>OK</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        transparent
+        visible={!!roomToDelete}
+        animationType="fade"
+        onRequestClose={() => setRoomToDelete(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setRoomToDelete(null)}>
+          <View style={styles.overlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.errorModalContainer}>
+                <Text style={styles.modalTitle}>Delete Room</Text>
+                <Text style={styles.modalMessage}>
+                  Are you sure you want to delete "{roomToDelete}"?
+                </Text>
+                <View style={styles.modalButtonRow}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setRoomToDelete(null)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={confirmDelete}
+                  >
+                    <Text style={styles.deleteText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 };

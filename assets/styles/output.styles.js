@@ -98,11 +98,15 @@ modalButton: {
   paddingVertical: verticalScale(8),
   paddingHorizontal: moderateScale(24),
   borderRadius: moderateScale(20),
+  width: '100%',
+  alignItems: 'center',
+  justifyContent: 'center',
 },
 modalButtonText: {
   color: COLORS.cardBackground,
   fontSize: moderateScale(14),
   fontWeight: "600",
+
 },
 
 });
