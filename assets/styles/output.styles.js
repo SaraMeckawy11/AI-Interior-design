@@ -108,5 +108,32 @@ modalButtonText: {
   fontWeight: "600",
 
 },
+detailsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginBottom: verticalScale(16),
+  },
+  bookDetails: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    paddingHorizontal: moderateScale(16),
+    paddingVertical: moderateScale(8),
+  },
+  bookTitle: {
+    fontSize: moderateScale(15),
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 6,
+  },
+  caption: {
+    fontSize: moderateScale(13),
+    color: COLORS.textDark,
+    marginBottom: verticalScale(6),
+    lineHeight: verticalScale(16),
+  },
+  date: {
+    fontSize: moderateScale(11),
+    color: COLORS.textSecondary,
+  },
 
 });

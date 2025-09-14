@@ -175,7 +175,6 @@ export default function Create() {
 
   const handleSubmit = async () => {
     if (!roomType || !designStyle || !colorTone || !image) {
-      // Alert.alert('Error', 'Please fill in all fields');
       setShowMissingValueModal(true);
       return;
     }
@@ -225,7 +224,13 @@ export default function Create() {
       if (imageUri) {
         router.push({
           pathname: '/outputScreen',
-          params: { imageUri },
+           params: {
+            imageUri,
+            roomType,
+            designStyle,
+            colorTone,
+            createdAt: new Date().toISOString(), // or Date.now()
+          },
         });
       } else {
         Alert.alert('Error', 'No image URL received from the server.');

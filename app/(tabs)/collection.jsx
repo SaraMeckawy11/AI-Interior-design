@@ -111,7 +111,13 @@ export default function Collection() {
       style={styles.bookCard}
       onPress={() => router.push({
         pathname: '/outputScreen',
-        params: { imageUri: imageUri }
+         params: {
+            imageUri: imageUri,
+            roomType: item.roomType,
+            designStyle: item.designStyle,
+            colorTone: item.colorTone,
+            createdAt: item.createdAt,
+          },
       })}
 
     >

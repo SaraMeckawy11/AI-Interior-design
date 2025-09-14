@@ -10,6 +10,7 @@ import React, { useState } from 'react';
 import styles from '../../assets/styles/create/colorTone.styles';
 import { Ionicons } from '@expo/vector-icons';
 import ColorPicker from 'react-native-wheel-color-picker';
+import namer from 'color-namer';
 
 const baseColorTones = [
   { name: 'Ivory', color: '#FFFFF0' },
@@ -83,9 +84,9 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
       return;
     }
 
-    const newTone = { name: hexInput.toUpperCase(), color: hexInput };
+    const newTone = { name: getColorName(hexInput), color: hexInput };
     setCustomTones((prev) => [...prev, newTone]);
-    setColorTone(hexInput.toUpperCase());
+    setColorTone(newTone.name);
     setShowColorPicker(false);
     setShowAll(true);
   };
@@ -100,6 +101,15 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
 
     if (/^#([0-9A-F]{6}|[0-9A-F]{3})$/i.test(formatted)) {
       setSelectedColor(formatted);
+    }
+  };
+  
+  const getColorName = (hex) => {
+    try {
+      const names = namer(hex); 
+      return names.ntc[0].name; // e.g. "Tomato"
+    } catch {
+      return hex.toUpperCase(); // fallback
     }
   };
 
@@ -166,7 +176,7 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
           <View style={styles.overlay}>
             <TouchableWithoutFeedback>
               <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>Pick a Color</Text>
+                <Text style={styles.modalTitleP}>Pick a Color</Text>
 
                 <View style={styles.pickerWrapper}>
                   <ColorPicker
@@ -198,16 +208,21 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
                   />
                 </View>
 
-                <TouchableOpacity
-                  style={styles.doneButton}
-                  onPress={handleAddCustomTone}
-                >
-                  <Text style={styles.doneButtonText}>Add Color</Text>
-                </TouchableOpacity>
+                <View style={styles.modalButtonRowP}>
+                  <TouchableOpacity
+                  style={styles.cancelButton}
+                    onPress={() => setShowColorPicker(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => setShowColorPicker(false)}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </TouchableOpacity>
+                   <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={handleAddCustomTone}
+                  >
+                    <Text style={styles.deleteText}>Add Color</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </TouchableWithoutFeedback>
           </View>
