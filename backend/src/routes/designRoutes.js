@@ -25,12 +25,14 @@ router.post("/", isAuthenticated, async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user.isSubscribed && user.freeDesignsUsed >= 2) {
+    // ✅ Block only free users who exceeded quota
+    if (!user.isSubscribed && !user.isPremium && user.freeDesignsUsed >= 2) {
       return res.status(403).json({
         message: "Upgrade required",
         reason: "You have used your 2 free designs. Please upgrade to continue.",
       });
     }
+
 
     // 🖼 Upload original image
     const uploadedResponse = await cloudinary.uploader.upload(image);
@@ -84,8 +86,8 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     await newDesign.save();
 
-    // ➕ Increment freeDesignsUsed if not subscribed
-    if (!user.isSubscribed) {
+    // ➕ Increment freeDesignsUsed only for free users
+    if (!user.isSubscribed && !user.isPremium) {
       user.freeDesignsUsed += 1;
       await user.save();
     }
