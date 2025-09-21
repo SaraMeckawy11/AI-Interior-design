@@ -138,7 +138,7 @@ export default function Create() {
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.3,
+        quality: 1.0,
         base64: true,
       });
 
