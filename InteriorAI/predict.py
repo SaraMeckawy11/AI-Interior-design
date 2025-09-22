@@ -32,7 +32,7 @@ def get_canny_image(image, size=(768, 768)):
     image = cv2.resize(image, size)
     canny = cv2.Canny(image, 100, 200)
     canny_rgb = cv2.cvtColor(canny, cv2.COLOR_GRAY2RGB)
-    return Image.fromarray(canny_rgb)
+    return Image.fromarray(canny_rgb), canny
 
 
 # --- Helper: Decode base64 image safely ---
@@ -49,6 +49,21 @@ def decode_base64_image(base64_str):
     return img
 
 
+# --- Helper: Classify room for conditioning scale & seed only ---
+def classify_room(canny_edges):
+    edge_pixels = np.sum(canny_edges > 0)
+    total_pixels = canny_edges.size
+    edge_ratio = edge_pixels / total_pixels
+    print(f"Edge ratio: {edge_ratio:.4f}")
+
+    if edge_ratio < 0.04:
+        return "empty", 0.3, 576906284
+    elif edge_ratio < 0.07:
+        return "semi", 0.4, 576906284
+    else:
+        return "furnished", 0.5, 42
+
+
 # --- Predictor class for Cog ---
 class Predictor(BasePredictor):
     def predict(
@@ -57,9 +72,10 @@ class Predictor(BasePredictor):
         room_type: str = Input(default="living room"),
         design_style: str = Input(default="modern"),
         color_tone: str = Input(default="warm"),
-    ) -> dict:
+    ) -> str:
         """
         Replicate will call this function with the inputs.
+        Returns only a base64-encoded generated image.
         """
 
         prompt = (
@@ -76,18 +92,22 @@ class Predictor(BasePredictor):
             room_image = decode_base64_image(image)
             h, w = room_image.shape[:2]
             target_size = (768, 512) if w > h else (512, 768)
-            canny_image = get_canny_image(room_image, target_size)
+            canny_image, canny_edges = get_canny_image(room_image, target_size)
+
+            # get controlnet_scale and seed from classify_room
+            _, controlnet_scale, seed = classify_room(canny_edges)
+
         except Exception as e:
-            return {"error": f"Invalid image data: {e}"}
+            raise ValueError(f"Invalid image data: {e}")
 
         result = pipe(
             prompt=prompt,
             image=canny_image,
             num_inference_steps=30,
             guidance_scale=7.5,
-            controlnet_conditioning_scale=0.5,
+            controlnet_conditioning_scale=controlnet_scale,
             negative_prompt=negative_prompt,
-            generator=torch.manual_seed(42),
+            generator=torch.manual_seed(seed),
         )
 
         output_image = result.images[0]
@@ -95,10 +115,5 @@ class Predictor(BasePredictor):
         output_image.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        return {
-            "generatedImage": img_str,
-            "prompt": prompt,
-            "room_type": room_type,
-            "design_style": design_style,
-            "color_tone": color_tone,
-        }
+        # ✅ return only base64 (consistent with HF Space)
+        return img_str

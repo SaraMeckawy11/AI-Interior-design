@@ -53,7 +53,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     try {
       let prediction = await replicate.deployments.predictions.create(
         "sarameckawy11", // your Replicate username
-        "interio",       // your deployment name
+        "interi",       // your deployment name
         {
           input: {
             image_base64: imageBase64,
