@@ -26,6 +26,14 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
+# ✅ Memory optimizations
+pipe.enable_attention_slicing()
+pipe.enable_model_cpu_offload()
+try:
+    pipe.enable_xformers_memory_efficient_attention()
+except Exception as e:
+    print("[WARN] xFormers not available:", e)
+
 
 # --- Helper: Convert input image to Canny edges ---
 def get_canny_image(image, size=(768, 768)):
@@ -37,16 +45,20 @@ def get_canny_image(image, size=(768, 768)):
 
 # --- Helper: Decode base64 image safely ---
 def decode_base64_image(base64_str):
-    if base64_str.startswith("data:image"):
-        base64_str = base64_str.split(",")[1]
-    base64_str += "=" * (-len(base64_str) % 4)  # Fix padding
-    image_bytes = base64.b64decode(base64_str)
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("cv2.imdecode returned None")
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    return img
+    try:
+        if base64_str.startswith("data:image"):
+            base64_str = base64_str.split(",")[1]
+        base64_str += "=" * (-len(base64_str) % 4)  # Fix padding
+        image_bytes = base64.b64decode(base64_str)
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("cv2.imdecode returned None")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        print(f"[DEBUG] Decoded base64: {len(image_bytes)/1024:.2f} KB")
+        return img
+    except Exception as e:
+        raise ValueError(f"Failed to decode base64 image: {e}")
 
 
 # --- Helper: Classify room for conditioning scale & seed only ---
@@ -91,6 +103,14 @@ class Predictor(BasePredictor):
         try:
             room_image = decode_base64_image(image)
             h, w = room_image.shape[:2]
+
+            # ✅ Cap resolution to 768 max for Replicate stability
+            if max(h, w) > 768:
+                scale = 768 / max(h, w)
+                h, w = int(h * scale), int(w * scale)
+                room_image = cv2.resize(room_image, (w, h))
+                print(f"[DEBUG] Image resized → ({w}, {h})")
+
             target_size = (768, 512) if w > h else (512, 768)
             canny_image, canny_edges = get_canny_image(room_image, target_size)
 
@@ -100,15 +120,18 @@ class Predictor(BasePredictor):
         except Exception as e:
             raise ValueError(f"Invalid image data: {e}")
 
-        result = pipe(
-            prompt=prompt,
-            image=canny_image,
-            num_inference_steps=30,
-            guidance_scale=7.5,
-            controlnet_conditioning_scale=controlnet_scale,
-            negative_prompt=negative_prompt,
-            generator=torch.manual_seed(seed),
-        )
+        try:
+            result = pipe(
+                prompt=prompt,
+                image=canny_image,
+                num_inference_steps=25,   # ✅ lower for memory
+                guidance_scale=7.0,       # ✅ slightly lower
+                controlnet_conditioning_scale=controlnet_scale,
+                negative_prompt=negative_prompt,
+                generator=torch.manual_seed(seed),
+            )
+        except Exception as e:
+            raise RuntimeError(f"Pipeline failed: {e}")
 
         output_image = result.images[0]
         buffered = io.BytesIO()
