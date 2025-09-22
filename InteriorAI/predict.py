@@ -8,30 +8,24 @@ import io
 import base64
 import traceback
 
-# --- Device and dtype setup ---
+# --- Device setup ---
 use_cuda = torch.cuda.is_available()
 device = "cuda" if use_cuda else "cpu"
-dtype = torch.float16 if use_cuda else torch.float32
 
-def print_vram(tag=""):
-    if torch.cuda.is_available():
-        allocated = torch.cuda.memory_allocated() / 1024**2
-        reserved = torch.cuda.memory_reserved() / 1024**2
-        print(f"[VRAM {tag}] Allocated: {allocated:.2f} MB | Reserved: {reserved:.2f} MB")
-
-# --- Load ControlNet and Stable Diffusion Pipeline ---
+# --- Load ControlNet ---
 print("[INIT] Loading models...")
+controlnet = ControlNetModel.from_pretrained(
+    "lllyasviel/control_v11p_sd15_canny",
+    torch_dtype=torch.float32   # 🔒 force fp32
+).to(device)
 
-try:
-    controlnet = ControlNetModel.from_pretrained(
-        "lllyasviel/control_v11p_sd15_canny",
-        torch_dtype=torch.float16
-    ).to(device)
 
+def init_pipe(dtype=torch.float32):
+    print(f"[INIT] Loading pipeline with dtype={dtype}...")
     pipe = StableDiffusionControlNetPipeline.from_pretrained(
         "Lykon/dreamshaper-8",
         controlnet=controlnet,
-        torch_dtype=torch.float16,
+        torch_dtype=dtype,
         safety_checker=None
     ).to(device)
 
@@ -43,11 +37,16 @@ try:
     except Exception as e:
         print(f"[INIT] Could not enable xFormers: {e}")
 
-    print_vram("after model load")
+    # ✅ VRAM saving
+    pipe.enable_attention_slicing()
+    pipe.enable_sequential_cpu_offload()
 
-except Exception as e:
-    print("[ERROR] during model init:", traceback.format_exc())
-    raise
+    return pipe
+
+
+# 🚀 Initialize once in fp32
+pipe = init_pipe(torch.float32)
+
 
 # --- Helper: Convert input image to Canny edges ---
 def get_canny_image(image, size=(768, 768)):
@@ -55,6 +54,7 @@ def get_canny_image(image, size=(768, 768)):
     canny = cv2.Canny(image, 100, 200)
     canny_rgb = cv2.cvtColor(canny, cv2.COLOR_GRAY2RGB)
     return Image.fromarray(canny_rgb), canny
+
 
 # --- Helper: Decode base64 image safely ---
 def decode_base64_image(base64_str):
@@ -69,6 +69,7 @@ def decode_base64_image(base64_str):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return img
 
+
 # --- Helper: Classify room ---
 def classify_room(canny_edges):
     edge_pixels = np.sum(canny_edges > 0)
@@ -82,6 +83,7 @@ def classify_room(canny_edges):
         return "semi", 0.4, 576906284
     else:
         return "furnished", 0.5, 42
+
 
 # --- Predictor class for Cog ---
 class Predictor(BasePredictor):
@@ -114,38 +116,31 @@ class Predictor(BasePredictor):
             _, controlnet_scale, seed = classify_room(canny_edges)
 
         except Exception as e:
-            print("[ERROR] during preprocessing:", traceback.format_exc())
-            raise
+            raise ValueError(f"Invalid image data: {e}")
 
+        # --- Run generation ---
+        global pipe
         try:
-            print_vram("before pipe")
-            print("[DEBUG] Starting generation...")
+            print("[DEBUG] Starting generation (fp32)...")
             torch.cuda.empty_cache()
-
             result = pipe(
                 prompt=prompt,
-                image=canny_image.resize((512, 512)),  # ✅ fixed 512
+                image=canny_image.resize((512, 512)),  # fixed size
                 num_inference_steps=20,
                 guidance_scale=7.0,
                 controlnet_conditioning_scale=controlnet_scale,
                 negative_prompt=negative_prompt,
                 generator=torch.manual_seed(seed),
             )
-
-            print("[DEBUG] Generation done.")
-            print_vram("after pipe")
-
         except Exception as e:
-            print("[ERROR] inside pipe:", traceback.format_exc())
+            print(f"[ERROR] Generation failed: {traceback.format_exc()}")
             raise
 
-        try:
-            output_image = result.images[0]
-            buffered = io.BytesIO()
-            output_image.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            print("[DEBUG] Encoding output done.")
-            return img_str
-        except Exception as e:
-            print("[ERROR] during output encoding:", traceback.format_exc())
-            raise
+        print("[DEBUG] Generation done.")
+
+        output_image = result.images[0]
+        buffered = io.BytesIO()
+        output_image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+        return img_str
