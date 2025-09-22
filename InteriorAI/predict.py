@@ -26,13 +26,13 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
-# ✅ Memory optimizations
-pipe.enable_attention_slicing()
-pipe.enable_model_cpu_offload()
-try:
-    pipe.enable_xformers_memory_efficient_attention()
-except Exception as e:
-    print("[WARN] xFormers not available:", e)
+
+# --- VRAM logger ---
+def log_vram(stage=""):
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**2
+        reserved = torch.cuda.memory_reserved() / 1024**2
+        print(f"[VRAM] {stage} - Allocated: {allocated:.2f} MB | Reserved: {reserved:.2f} MB")
 
 
 # --- Helper: Convert input image to Canny edges ---
@@ -58,7 +58,7 @@ def decode_base64_image(base64_str):
         print(f"[DEBUG] Decoded base64: {len(image_bytes)/1024:.2f} KB")
         return img
     except Exception as e:
-        raise ValueError(f"Failed to decode base64 image: {e}")
+        raise ValueError(f"Base64 decode failed: {e}")
 
 
 # --- Helper: Classify room for conditioning scale & seed only ---
@@ -103,15 +103,8 @@ class Predictor(BasePredictor):
         try:
             room_image = decode_base64_image(image)
             h, w = room_image.shape[:2]
-
-            # ✅ Cap resolution to 768 max for Replicate stability
-            if max(h, w) > 768:
-                scale = 768 / max(h, w)
-                h, w = int(h * scale), int(w * scale)
-                room_image = cv2.resize(room_image, (w, h))
-                print(f"[DEBUG] Image resized → ({w}, {h})")
-
             target_size = (768, 512) if w > h else (512, 768)
+            print(f"[DEBUG] Image resized → {target_size}")
             canny_image, canny_edges = get_canny_image(room_image, target_size)
 
             # get controlnet_scale and seed from classify_room
@@ -121,22 +114,31 @@ class Predictor(BasePredictor):
             raise ValueError(f"Invalid image data: {e}")
 
         try:
+            log_vram("before pipe")
+
             result = pipe(
                 prompt=prompt,
-                image=canny_image,
-                num_inference_steps=25,   # ✅ lower for memory
-                guidance_scale=7.0,       # ✅ slightly lower
+                image=canny_image.resize((512, 512)),  # ✅ forced size
+                num_inference_steps=20,                # ✅ reduced steps
+                guidance_scale=7.0,
                 controlnet_conditioning_scale=controlnet_scale,
                 negative_prompt=negative_prompt,
                 generator=torch.manual_seed(seed),
             )
+
+            log_vram("after pipe")
+
+            output_image = result.images[0]
+            buffered = io.BytesIO()
+            output_image.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+            return img_str
+
         except Exception as e:
+            log_vram("on error")
             raise RuntimeError(f"Pipeline failed: {e}")
 
-        output_image = result.images[0]
-        buffered = io.BytesIO()
-        output_image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-        # ✅ return only base64 (consistent with HF Space)
-        return img_str
+        finally:
+            torch.cuda.empty_cache()
+            log_vram("after cleanup")
