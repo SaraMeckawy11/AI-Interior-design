@@ -6,46 +6,25 @@ import cv2
 import numpy as np
 import io
 import base64
-import traceback
 
-# --- Device setup ---
+# --- Device and dtype setup ---
 use_cuda = torch.cuda.is_available()
+dtype = torch.float16 if use_cuda else torch.float32
 device = "cuda" if use_cuda else "cpu"
 
-# --- Load ControlNet ---
-print("[INIT] Loading models...")
+# --- Load ControlNet and Stable Diffusion Pipeline ---
 controlnet = ControlNetModel.from_pretrained(
-    "lllyasviel/control_v11p_sd15_canny",
-    torch_dtype=torch.float32   # 🔒 force fp32
+    "lllyasviel/control_v11p_sd15_canny", torch_dtype=dtype
+)
+
+pipe = StableDiffusionControlNetPipeline.from_pretrained(
+    "Lykon/dreamshaper-8",
+    controlnet=controlnet,
+    torch_dtype=dtype,
+    safety_checker=None
 ).to(device)
 
-
-def init_pipe(dtype=torch.float32):
-    print(f"[INIT] Loading pipeline with dtype={dtype}...")
-    pipe = StableDiffusionControlNetPipeline.from_pretrained(
-        "Lykon/dreamshaper-8",
-        controlnet=controlnet,
-        torch_dtype=dtype,
-        safety_checker=None
-    ).to(device)
-
-    pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-
-    try:
-        pipe.enable_xformers_memory_efficient_attention()
-        print("[INIT] xFormers enabled.")
-    except Exception as e:
-        print(f"[INIT] Could not enable xFormers: {e}")
-
-    # ✅ VRAM saving
-    pipe.enable_attention_slicing()
-    pipe.enable_sequential_cpu_offload()
-
-    return pipe
-
-
-# 🚀 Initialize once in fp32
-pipe = init_pipe(torch.float32)
+pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
 
 # --- Helper: Convert input image to Canny edges ---
@@ -70,12 +49,12 @@ def decode_base64_image(base64_str):
     return img
 
 
-# --- Helper: Classify room ---
+# --- Helper: Classify room for conditioning scale & seed only ---
 def classify_room(canny_edges):
     edge_pixels = np.sum(canny_edges > 0)
     total_pixels = canny_edges.size
     edge_ratio = edge_pixels / total_pixels
-    print(f"[DEBUG] Edge ratio: {edge_ratio:.4f}")
+    print(f"Edge ratio: {edge_ratio:.4f}")
 
     if edge_ratio < 0.04:
         return "empty", 0.3, 576906284
@@ -94,6 +73,10 @@ class Predictor(BasePredictor):
         design_style: str = Input(default="modern"),
         color_tone: str = Input(default="warm"),
     ) -> str:
+        """
+        Replicate will call this function with the inputs.
+        Returns only a base64-encoded generated image.
+        """
 
         prompt = (
             f"A {design_style} {room_type} interior with {color_tone} tones, "
@@ -106,41 +89,31 @@ class Predictor(BasePredictor):
         )
 
         try:
-            print("[DEBUG] Decoding base64...")
             room_image = decode_base64_image(image)
             h, w = room_image.shape[:2]
             target_size = (768, 512) if w > h else (512, 768)
-            print(f"[DEBUG] Image resized → {target_size}")
             canny_image, canny_edges = get_canny_image(room_image, target_size)
 
+            # get controlnet_scale and seed from classify_room
             _, controlnet_scale, seed = classify_room(canny_edges)
 
         except Exception as e:
             raise ValueError(f"Invalid image data: {e}")
 
-        # --- Run generation ---
-        global pipe
-        try:
-            print("[DEBUG] Starting generation (fp32)...")
-            torch.cuda.empty_cache()
-            result = pipe(
-                prompt=prompt,
-                image=canny_image.resize((512, 512)),  # fixed size
-                num_inference_steps=20,
-                guidance_scale=7.0,
-                controlnet_conditioning_scale=controlnet_scale,
-                negative_prompt=negative_prompt,
-                generator=torch.manual_seed(seed),
-            )
-        except Exception as e:
-            print(f"[ERROR] Generation failed: {traceback.format_exc()}")
-            raise
-
-        print("[DEBUG] Generation done.")
+        result = pipe(
+            prompt=prompt,
+            image=canny_image,
+            num_inference_steps=30,
+            guidance_scale=7.5,
+            controlnet_conditioning_scale=controlnet_scale,
+            negative_prompt=negative_prompt,
+            generator=torch.manual_seed(seed),
+        )
 
         output_image = result.images[0]
         buffered = io.BytesIO()
         output_image.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+        # ✅ return only base64 (consistent with HF Space)
         return img_str
