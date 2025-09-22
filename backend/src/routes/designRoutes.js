@@ -4,8 +4,14 @@ import cloudinary from "../lib/cloudinary.js";
 import Design from "../models/Design.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
+import Replicate from "replicate";
 
 const router = express.Router();
+
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
+});
+
 
 async function getImageBase64FromUrl(url) {
   const response = await axios.get(url, { responseType: "arraybuffer" });
@@ -33,7 +39,6 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-
     // 🖼 Upload original image
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
@@ -41,34 +46,44 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
-    // 🤖 Call AI generation API
-    let generatedImageBase64;
-    try {
-      const aiResponse = await axios.post(`https://SaraMeckawy-Interior.hf.space/generate`, {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-      });
-      generatedImageBase64 = aiResponse.data.generatedImage;
-    } catch (err) {
-      console.error("AI server error:", err.response?.data || err.message);
-      return res.status(err.response?.status || 500).json({
-        message: err.response?.data?.message || "AI server error",
-      });
-    }
-
-    // 🖼 Upload AI-generated image
+    // 🤖 Call Replicate deployment
     let generatedImageUrl = null;
     let generatedImagePublicId = null;
 
-    if (generatedImageBase64) {
-      const dataUri = `data:image/png;base64,${generatedImageBase64}`;
-      const generatedResponse = await cloudinary.uploader.upload(dataUri, {
-        folder: "generated_images",
+    try {
+      let prediction = await replicate.deployments.predictions.create(
+        "sarameckawy11", // your Replicate username
+        "interio",       // your deployment name
+        {
+          input: {
+            image_base64: imageBase64,
+            room_type: roomType,
+            design_style: designStyle,
+            color_tone: colorTone,
+            prompt: customPrompt || ""   // optional
+          }
+        }
+      );
+
+      prediction = await replicate.wait(prediction);
+
+      // Replicate output = base64 string
+      const generatedImageBase64 = prediction.output;
+
+      if (generatedImageBase64) {
+        const dataUri = `data:image/png;base64,${generatedImageBase64}`;
+        const generatedResponse = await cloudinary.uploader.upload(dataUri, {
+          folder: "generated_images",
+        });
+        generatedImageUrl = generatedResponse.secure_url;
+        generatedImagePublicId = generatedResponse.public_id;
+      }
+    } catch (err) {
+      console.error("Replicate API error:", err);
+      return res.status(500).json({
+        message: "AI generation failed",
+        error: err.message,
       });
-      generatedImageUrl = generatedResponse.secure_url;
-      generatedImagePublicId = generatedResponse.public_id;
     }
 
     // 💾 Save design to DB
@@ -104,6 +119,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     res.status(500).json({ message: error.message || "Something went wrong" });
   }
 });
+
 
 router.get("/", isAuthenticated, async (req, res) => {
   try {
