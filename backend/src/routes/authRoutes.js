@@ -7,13 +7,12 @@ import { sendToken } from "../../utils/sendToken.js";
 
 const router = express.Router();
 
-
 // ✅ Signup with email + password
 router.post("/signup", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { username, email, password } = req.body; // 👈 changed from name → username
 
-    if (!name || !email || !password) {
+    if (!username || !email || !password) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
@@ -25,10 +24,10 @@ router.post("/signup", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({
-      name,
+      username, // 👈 schema requires username
       email,
       password: hashedPassword,
-      avatar: "",
+      profileImage: "", // 👈 matches schema field
     });
 
     await sendToken(user, res);
@@ -38,8 +37,7 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-
-// ✅ Login with email + password
+// ✅ Login with email + password OR Google
 router.post("/login", async (req, res) => {
   try {
     const { email, password, signedToken } = req.body;
@@ -60,9 +58,9 @@ router.post("/login", async (req, res) => {
       let user = await User.findOne({ email: data.email });
       if (!user) {
         user = await User.create({
-          name: data.name || "Unnamed",
+          username: data.username || data.name || "user" + Date.now(), // 👈 fallback for Google
           email: data.email,
-          avatar: data.avatar || "",
+          profileImage: data.avatar || "",
         });
       }
 
@@ -90,7 +88,6 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
-
 
 // ✅ Get Logged-In User
 router.get("/me", isAuthenticated, async (req, res) => {

@@ -8,8 +8,8 @@ export const useAuthStore = create((set) => ({
   isLoading: false,
   isCheckingAuth: true,
 
-  // ✅ Login with Google (your existing flow)
-  login: async (googleUser, idToken) => {
+  // ✅ Login with Google
+  loginGoogle: async (googleUser, idToken) => {
     try {
       set({ isLoading: true });
 
@@ -60,13 +60,13 @@ export const useAuthStore = create((set) => ({
   },
 
   // ✅ Signup with email + password
-  signupWithEmail: async (name, email, password) => {
+  signupWithEmail: async (username, email, password) => {
     try {
       set({ isLoading: true });
 
       const res = await axios.post(
         `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/signup`,
-        { name, email, password }
+        { username, email, password }
       );
 
       const { user, accessToken } = res.data;
@@ -87,9 +87,10 @@ export const useAuthStore = create((set) => ({
     }
   },
 
+  // ✅ Aliases (shortcuts)
   register: (...args) => useAuthStore.getState().signupWithEmail(...args),
   signup: (...args) => useAuthStore.getState().signupWithEmail(...args),
-
+  login: (...args) => useAuthStore.getState().loginWithEmail(...args), // 🔹 added alias
 
   // ✅ Check persisted login
   checkAuth: async () => {
