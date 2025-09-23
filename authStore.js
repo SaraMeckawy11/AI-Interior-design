@@ -19,12 +19,17 @@ export const useAuthStore = create((set) => ({
         return;
       }
 
+      const normalizedUser = {
+        ...googleUser,
+        username: googleUser.name || googleUser.username || "user" + Date.now(),
+      };
+
       await AsyncStorage.multiSet([
-        ["user", JSON.stringify(googleUser)],
+        ["user", JSON.stringify(normalizedUser)],
         ["token", idToken],
       ]);
 
-      set({ user: googleUser, token: idToken, isLoading: false });
+      set({ user: normalizedUser, token: idToken, isLoading: false });
     } catch (error) {
       console.error("Google login error:", error);
       set({ isLoading: false });
@@ -45,12 +50,17 @@ export const useAuthStore = create((set) => ({
 
       if (!accessToken) throw new Error("No token received");
 
+      const normalizedUser = {
+        ...user,
+        username: user.username || user.name || "user" + Date.now(),
+      };
+
       await AsyncStorage.multiSet([
-        ["user", JSON.stringify(user)],
+        ["user", JSON.stringify(normalizedUser)],
         ["token", accessToken],
       ]);
 
-      set({ user, token: accessToken, isLoading: false });
+      set({ user: normalizedUser, token: accessToken, isLoading: false });
       return { success: true };
     } catch (error) {
       console.error("Email login error:", error.response?.data || error.message);
@@ -73,12 +83,17 @@ export const useAuthStore = create((set) => ({
 
       if (!accessToken) throw new Error("No token received");
 
+      const normalizedUser = {
+        ...user,
+        username: user.username || user.name || username || "user" + Date.now(),
+      };
+
       await AsyncStorage.multiSet([
-        ["user", JSON.stringify(user)],
+        ["user", JSON.stringify(normalizedUser)],
         ["token", accessToken],
       ]);
 
-      set({ user, token: accessToken, isLoading: false });
+      set({ user: normalizedUser, token: accessToken, isLoading: false });
       return { success: true };
     } catch (error) {
       console.error("Signup error:", error.response?.data || error.message);
@@ -90,7 +105,7 @@ export const useAuthStore = create((set) => ({
   // ✅ Aliases (shortcuts)
   register: (...args) => useAuthStore.getState().signupWithEmail(...args),
   signup: (...args) => useAuthStore.getState().signupWithEmail(...args),
-  login: (...args) => useAuthStore.getState().loginWithEmail(...args), // 🔹 added alias
+  login: (...args) => useAuthStore.getState().loginWithEmail(...args),
 
   // ✅ Check persisted login
   checkAuth: async () => {
@@ -124,3 +139,4 @@ export const useAuthStore = create((set) => ({
     return token;
   },
 }));
+

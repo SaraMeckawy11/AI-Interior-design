@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from "react";
 import {
-  View,
-  Text,
-  Pressable,
-  Platform,
-  Image,
-  TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity, Pressable,
+  Platform, Modal, Image
 } from "react-native";
+import { scale, verticalScale } from "react-native-size-matters";
+import { fontSizes, windowWidth } from "@/themes/app.constant";
 import { BlurView } from "expo-blur";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import JWT from "expo-jwt";
@@ -20,7 +18,7 @@ import COLORS from "@/constants/colors";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
-  const login = useAuthStore((state) => state.login);
+  const loginGoogle = useAuthStore((state) => state.loginGoogle);
   const [isLogin, setIsLogin] = useState(true); // ✅ toggle
 
   const configureGoogleSignIn = () => {
@@ -52,7 +50,7 @@ export default function AuthModal({ setModalVisible }) {
       );
 
       const accessToken = res.data.accessToken;
-      await login(user, accessToken);
+      await loginGoogle(user, accessToken);
 
       setModalVisible(false);
       router.push("/create");
@@ -81,53 +79,104 @@ export default function AuthModal({ setModalVisible }) {
   };
 
   return (
-    <BlurView intensity={100} tint="dark" style={styles.overlay}>
-      <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation?.()}>
-        <Text style={styles.title}>
-          {isLogin ? "LIVINAI" : "Join to LIVINAI"}
+    <BlurView
+      intensity={100}
+      tint="dark"
+      style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+    >
+      <Pressable
+        style={{
+          width: scale(320),
+          height: verticalScale(160),
+          backgroundColor: "#fff",
+          borderRadius: 24,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+        onPress={(e) => e.stopPropagation?.()}
+      >
+        <Text style={{
+          fontSize: 24,
+          marginTop: 16,
+          fontFamily: "Poppins_500Medium",
+        }}>
+          Join to LIVINAI
         </Text>
-        <Text style={styles.subtitle}>
-          {isLogin
-            ? "Log in to continue"
-            : "It's easier than your imagination!"}
+        <Text style={{
+          fontSize: fontSizes.FONT17,
+          paddingTop: verticalScale(4),
+          fontFamily: "Poppins_300Light",
+        }}>
+          It's easier than your imagination!
         </Text>
-
-        {/* ✅ Toggle between Login and Signup */}
-        {isLogin ? (
-          <LoginForm setModalVisible={setModalVisible} />
-        ) : (
-          <SignupForm setModalVisible={setModalVisible} />
-        )}
-
-        {/* Switcher */}
-        <View style={{ marginTop: 12, flexDirection: "row" }}>
-          <Text style={{ color: "#555" }}>
-            {isLogin ? "Don’t have an account? " : "Already have an account? "}
-          </Text>
-          <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
-            <Text style={{ color: COLORS.primaryDark, fontWeight: "600" }}>
-              {isLogin ? "Sign Up" : "Login"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Divider */}
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Google Sign-in */}
-        <View style={styles.googleContainer}>
+        
+        <View style={{
+          paddingVertical: scale(24),
+          flexDirection: "row",
+          gap: windowWidth(24),
+        }}>
           <Pressable onPress={handleGoogleSignIn}>
             <Image
               source={require("@/assets/images/onboarding/google.png")}
-              style={styles.googleIcon}
+              style={{
+                width: scale(32),
+                height: scale(32),
+                resizeMode: "contain",
+              }}
             />
           </Pressable>
         </View>
       </Pressable>
     </BlurView>
+
+     // <BlurView intensity={100} tint="dark" style={styles.overlay}>
+    //   <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation?.()}>
+    //     <Text style={styles.title}>
+    //       {isLogin ? "LIVINAI" : "Join to LIVINAI"}
+    //     </Text>
+    //     <Text style={styles.subtitle}>
+    //       {isLogin
+    //         ? "Log in to continue"
+    //         : "It's easier than your imagination!"}
+    //     </Text>
+
+    //     {/* ✅ Toggle between Login and Signup */}
+    //     {isLogin ? (
+    //       <LoginForm setModalVisible={setModalVisible} />
+    //     ) : (
+    //       <SignupForm setModalVisible={setModalVisible} />
+    //     )}
+
+    //     {/* Switcher */}
+    //     <View style={{ marginTop: 12, flexDirection: "row" }}>
+    //       <Text style={{ color: "#555" }}>
+    //         {isLogin ? "Don’t have an account? " : "Already have an account? "}
+    //       </Text>
+    //       <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
+    //         <Text style={{ color: COLORS.primaryDark, fontWeight: "600" }}>
+    //           {isLogin ? "Sign Up" : "Login"}
+    //         </Text>
+    //       </TouchableOpacity>
+    //     </View>
+
+    //     {/* Divider */}
+    //     <View style={styles.divider}>
+    //       <View style={styles.dividerLine} />
+    //       <Text style={styles.dividerText}>OR</Text>
+    //       <View style={styles.dividerLine} />
+    //     </View>
+
+    //     {/* Google Sign-in */}
+    //     <View style={styles.googleContainer}>
+    //       <Pressable onPress={handleGoogleSignIn}>
+    //         <Image
+    //           source={require("@/assets/images/onboarding/google.png")}
+    //           style={styles.googleIcon}
+    //         />
+    //       </Pressable>
+    //     </View>
+    //   </Pressable>
+    // </BlurView>
+    
   );
 }

@@ -8,15 +8,18 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";  // ✅ import router
 import { useAuthStore } from "../../authStore";
-import styles from "../../assets/styles/authModal.styles"; // reuse same styles
+import styles from "../../assets/styles/authModal.styles";
 import COLORS from "../../constants/colors";
 
 export default function LoginForm({ setModalVisible }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
   const { isLoading, login } = useAuthStore();
+  const router = useRouter(); // ✅ initialize router
 
   const handleLogin = async () => {
     const result = await login(email, password);
@@ -25,6 +28,7 @@ export default function LoginForm({ setModalVisible }) {
       return;
     }
     setModalVisible(false);
+    router.push("/create"); // ✅ redirect after login
   };
 
   return (
@@ -76,7 +80,7 @@ export default function LoginForm({ setModalVisible }) {
         </TouchableOpacity>
       </View>
 
-      {/* Login Button (no gradient) */}
+      {/* Login Button */}
       <TouchableOpacity
         onPress={handleLogin}
         disabled={isLoading}
