@@ -10,7 +10,7 @@ const router = express.Router();
 // ✅ Signup with email + password
 router.post("/signup", async (req, res) => {
   try {
-    const { username, email, password } = req.body; // 👈 changed from name → username
+    const { username, email, password } = req.body; // 👈 expect username
 
     if (!username || !email || !password) {
       return res.status(400).json({ success: false, message: "All fields are required" });
@@ -21,13 +21,12 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ success: false, message: "User already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
+    // ❌ don't hash here, schema will hash automatically
     const user = await User.create({
-      username, // 👈 schema requires username
+      username,
       email,
-      password: hashedPassword,
-      profileImage: "", // 👈 matches schema field
+      password,       // raw password → will be hashed by schema
+      profileImage: "",
     });
 
     await sendToken(user, res);
@@ -58,7 +57,7 @@ router.post("/login", async (req, res) => {
       let user = await User.findOne({ email: data.email });
       if (!user) {
         user = await User.create({
-          username: data.username || data.name || "user" + Date.now(), // 👈 fallback for Google
+          username: data.username || data.name || "user" + Date.now(), // 👈 always set username
           email: data.email,
           profileImage: data.avatar || "",
         });
