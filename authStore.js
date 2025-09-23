@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "axios";
 
 export const useAuthStore = create((set) => ({
   user: null,
@@ -7,36 +8,90 @@ export const useAuthStore = create((set) => ({
   isLoading: false,
   isCheckingAuth: true,
 
-  // Login and persist data
+  // ✅ Login with Google (your existing flow)
   login: async (googleUser, idToken) => {
     try {
       set({ isLoading: true });
 
-      // Validate token format
       if (!idToken || typeof idToken !== "string" || idToken.split(".").length !== 3) {
         console.error("Invalid JWT token format:", idToken);
         set({ isLoading: false });
         return;
       }
 
-      // Save to storage
       await AsyncStorage.multiSet([
         ["user", JSON.stringify(googleUser)],
         ["token", idToken],
       ]);
 
-      set({
-        user: googleUser,
-        token: idToken,
-        isLoading: false,
-      });
+      set({ user: googleUser, token: idToken, isLoading: false });
     } catch (error) {
-      console.error("Login error:", error);
+      console.error("Google login error:", error);
       set({ isLoading: false });
     }
   },
 
-  // Check if user is already logged in
+  // ✅ Login with email + password
+  loginWithEmail: async (email, password) => {
+    try {
+      set({ isLoading: true });
+
+      const res = await axios.post(
+        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/login`,
+        { email, password }
+      );
+
+      const { user, accessToken } = res.data;
+
+      if (!accessToken) throw new Error("No token received");
+
+      await AsyncStorage.multiSet([
+        ["user", JSON.stringify(user)],
+        ["token", accessToken],
+      ]);
+
+      set({ user, token: accessToken, isLoading: false });
+      return { success: true };
+    } catch (error) {
+      console.error("Email login error:", error.response?.data || error.message);
+      set({ isLoading: false });
+      return { success: false, error: error.response?.data?.message || "Login failed" };
+    }
+  },
+
+  // ✅ Signup with email + password
+  signupWithEmail: async (name, email, password) => {
+    try {
+      set({ isLoading: true });
+
+      const res = await axios.post(
+        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/signup`,
+        { name, email, password }
+      );
+
+      const { user, accessToken } = res.data;
+
+      if (!accessToken) throw new Error("No token received");
+
+      await AsyncStorage.multiSet([
+        ["user", JSON.stringify(user)],
+        ["token", accessToken],
+      ]);
+
+      set({ user, token: accessToken, isLoading: false });
+      return { success: true };
+    } catch (error) {
+      console.error("Signup error:", error.response?.data || error.message);
+      set({ isLoading: false });
+      return { success: false, error: error.response?.data?.message || "Signup failed" };
+    }
+  },
+
+  register: (...args) => useAuthStore.getState().signupWithEmail(...args),
+  signup: (...args) => useAuthStore.getState().signupWithEmail(...args),
+
+
+  // ✅ Check persisted login
   checkAuth: async () => {
     try {
       const [token, userJson] = await AsyncStorage.multiGet(["token", "user"]);
@@ -52,20 +107,19 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  // Clear session
+  // ✅ Logout
   logout: async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user"]);
-      console.log("Logged out: token and user removed");
       set({ token: null, user: null });
     } catch (error) {
       console.error("Logout error:", error);
     }
   },
 
-  // Optional: expose token getter
+  // Getter
   getToken: () => {
     const { token } = useAuthStore.getState();
     return token;
   },
-}))
+}));

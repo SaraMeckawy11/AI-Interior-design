@@ -1,65 +1,101 @@
 import express from "express";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { sendToken } from "../../utils/sendToken.js";
 
 const router = express.Router();
 
-// Login Route
-router.post("/login", async (req, res) => {
+
+// ✅ Signup with email + password
+router.post("/signup", async (req, res) => {
   try {
-    const { signedToken } = req.body;
+    const { name, email, password } = req.body;
 
-    if (!signedToken) {
-      console.log("No token provided");
-      return res.status(400).json({ success: false, message: "No token provided" });
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    console.log("Received signedToken:", signedToken);
-
-    let data;
-    try {
-      data = jwt.verify(signedToken, process.env.JWT_SECRET);
-      console.log("Decoded token data:", data);
-    } catch (err) {
-      console.log("JWT verification failed:", err.message);
-      return res.status(401).json({ success: false, message: "Invalid token" });
+    let existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "User already exists" });
     }
 
-    if (!data.email) {
-      console.log("Decoded token missing email");
-      return res.status(400).json({ success: false, message: "Missing email in token" });
-    }
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    let user = await User.findOne({ email: data.email });
-    if (user) {
-      console.log("User found:", user.email);
-    } else {
-      console.log("Creating new user...");
-      user = await User.create({
-          username: data.name || "user" + Date.now(),  // add a fallback
-        name: data.name || "Unnamed",
-        email: data.email,
-        avatar: data.avatar || "",
-      });
-      console.log("New user created:", user.email);
-    }
+    const user = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      avatar: "",
+    });
 
     await sendToken(user, res);
-
   } catch (error) {
-    console.error("Unhandled login error:", error);
+    console.error("Signup error:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
 
-// Get Logged-In User
+// ✅ Login with email + password
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password, signedToken } = req.body;
+
+    // 🔹 Case 1: Google login with signedToken
+    if (signedToken) {
+      let data;
+      try {
+        data = jwt.verify(signedToken, process.env.JWT_SECRET);
+      } catch (err) {
+        return res.status(401).json({ success: false, message: "Invalid Google token" });
+      }
+
+      if (!data.email) {
+        return res.status(400).json({ success: false, message: "Missing email in Google token" });
+      }
+
+      let user = await User.findOne({ email: data.email });
+      if (!user) {
+        user = await User.create({
+          name: data.name || "Unnamed",
+          email: data.email,
+          avatar: data.avatar || "",
+        });
+      }
+
+      return sendToken(user, res);
+    }
+
+    // 🔹 Case 2: Normal email+password login
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password required" });
+    }
+
+    const user = await User.findOne({ email }).select("+password");
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Invalid credentials" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Invalid credentials" });
+    }
+
+    await sendToken(user, res);
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+
+// ✅ Get Logged-In User
 router.get("/me", isAuthenticated, async (req, res) => {
   try {
-    const user = req.user;
-    res.status(200).json({ success: true, user });
+    res.status(200).json({ success: true, user: req.user });
   } catch (error) {
     console.error("Me route error:", error);
     res.status(500).json({ message: "Internal server error" });

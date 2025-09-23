@@ -1,21 +1,27 @@
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, Pressable,
-  Platform, Modal, Image
+  View,
+  Text,
+  Pressable,
+  Platform,
+  Image,
+  TouchableOpacity,
 } from "react-native";
-import { scale, verticalScale } from "react-native-size-matters";
-import { fontSizes, windowWidth } from "@/themes/app.constant";
 import { BlurView } from "expo-blur";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import JWT from "expo-jwt";
 import axios from "axios";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "../../authStore";
-import { requestTrackingPermissionAsync } from 'expo-tracking-transparency';
+import SignupForm from "./signup";
+import LoginForm from "./login"; // ✅ new component
+import styles from "../../assets/styles/authModal.styles";
+import COLORS from "@/constants/colors";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
   const login = useAuthStore((state) => state.login);
+  const [isLogin, setIsLogin] = useState(true); // ✅ toggle
 
   const configureGoogleSignIn = () => {
     if (Platform.OS === "ios") {
@@ -30,7 +36,6 @@ export default function AuthModal({ setModalVisible }) {
     }
   };
 
-
   useEffect(() => {
     configureGoogleSignIn();
   }, []);
@@ -41,13 +46,12 @@ export default function AuthModal({ setModalVisible }) {
       const user = { name, email, avatar };
       const signedToken = JWT.encode(user, JWT_SECRET);
 
-      const res = await axios.post(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/login`, {
-        signedToken,
-      });
+      const res = await axios.post(
+        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/login`,
+        { signedToken }
+      );
 
       const accessToken = res.data.accessToken;
-
-      // Use Zustand authStore instead of SecureStore
       await login(user, accessToken);
 
       setModalVisible(false);
@@ -58,76 +62,68 @@ export default function AuthModal({ setModalVisible }) {
   };
 
   const handleGoogleSignIn = async () => {
-  try {
-    await GoogleSignin.hasPlayServices();
-    await GoogleSignin.signOut(); // force fresh login
+    try {
+      await GoogleSignin.hasPlayServices();
+      await GoogleSignin.signOut();
 
-    const userInfo = await GoogleSignin.signIn();
-    console.log("userInfo:", userInfo);
+      const userInfo = await GoogleSignin.signIn();
+      const { name, email, photo } = userInfo?.data?.user || {};
 
-    //  Destructure safely from userInfo.data
-    const { name, email, photo } = userInfo?.data?.user || {};
+      if (!name || !email) {
+        console.warn("Incomplete user info from Google.");
+        return;
+      }
 
-    if (!name || !email) {
-      console.warn("Incomplete user info from Google.");
-      return;
+      await authHandler({ name, email, avatar: photo });
+    } catch (error) {
+      console.log("Google sign-in error:", error.message || error);
     }
-
-    await authHandler({
-      name,
-      email,
-      avatar: photo,
-    });
-  } catch (error) {
-    console.log("Google sign-in error:", error.message || error);
-  }
-};
-
+  };
 
   return (
-    <BlurView
-      intensity={100}
-      tint="dark"
-      style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
-    >
-      <Pressable
-        style={{
-          width: scale(320),
-          height: verticalScale(160),
-          backgroundColor: "#fff",
-          borderRadius: 24,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-        onPress={(e) => e.stopPropagation?.()}
-      >
-        <Text style={{
-          fontSize: 24,
-          marginTop: 16,
-          fontFamily: "Poppins_500Medium",
-        }}>
-          Join to LIVINAI
+    <BlurView intensity={100} tint="dark" style={styles.overlay}>
+      <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation?.()}>
+        <Text style={styles.title}>
+          {isLogin ? "LIVINAI" : "Join to LIVINAI"}
         </Text>
-        <Text style={{
-          fontSize: fontSizes.FONT17,
-          paddingTop: verticalScale(4),
-          fontFamily: "Poppins_300Light",
-        }}>
-          It's easier than your imagination!
+        <Text style={styles.subtitle}>
+          {isLogin
+            ? "Log in to continue"
+            : "It's easier than your imagination!"}
         </Text>
-        <View style={{
-          paddingVertical: scale(24),
-          flexDirection: "row",
-          gap: windowWidth(24),
-        }}>
+
+        {/* ✅ Toggle between Login and Signup */}
+        {isLogin ? (
+          <LoginForm setModalVisible={setModalVisible} />
+        ) : (
+          <SignupForm setModalVisible={setModalVisible} />
+        )}
+
+        {/* Switcher */}
+        <View style={{ marginTop: 12, flexDirection: "row" }}>
+          <Text style={{ color: "#555" }}>
+            {isLogin ? "Don’t have an account? " : "Already have an account? "}
+          </Text>
+          <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
+            <Text style={{ color: COLORS.primaryDark, fontWeight: "600" }}>
+              {isLogin ? "Sign Up" : "Login"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Divider */}
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>OR</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        {/* Google Sign-in */}
+        <View style={styles.googleContainer}>
           <Pressable onPress={handleGoogleSignIn}>
             <Image
               source={require("@/assets/images/onboarding/google.png")}
-              style={{
-                width: scale(32),
-                height: scale(32),
-                resizeMode: "contain",
-              }}
+              style={styles.googleIcon}
             />
           </Pressable>
         </View>
