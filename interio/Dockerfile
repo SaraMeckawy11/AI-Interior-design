@@ -1,5 +1,5 @@
 # Base image
-FROM python:3.9
+FROM python:3.9-slim
 
 # System deps
 RUN apt-get update && apt-get install -y \
@@ -15,11 +15,11 @@ ENV PATH="/home/user/.local/bin:$PATH"
 WORKDIR /app
 
 # Install dependencies
-COPY --chown=user ./requirements.txt requirements.txt
+COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy code
-COPY --chown=user . /app
+COPY --chown=user . .
 
-# Run handler (not Flask)
+# Run handler (RunPod looks for this)
 CMD ["python", "handler.py"]
