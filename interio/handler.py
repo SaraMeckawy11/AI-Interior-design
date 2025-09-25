@@ -14,14 +14,18 @@ device = "cuda" if use_cuda else "cpu"
 
 # --- Load models once (cold start) ---
 controlnet = ControlNetModel.from_pretrained(
-    "lllyasviel/control_v11p_sd15_canny", torch_dtype=dtype
+    "lllyasviel/control_v11p_sd15_canny",
+    torch_dtype=dtype,
+    cache_dir="/home/user/.cache/huggingface"
 )
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
     "Lykon/dreamshaper-8",
     controlnet=controlnet,
     torch_dtype=dtype,
-    safety_checker=None
+    safety_checker=None,
+    cache_dir="/home/user/.cache/huggingface"
 ).to(device)
+
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
 # --- Helper functions ---
