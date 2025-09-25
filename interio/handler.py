@@ -18,15 +18,17 @@ controlnet = ControlNetModel.from_pretrained(
     torch_dtype=dtype,
     cache_dir="/home/user/.cache/huggingface"
 )
+
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
     "Lykon/dreamshaper-8",
-    controlnet=controlnet,
+    controlnet=controlnet,   # ✅ ensure controlnet is passed
     torch_dtype=dtype,
     safety_checker=None,
     cache_dir="/home/user/.cache/huggingface"
 ).to(device)
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+
 
 # --- Helper functions ---
 def get_canny_image(image, size=(768, 768)):
@@ -57,6 +59,7 @@ def classify_room(canny_edges):
         return 0.4, 576906284
     else:
         return 0.5, 42
+
 
 # --- Main handler ---
 def handler(event):
@@ -114,5 +117,7 @@ def handler(event):
     except Exception as e:
         return {"error": str(e)}
 
-# Start runpod serverless
-runpod.serverless.start({"handler": handler})
+
+# ✅ RunPod entrypoint
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})
