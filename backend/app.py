@@ -41,20 +41,6 @@ def get_canny_image(image, size=(768, 768)):
     canny_rgb = cv2.cvtColor(canny, cv2.COLOR_GRAY2RGB)
     return Image.fromarray(canny_rgb)
 
-# --- Helper: Convert base64 to NumPy image ---
-# def decode_base64_image(base64_str):
-#     try:
-#         if base64_str.startswith("data:image"):
-#             base64_str = base64_str.split(",")[1]
-#         image_bytes = base64.b64decode(base64_str)
-#         nparr = np.frombuffer(image_bytes, np.uint8)
-#         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-#         if img is None:
-#             raise ValueError("cv2.imdecode returned None")
-#         return img
-#     except Exception as e:
-#         raise ValueError(f"Failed to decode base64 image: {e}")
-
 def decode_base64_image(base64_str):
     try:
         print(f"Decoding base64 image of length {len(base64_str)}")

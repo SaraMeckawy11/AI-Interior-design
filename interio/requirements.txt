@@ -1,0 +1,8 @@
+flask
+flask-cors
+torch
+opencv-python
+diffusers[torch]
+transformers
+accelerate
+runpod
