@@ -44,7 +44,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
-      const aiResponse = await axios.post(`https://api.runpod.ai/v2/<your-endpoint-id>/runsync`, {
+      const aiResponse = await axios.post(`https://api.runpod.ai/v2/x6jka3ci9vkelj/run`, {
         image: imageBase64,
         room_type: roomType,
         design_style: designStyle,
