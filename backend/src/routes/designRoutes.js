@@ -87,9 +87,10 @@ router.post("/", isAuthenticated, async (req, res) => {
       await sleep(2000); // wait 2 seconds
 
       const statusResp = await axios.get(
-        `https://api.runpod.io/v2/job/result?id=${jobId}`,
+        `https://api.runpod.io/v2/job?id=${jobId}`, // ✅ correct URL
         { headers: { "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}` } }
       );
+
 
 
       console.log(`Polling RunPod [attempt ${retries + 1}]:`, statusResp.data.status);
