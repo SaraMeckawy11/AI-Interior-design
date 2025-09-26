@@ -42,58 +42,40 @@ router.post("/", isAuthenticated, async (req, res) => {
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
     // 🤖 Call AI generation API
-    // 🤖 Call AI generation API
-let generatedImageBase64;
-try {
-  // Use the original base64 directly from frontend
-  const imageBase64 = image;
+    let generatedImageBase64;
+    try {
+      // Use the original base64 directly from frontend
+      const aiResponse = await axios.post(
+        "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
+        {
+          image: imageBase64,
+          room_type: roomType,
+          design_style: designStyle,
+          color_tone: colorTone,
+          custom_prompt: customPrompt || ""
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
+          },
+        }
+      );
 
-  const aiResponse = await axios.post(
-    "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
-    {
-      input: {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-        custom_prompt: customPrompt || "",
-      },
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
-      },
+      console.log("RunPod raw response:", aiResponse.data);
+
+      // RunPod usually returns { output: { generatedImage: "..." } }
+      if (aiResponse.data.output) {
+        generatedImageBase64 = aiResponse.data.output.generatedImage;
+      } else {
+        generatedImageBase64 = aiResponse.data.generatedImage;
+      }
+    } catch (err) {
+      console.error("AI server error:", err.response?.data || err.message);
+      return res.status(err.response?.status || 500).json({
+        message: err.response?.data?.message || "AI server error",
+      });
     }
-  );
-
-  console.log("RunPod raw response:", aiResponse.data);
-
-  // RunPod usually returns { output: { generatedImage: "..." } }
-  if (aiResponse.data.output) {
-    generatedImageBase64 = aiResponse.data.output.generatedImage;
-  } else {
-    generatedImageBase64 = aiResponse.data.generatedImage;
-  }
-} catch (err) {
-  console.error("AI server error:", err.response?.data || err.message);
-  return res.status(err.response?.status || 500).json({
-    message: err.response?.data?.message || "AI server error",
-  });
-}
-
-// 🖼 Upload AI-generated image to Cloudinary
-let generatedImageUrl = null;
-let generatedImagePublicId = null;
-
-if (generatedImageBase64) {
-  const dataUri = `data:image/png;base64,${generatedImageBase64}`;
-  const generatedResponse = await cloudinary.uploader.upload(dataUri, {
-    folder: "generated_images",
-  });
-  generatedImageUrl = generatedResponse.secure_url;
-  generatedImagePublicId = generatedResponse.public_id;
-}
 
     // 💾 Save design to DB
     const newDesign = new Design({
