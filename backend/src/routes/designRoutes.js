@@ -42,38 +42,42 @@ router.post("/", isAuthenticated, async (req, res) => {
     const imageBase64 = await getImageBase64FromUrl(imageUrl);
 
     // 🤖 Call AI generation API
+    // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
-  const aiResponse = await axios.post(
-    "https://api.runpod.ai/v2/x6jka3ci9vkelj/run", // your RunPod endpoint
-    {
-      input: {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-      },
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-      },
+      const aiResponse = await axios.post(
+        "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
+        {
+          input: {
+            image: imageBase64,
+            room_type: roomType,
+            design_style: designStyle,
+            color_tone: colorTone,
+            custom_prompt: customPrompt || "",
+          },
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`, // 🔑 store your key in .env
+          },
+        }
+      );
+
+      console.log("RunPod raw response:", aiResponse.data);
+
+      // RunPod usually returns { output: { generatedImage: "..." } }
+      if (aiResponse.data.output) {
+        generatedImageBase64 = aiResponse.data.output.generatedImage;
+      } else {
+        generatedImageBase64 = aiResponse.data.generatedImage;
+      }
+    } catch (err) {
+      console.error("AI server error:", err.response?.data || err.message);
+      return res.status(err.response?.status || 500).json({
+        message: err.response?.data?.message || "AI server error",
+      });
     }
-  );
-
-  console.log("RunPod raw response:", aiResponse.data);
-
-  // Your Python returns directly { "generatedImage": ... }
-  generatedImageBase64 = aiResponse.data.output
-    ? aiResponse.data.output.generatedImage
-    : aiResponse.data.generatedImage;
-} catch (err) {
-  console.error("AI server error:", err.response?.data || err.message);
-  return res.status(err.response?.status || 500).json({
-    message: err.response?.data?.message || "AI server error",
-  });
-}
-
 
     // 🖼 Upload AI-generated image
     let generatedImageUrl = null;
