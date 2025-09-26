@@ -14,6 +14,9 @@ async function getImageBase64FromUrl(url) {
   return buffer.toString("base64");
 }
 
+// Helper to sleep
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 router.post("/", isAuthenticated, async (req, res) => {
   try {
     const { roomType, designStyle, colorTone, customPrompt, image } = req.body;
@@ -45,49 +48,66 @@ router.post("/", isAuthenticated, async (req, res) => {
     console.log("Uploaded original image to Cloudinary:", { imageUrl, imagePublicId });
 
     // Remove data URI prefix if present
-    const imageBase64 = image.startsWith("data:image")
-      ? image.split(",")[1]
-      : image;
+    const imageBase64 = image.startsWith("data:image") ? image.split(",")[1] : image;
     console.log("Prepared base64 for AI API, length:", imageBase64.length);
 
-    // Call RunPod AI API
-    let generatedImageBase64;
-    try {
-      const payload = {
-        input: {
-          image: imageBase64,
-          room_type: roomType,
-          design_style: designStyle,
-          color_tone: colorTone,
-          custom_prompt: customPrompt || "",
+    // Submit job to RunPod
+    const payload = {
+      input: {
+        image: imageBase64,
+        room_type: roomType,
+        design_style: designStyle,
+        color_tone: colorTone,
+        custom_prompt: customPrompt || "",
+      },
+    };
+
+    console.log("Submitting job to RunPod:", { payload });
+
+    const jobResponse = await axios.post(
+      "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
         },
-      };
+      }
+    );
 
-      console.log("Sending payload to RunPod:", { payload });
+    const jobId = jobResponse.data.id;
+    console.log("RunPod job submitted:", jobId, "initial status:", jobResponse.data.status);
 
-      const aiResponse = await axios.post(
-        "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
-        payload,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
-          },
-        }
+    // Poll RunPod job until completed
+    let generatedImageBase64 = null;
+    const maxRetries = 30;
+    let retries = 0;
+
+    while (retries < maxRetries) {
+      await sleep(2000); // wait 2 seconds
+
+      const statusResp = await axios.get(
+        `https://api.runpod.ai/v2/x6jka3ci9vkelj/result?id=${jobId}`,
+        { headers: { "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}` } }
       );
 
-      console.log("Raw RunPod response:", aiResponse.data);
+      console.log(`Polling RunPod [attempt ${retries + 1}]:`, statusResp.data.status);
 
-      // Extract generated image
-      generatedImageBase64 =
-        aiResponse.data.output?.generatedImage || aiResponse.data.generatedImage;
+      if (statusResp.data.status === "COMPLETED") {
+        generatedImageBase64 = statusResp.data.output.generatedImage;
+        break;
+      } else if (statusResp.data.status === "FAILED") {
+        console.error("RunPod job failed:", statusResp.data);
+        return res.status(500).json({ message: "RunPod job failed" });
+      }
 
-      console.log("Received generated image base64 length:", generatedImageBase64?.length || 0);
-    } catch (err) {
-      console.error("AI server error:", err.response?.data || err.message);
-      return res.status(err.response?.status || 500).json({
-        message: err.response?.data?.message || "AI server error",
-      });
+      retries++;
+    }
+
+    if (!generatedImageBase64) {
+      console.warn("RunPod job did not complete in time, returning original image only");
+    } else {
+      console.log("Received generated image base64 length:", generatedImageBase64.length);
     }
 
     // Upload AI-generated image to Cloudinary
@@ -102,8 +122,6 @@ router.post("/", isAuthenticated, async (req, res) => {
       generatedImageUrl = generatedResponse.secure_url;
       generatedImagePublicId = generatedResponse.public_id;
       console.log("Uploaded AI-generated image to Cloudinary:", { generatedImageUrl, generatedImagePublicId });
-    } else {
-      console.warn("No generated image returned from RunPod!");
     }
 
     // Save design to DB
