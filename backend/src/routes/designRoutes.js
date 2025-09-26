@@ -54,7 +54,6 @@ router.post("/", isAuthenticated, async (req, res) => {
             room_type: roomType,
             design_style: designStyle,
             color_tone: colorTone,
-            custom_prompt: customPrompt || "",
           },
         },
         {
