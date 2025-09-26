@@ -44,19 +44,32 @@ router.post("/", isAuthenticated, async (req, res) => {
     // 🤖 Call AI generation API
     let generatedImageBase64;
     try {
-      const aiResponse = await axios.post(`https://api.runpod.ai/v2/x6jka3ci9vkelj/run`, {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-      });
-      generatedImageBase64 = aiResponse.data.generatedImage;
+      const aiResponse = await axios.post(
+        "https://api.runpod.ai/v2/x6jka3ci9vkelj/run", // your real endpoint
+        {
+          input: {
+            image: imageBase64,
+            room_type: roomType,
+            design_style: designStyle,
+            color_tone: colorTone,
+          },
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      // your handler.py returns {"message": "...", "generatedImage": "..."}
+      generatedImageBase64 = aiResponse.data.output.generatedImage;
     } catch (err) {
       console.error("AI server error:", err.response?.data || err.message);
       return res.status(err.response?.status || 500).json({
         message: err.response?.data?.message || "AI server error",
       });
     }
+
 
     // 🖼 Upload AI-generated image
     let generatedImageUrl = null;
