@@ -21,11 +21,10 @@ router.post("/", isAuthenticated, async (req, res) => {
       return res.status(400).json({ message: "Please provide all required fields" });
     }
 
-    // ✅ Fetch user and check usage
+    // Fetch user and check usage
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // ✅ Block only free users who exceeded quota
     if (!user.isSubscribed && !user.isPremium && user.freeDesignsUsed >= 2) {
       return res.status(403).json({
         message: "Upgrade required",
@@ -33,26 +32,27 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-
-    // 🖼 Upload original image
+    // Upload original image
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
 
-    const imageBase64 = await getImageBase64FromUrl(imageUrl);
+    // Use the base64 from frontend directly
+    const imageBase64 = image.startsWith("data:image") ? image.split(",")[1] : image;
 
-    // 🤖 Call AI generation API
+    // Call RunPod AI API
     let generatedImageBase64;
     try {
-      // Use the original base64 directly from frontend
       const aiResponse = await axios.post(
         "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
         {
-          image: imageBase64,
-          room_type: roomType,
-          design_style: designStyle,
-          color_tone: colorTone,
-          custom_prompt: customPrompt || ""
+          input: {
+            image: imageBase64,
+            room_type: roomType,
+            design_style: designStyle,
+            color_tone: colorTone,
+            custom_prompt: customPrompt || "",
+          },
         },
         {
           headers: {
@@ -64,7 +64,7 @@ router.post("/", isAuthenticated, async (req, res) => {
 
       console.log("RunPod raw response:", aiResponse.data);
 
-      // RunPod usually returns { output: { generatedImage: "..." } }
+      // Get the generated image base64
       if (aiResponse.data.output) {
         generatedImageBase64 = aiResponse.data.output.generatedImage;
       } else {
@@ -77,7 +77,20 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-    // 💾 Save design to DB
+    // Upload AI-generated image to Cloudinary
+    let generatedImageUrl = null;
+    let generatedImagePublicId = null;
+
+    if (generatedImageBase64) {
+      const dataUri = `data:image/png;base64,${generatedImageBase64}`;
+      const generatedResponse = await cloudinary.uploader.upload(dataUri, {
+        folder: "generated_images",
+      });
+      generatedImageUrl = generatedResponse.secure_url;
+      generatedImagePublicId = generatedResponse.public_id;
+    }
+
+    // Save design to DB
     const newDesign = new Design({
       roomType,
       designStyle,
@@ -92,7 +105,7 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     await newDesign.save();
 
-    // ➕ Increment freeDesignsUsed only for free users
+    // Increment freeDesignsUsed for free users
     if (!user.isSubscribed && !user.isPremium) {
       user.freeDesignsUsed += 1;
       await user.save();
