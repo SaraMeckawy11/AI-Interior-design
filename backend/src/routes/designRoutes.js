@@ -79,6 +79,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     console.log("RunPod job submitted:", jobId, "initial status:", jobResponse.data.status);
 
     // Poll RunPod job until completed
+    // Poll RunPod job until completed
     let generatedImageBase64 = null;
     const maxRetries = 30;
     let retries = 0;
@@ -87,11 +88,13 @@ router.post("/", isAuthenticated, async (req, res) => {
       await sleep(2000); // wait 2 seconds
 
       const statusResp = await axios.get(
-        `https://api.runpod.io/v2/job?id=${jobId}`, // ✅ correct URL
-        { headers: { "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}` } }
+        `https://api.runpod.ai/v2/x6jka3ci9vkelj/status/${jobId}`, // ✅ fixed URL
+        {
+          headers: {
+            "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
+          },
+        }
       );
-
-
 
       console.log(`Polling RunPod [attempt ${retries + 1}]:`, statusResp.data.status);
 
@@ -105,6 +108,7 @@ router.post("/", isAuthenticated, async (req, res) => {
 
       retries++;
     }
+
 
     if (!generatedImageBase64) {
       console.warn("RunPod job did not complete in time, returning original image only");
