@@ -7,6 +7,7 @@ import { isAuthenticated } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
+// Helper to fetch base64 from URL
 async function getImageBase64FromUrl(url) {
   const response = await axios.get(url, { responseType: "arraybuffer" });
   const buffer = Buffer.from(response.data, "binary");
@@ -32,13 +33,15 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-    // Upload original image
+    // Upload original image to Cloudinary
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
 
-    // Use the base64 from frontend directly
-    const imageBase64 = image.startsWith("data:image") ? image.split(",")[1] : image;
+    // Remove data URI prefix if present
+    const imageBase64 = image.startsWith("data:image")
+      ? image.split(",")[1]
+      : image;
 
     // Call RunPod AI API
     let generatedImageBase64;
@@ -46,11 +49,13 @@ router.post("/", isAuthenticated, async (req, res) => {
       const aiResponse = await axios.post(
         "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
         {
-          image: imageBase64,
-          room_type: roomType,
-          design_style: designStyle,
-          color_tone: colorTone,
-          custom_prompt: customPrompt || "",
+          input: {
+            image: imageBase64,
+            room_type: roomType,
+            design_style: designStyle,
+            color_tone: colorTone,
+            custom_prompt: customPrompt || "",
+          },
         },
         {
           headers: {
@@ -62,12 +67,9 @@ router.post("/", isAuthenticated, async (req, res) => {
 
       console.log("RunPod raw response:", aiResponse.data);
 
-      // Get the generated image base64
-      if (aiResponse.data.output) {
-        generatedImageBase64 = aiResponse.data.output.generatedImage;
-      } else {
-        generatedImageBase64 = aiResponse.data.generatedImage;
-      }
+      // Extract generated image
+      generatedImageBase64 =
+        aiResponse.data.output?.generatedImage || aiResponse.data.generatedImage;
     } catch (err) {
       console.error("AI server error:", err.response?.data || err.message);
       return res.status(err.response?.status || 500).json({
@@ -122,13 +124,13 @@ router.post("/", isAuthenticated, async (req, res) => {
   }
 });
 
+// GET all designs with pagination
 router.get("/", isAuthenticated, async (req, res) => {
   try {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 5;
     const skip = (page - 1) * limit;
 
-    // ✅ Filter designs by authenticated user
     const designs = await Design.find({ user: req.user._id })
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -137,7 +139,7 @@ router.get("/", isAuthenticated, async (req, res) => {
 
     const totalDesigns = await Design.countDocuments({ user: req.user._id });
 
-    const output = designs.map(design => ({
+    const output = designs.map((design) => ({
       generatedImage: design.generatedImage,
       image: design.image,
       roomType: design.roomType,
@@ -145,7 +147,7 @@ router.get("/", isAuthenticated, async (req, res) => {
       colorTone: design.colorTone,
       user: design.user,
       createdAt: design.createdAt,
-      _id: design._id
+      _id: design._id,
     }));
 
     res.json({
@@ -160,7 +162,7 @@ router.get("/", isAuthenticated, async (req, res) => {
   }
 });
 
-
+// GET all designs of current user
 router.get("/user", isAuthenticated, async (req, res) => {
   try {
     const designs = await Design.find({ user: req.user._id }).sort({ createdAt: -1 });
@@ -171,6 +173,7 @@ router.get("/user", isAuthenticated, async (req, res) => {
   }
 });
 
+// DELETE a design
 router.delete("/:id", isAuthenticated, async (req, res) => {
   try {
     const design = await Design.findById(req.params.id);
@@ -199,7 +202,6 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
     await design.deleteOne();
 
     res.json({ message: "Design deleted successfully" });
-
   } catch (error) {
     console.error("DELETE /designs/:id error:", error.message || error);
     res.status(500).json({ message: "Internal server error" });
