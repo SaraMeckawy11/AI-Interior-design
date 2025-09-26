@@ -46,13 +46,11 @@ router.post("/", isAuthenticated, async (req, res) => {
       const aiResponse = await axios.post(
         "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
         {
-          input: {
-            image: imageBase64,
-            room_type: roomType,
-            design_style: designStyle,
-            color_tone: colorTone,
-            custom_prompt: customPrompt || "",
-          },
+          image: imageBase64,
+          room_type: roomType,
+          design_style: designStyle,
+          color_tone: colorTone,
+          custom_prompt: customPrompt || "",
         },
         {
           headers: {
