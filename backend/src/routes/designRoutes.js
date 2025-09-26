@@ -19,43 +19,55 @@ router.post("/", isAuthenticated, async (req, res) => {
     const { roomType, designStyle, colorTone, customPrompt, image } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
+      console.log("Missing required fields:", { roomType, designStyle, colorTone, image });
       return res.status(400).json({ message: "Please provide all required fields" });
     }
 
     // Fetch user and check usage
     const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log("User not found:", req.user._id);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     if (!user.isSubscribed && !user.isPremium && user.freeDesignsUsed >= 2) {
+      console.log("Free design limit reached for user:", user._id);
       return res.status(403).json({
         message: "Upgrade required",
         reason: "You have used your 2 free designs. Please upgrade to continue.",
       });
     }
 
-    // Upload original image to Cloudinary
+    // Upload original image
     const uploadedResponse = await cloudinary.uploader.upload(image);
     const imageUrl = uploadedResponse.secure_url;
     const imagePublicId = uploadedResponse.public_id;
+    console.log("Uploaded original image to Cloudinary:", { imageUrl, imagePublicId });
 
     // Remove data URI prefix if present
     const imageBase64 = image.startsWith("data:image")
       ? image.split(",")[1]
       : image;
+    console.log("Prepared base64 for AI API, length:", imageBase64.length);
 
     // Call RunPod AI API
     let generatedImageBase64;
     try {
+      const payload = {
+        input: {
+          image: imageBase64,
+          room_type: roomType,
+          design_style: designStyle,
+          color_tone: colorTone,
+          custom_prompt: customPrompt || "",
+        },
+      };
+
+      console.log("Sending payload to RunPod:", { payload });
+
       const aiResponse = await axios.post(
         "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
-        {
-          input: {
-            image: imageBase64,
-            room_type: roomType,
-            design_style: designStyle,
-            color_tone: colorTone,
-          },
-        },
+        payload,
         {
           headers: {
             "Content-Type": "application/json",
@@ -64,11 +76,13 @@ router.post("/", isAuthenticated, async (req, res) => {
         }
       );
 
-      console.log("RunPod raw response:", aiResponse.data);
+      console.log("Raw RunPod response:", aiResponse.data);
 
       // Extract generated image
       generatedImageBase64 =
         aiResponse.data.output?.generatedImage || aiResponse.data.generatedImage;
+
+      console.log("Received generated image base64 length:", generatedImageBase64?.length || 0);
     } catch (err) {
       console.error("AI server error:", err.response?.data || err.message);
       return res.status(err.response?.status || 500).json({
@@ -87,6 +101,9 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
       generatedImageUrl = generatedResponse.secure_url;
       generatedImagePublicId = generatedResponse.public_id;
+      console.log("Uploaded AI-generated image to Cloudinary:", { generatedImageUrl, generatedImagePublicId });
+    } else {
+      console.warn("No generated image returned from RunPod!");
     }
 
     // Save design to DB
@@ -118,7 +135,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       colorTone: newDesign.colorTone,
     });
   } catch (error) {
-    console.error("POST /designs error:", error.message || error);
+    console.error("POST /designs error:", error);
     res.status(500).json({ message: error.message || "Something went wrong" });
   }
 });
