@@ -80,9 +80,8 @@ def handler(event):
         controlnet_scale, seed = classify_room(canny_edges)
 
         prompt = (
-            f"A {design_style} {room_type} interior with {color_tone} tones, "
-            f"soft ambient lighting, realistic textures, highly detailed, "
-            f"photorealistic, 8k, designed by an interior architect"
+            f"A {design_style} {room_type} interior with {color_tone} tones, soft ambient lighting, "
+            f"realistic textures, highly detailed, photorealistic, 8k, designed by an interior architect"
         )
 
         negative_prompt = (
