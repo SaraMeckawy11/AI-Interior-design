@@ -97,7 +97,7 @@ export default function AuthModal({ setModalVisible }) {
       >
         <Text style={{
           fontSize: 24,
-          marginTop: 16,
+          marginTop: verticalScale(4),
           fontFamily: "Poppins_500Medium",
         }}>
           Join to LIVINAI
@@ -110,22 +110,16 @@ export default function AuthModal({ setModalVisible }) {
           It's easier than your imagination!
         </Text>
         
-        <View style={{
-          paddingVertical: scale(24),
-          flexDirection: "row",
-          gap: windowWidth(24),
-        }}>
-          <Pressable onPress={handleGoogleSignIn}>
+        <View style={styles.googleContainer}>
+          <Pressable onPress={handleGoogleSignIn} style={styles.googleButton}>
             <Image
               source={require("@/assets/images/onboarding/google.png")}
-              style={{
-                width: scale(32),
-                height: scale(32),
-                resizeMode: "contain",
-              }}
+              style={styles.googleIcon}
             />
+            <Text style={styles.googleText}>Sign in with Google</Text>
           </Pressable>
         </View>
+
       </Pressable>
     </BlurView>
 

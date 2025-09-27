@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { scale } from "react-native-size-matters";
+import { scale, verticalScale } from "react-native-size-matters";
 import COLORS from "../../constants/colors";
 
 export default StyleSheet.create({
@@ -116,15 +116,41 @@ export default StyleSheet.create({
     fontFamily: "Poppins_400Regular",
   },
 
+  // 🔹 Google sign-in styles
   googleContainer: {
-    paddingVertical: scale(12),
+    paddingVertical: verticalScale(12),
     flexDirection: "row",
     justifyContent: "center",
   },
 
+  googleButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: scale(20),
+    borderRadius: 12,
+    shadowColor: COLORS.black,
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+    marginTop: verticalScale(4),
+  },
+
   googleIcon: {
-    width: scale(24),
-    height: scale(24),
+    width: scale(20),
+    height: scale(20),
     resizeMode: "contain",
+    marginRight: 10,
+  },
+
+  googleText: {
+    fontSize: 14,
+    fontFamily: "Poppins_500Medium",
+    color: COLORS.textPrimary,
+    textAlign: "center",
   },
 });

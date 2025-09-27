@@ -52,46 +52,6 @@ export default function Create() {
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
   const [showMissingValueModal, setShowMissingValueModal] = useState(false);
 
-  // const fetchUserStatus = useCallback(async () => {
-  //   if (!token) return;
-
-  //   try {
-  //     const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-  //       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  //     });
-
-  //     if (!res.ok) {
-  //       console.error('Failed to fetch user status:', res.status);
-  //       return;
-  //     }
-
-  //     const data = await res.json();
-  //     const { isSubscribed, freeDesignsUsed, isPremium } = data.user || {};
-
-  //     setIsSubscribed(isSubscribed || false);
-  //     setFreeDesignsUsed(freeDesignsUsed || 0);
-  //     setIsPremium(isPremium || false);
-
-  //     // Wake HF Space if user is eligible
-  //     if (isSubscribed || freeDesignsUsed < 2 || isPremium) {
-  //       try {
-  //         await fetch('https://SaraMeckawy-Interior.hf.space/generate', { method: 'GET' });
-  //         console.log('✅ HF Space wake-up ping sent (user eligible)');
-  //       } catch (err) {
-  //         console.error('❌ Failed to wake HF Space:', err);
-  //       }
-  //     } else {
-  //       console.log('⏭️ HF Space not woken (user not eligible)');
-  //     }
-  //   } catch (err) {
-  //     console.error('Failed to fetch user status:', err);
-  //   }
-  // }, [token]);
-
-  // useEffect(() => {
-  //   fetchUserStatus();
-  // }, [fetchUserStatus]);
-
   const pickImage = async () => {
     try {
       if (Platform.OS !== 'web') {
@@ -408,7 +368,7 @@ export default function Create() {
             <TouchableWithoutFeedback>
               <View style={styles.modalMissingContainer}>
                 <Text style={styles.modalTitle}>Missing Information</Text>
-                <Text style={styles.modalSubtitle}>Please fill in all fields before continuing.</Text>
+                <Text style={styles.modalSubtitle}>Please upload a photo before continuing.</Text>
 
                 <TouchableOpacity
                   style={[styles.modalMissingButton, styles.modalConfirmButton]}
