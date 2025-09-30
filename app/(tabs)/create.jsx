@@ -51,7 +51,44 @@ export default function Create() {
   const [isPremium, setIsPremium] = useState(false);
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
   const [showMissingValueModal, setShowMissingValueModal] = useState(false);
-  const [showFreeDesignsModal, setShowFreeDesignsModal] = useState(true);
+  const [showFreeDesignsModal, setShowFreeDesignsModal] = useState(false);
+  
+ useEffect(() => {
+  const fetchUserStatus = async () => {
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        console.error('Failed to fetch user status:', res.status);
+        return;
+      }
+
+      const data = await res.json();
+      const { isSubscribed, freeDesignsUsed, isPremium } = data.user || {};
+
+      setIsSubscribed(isSubscribed || false);
+      setFreeDesignsUsed(freeDesignsUsed || 0);
+      setIsPremium(isPremium || false);
+
+      // 👉 directly decide here if disclaimer should show
+      if (!isSubscribed && !isPremium) {
+        setShowFreeDesignsModal(true);
+      }
+    } catch (err) {
+      console.error('Failed to fetch user status:', err);
+    }
+  };
+
+  fetchUserStatus();
+}, [token]);
+
 
   const pickImage = async () => {
     try {
