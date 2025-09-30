@@ -51,6 +51,7 @@ export default function Create() {
   const [isPremium, setIsPremium] = useState(false);
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
   const [showMissingValueModal, setShowMissingValueModal] = useState(false);
+  const [showFreeDesignsModal, setShowFreeDesignsModal] = useState(true);
 
   const pickImage = async () => {
     try {
@@ -219,7 +220,6 @@ export default function Create() {
           </View>
 
           <View style={styles.form}>
-
             <View style={styles.formGroup}>
               <Text style={styles.label}>Add photo</Text>
               <TouchableOpacity
@@ -375,6 +375,33 @@ export default function Create() {
                   onPress={() => setShowMissingValueModal(false)}
                 >
                   <Text style={styles.modalButtonText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      <Modal
+        visible={showFreeDesignsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFreeDesignsModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowFreeDesignsModal(false)}>
+          <View style={styles.freeDesignsOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.freeDesignsContainer}>
+                <Text style={styles.freeDesignsTitle}>Free Designs Disclaimer</Text>
+                <Text style={styles.modalSubtitle}>
+                  {2 - freeDesignsUsed} free design{freeDesignsUsed === 1 ? '' : 's'} left.  
+                  Subscribe after that to keep generating designs.
+                </Text>
+                <TouchableOpacity
+                  style={styles.freeDesignsButton}
+                  onPress={() => setShowFreeDesignsModal(false)}
+                >
+                  <Text style={styles.freeDesignsButtonText}>Got it</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
