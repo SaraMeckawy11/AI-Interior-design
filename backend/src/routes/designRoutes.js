@@ -141,6 +141,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       generatedImage: generatedImageUrl,
       generatedImagePublicId,
       user: req.user._id,
+      username: user.username,
     });
 
     await newDesign.save();

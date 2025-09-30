@@ -30,6 +30,10 @@ const designSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    username: {
+      type: String,
+      required: false, // not mandatory since old docs won’t have it
+    },
   },
   { timestamps: true }
 );
