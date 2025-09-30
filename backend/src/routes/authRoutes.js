@@ -33,11 +33,6 @@ router.post("/signup", async (req, res) => {
       isPremium: !!prePremium, // 👈 auto-set premium
     });
 
-    // 🔹 Remove from PrePremium once used
-    if (prePremium) {
-      await PrePremium.deleteOne({ email });
-    }
-
     await sendToken(user, res);
   } catch (error) {
     console.error("Signup error:", error);
@@ -74,10 +69,6 @@ router.post("/login", async (req, res) => {
           profileImage: data.avatar || "",
           isPremium: !!prePremium, // 👈 auto-set premium
         });
-
-        if (prePremium) {
-          await PrePremium.deleteOne({ email: data.email });
-        }
       }
 
       return sendToken(user, res);
