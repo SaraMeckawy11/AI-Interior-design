@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema(
     username: {
       type: String,
       required: true,
-      //unique: true,
+      // unique: true,
     },
     email: {
       type: String,
@@ -32,6 +32,16 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // ✅ Track total number of designs created
+    designCount: {
+      type: Number,
+      default: 0,  // lifetime total
+    },
+    activeDesigns: {
+      type: Number,
+      default: 0,  // currently not deleted
+    },
+
     // ✅ Subscription status (paid users)
     isSubscribed: {
       type: Boolean,

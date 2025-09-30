@@ -145,11 +145,15 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     await newDesign.save();
 
-    // Increment freeDesignsUsed for free users
+    // ✅ Update user stats
+    user.designCount = (user.designCount || 0) + 1;   // lifetime total
+    user.activeDesigns = (user.activeDesigns || 0) + 1; // current active
+
     if (!user.isSubscribed && !user.isPremium) {
       user.freeDesignsUsed += 1;
-      await user.save();
     }
+
+    await user.save();
 
     res.status(201).json({
       image: newDesign.image,
@@ -240,6 +244,16 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
     }
 
     await design.deleteOne();
+
+    // ✅ Update user's activeDesigns
+    const user = await User.findById(req.user._id);
+    if (user) {
+      user.activeDesigns = Math.max((user.activeDesigns || 0) - 1, 0);
+      await user.save();
+    }
+
+    res.json({ message: "Design deleted successfully" });
+
 
     res.json({ message: "Design deleted successfully" });
   } catch (error) {

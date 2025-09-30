@@ -5,6 +5,7 @@ import authRoutes from "./routes/authRoutes.js";
 import designRoutes from "./routes/designRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import adminRoutes from "./routes/admin.routes.js";
 import job from "./lib/cron.js";
 
 
@@ -26,7 +27,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/designs", designRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/users", userRoutes);
-
+app.use("/api/admin", adminRoutes);
 
 app.get("/me", isAuthenticated, async (req, res, next) => {
   try {

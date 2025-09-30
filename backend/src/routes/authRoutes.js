@@ -2,6 +2,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
+import PrePremium from "../models/PrePremium.js"; // 👈 import new model
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { sendToken } from "../../utils/sendToken.js";
 
@@ -10,7 +11,7 @@ const router = express.Router();
 // ✅ Signup with email + password
 router.post("/signup", async (req, res) => {
   try {
-    const { username, email, password } = req.body; // 👈 expect username
+    const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
       return res.status(400).json({ success: false, message: "All fields are required" });
@@ -21,13 +22,21 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ success: false, message: "User already exists" });
     }
 
-    // ❌ don't hash here, schema will hash automatically
+    // 🔹 Check if email was pre-marked as premium
+    const prePremium = await PrePremium.findOne({ email });
+
     const user = await User.create({
       username,
       email,
-      password,       // raw password → will be hashed by schema
+      password,
       profileImage: "",
+      isPremium: !!prePremium, // 👈 auto-set premium
     });
+
+    // 🔹 Remove from PrePremium once used
+    if (prePremium) {
+      await PrePremium.deleteOne({ email });
+    }
 
     await sendToken(user, res);
   } catch (error) {
@@ -56,11 +65,19 @@ router.post("/login", async (req, res) => {
 
       let user = await User.findOne({ email: data.email });
       if (!user) {
+        // 🔹 Check if email is pre-premium
+        const prePremium = await PrePremium.findOne({ email: data.email });
+
         user = await User.create({
-          username: data.username || data.name || "user" + Date.now(), // 👈 always set username
+          username: data.username || data.name || "user" + Date.now(),
           email: data.email,
           profileImage: data.avatar || "",
+          isPremium: !!prePremium, // 👈 auto-set premium
         });
+
+        if (prePremium) {
+          await PrePremium.deleteOne({ email: data.email });
+        }
       }
 
       return sendToken(user, res);
