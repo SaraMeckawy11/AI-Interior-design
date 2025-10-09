@@ -11,7 +11,7 @@ export const sendToken = async (user, res) => {
         email: user.email,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "15d" } // Optional: Add expiration
+      { expiresIn: "60d" } // Optional: Add expiration
     );
 
     res.status(200).json({
