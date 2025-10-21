@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../assets/styles/upgrade.styles';
 import COLORS from '../constants/colors';
@@ -16,15 +16,14 @@ export default function Upgrade() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [offerings, setOfferings] = useState(null);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    try {
-      purchases.setLogLevel(LOG_LEVEL.DEBUG);
-    } catch (e) {}
-
-    async function initOfferings() {
+    const init = async () => {
       try {
+        purchases.setLogLevel(LOG_LEVEL.DEBUG);
+
         const o = await purchases.getOfferings();
         if (o?.current?.availablePackages?.length > 0) {
           setOfferings(o);
@@ -33,36 +32,30 @@ export default function Upgrade() {
           const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
 
           const product = weeklyPkg?.product || annualPkg?.product;
-          if (product?.currencyCode) {
-            setCurrencyCode(product.currencyCode);
+          if (product?.currencyCode) setCurrencyCode(product.currencyCode);
+        }
+
+        if (token) {
+          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setIsSubscribed(Boolean(data.user?.isSubscribed));
+            setFreeDesignsUsed(Number(data.user?.freeDesignsUsed || 0));
           }
         }
       } catch (err) {
-        console.error('Failed to fetch offerings:', err);
+        console.error('Initialization error:', err);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
 
-    async function fetchUserStatus() {
-      try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          setIsSubscribed(Boolean(data.user?.isSubscribed));
-          setFreeDesignsUsed(Number(data.user?.freeDesignsUsed || 0));
-        }
-      } catch (err) {
-        console.error('Failed to fetch user status:', err);
-      }
-    }
-
-    initOfferings();
-    if (token) fetchUserStatus();
+    init();
   }, [token]);
 
   const getPackageForPlan = (plan) => {
@@ -85,12 +78,8 @@ export default function Upgrade() {
 
   const handleUpgrade = async () => {
     const chosenPackage = getPackageForPlan(selectedPlan);
-    if (!chosenPackage) {
-      Alert.alert('Error', 'Selected plan not available right now.');
-      return;
-    }
+    if (!chosenPackage) return;
 
-    // get values for backend
     const plan = selectedPlan === 'weekly' ? 'Weekly Plan' : 'Yearly Plan';
     const billingCycle = selectedPlan;
     const price = chosenPackage.product?.price || 0;
@@ -101,81 +90,60 @@ export default function Upgrade() {
         : startDate.getTime() + 365 * 24 * 60 * 60 * 1000
     );
 
-    if (isSubscribed) {
-      Alert.alert(
-        'Already Subscribed',
-        'You are already subscribed. Do you want to change your plan?',
-        [
-          { text: 'No', style: 'cancel' },
-          {
-            text: 'Yes, Change Plan',
-            onPress: async () => {
-              try {
-                // RevenueCat purchase
-                await purchases.purchasePackage(chosenPackage);
+    try {
+      const purchaseResult = await purchases.purchasePackage(chosenPackage);
 
-                // Backend update
-                const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/update-latest`, {
-                  method: 'PUT',
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    plan,
-                    billingCycle,
-                    price,
-                    startDate: startDate.toISOString(),
-                    endDate: endDate.toISOString(),
-                    autoRenew: true,
-                  }),
-                });
+      const entitlements = purchaseResult?.customerInfo?.entitlements?.active;
+      const activeEntitlement = Object.values(entitlements || {})[0];
+      const entitlementId = activeEntitlement?.identifier;
+      const transactionId =
+      purchaseResult?.customerInfo?.transactionIdentifier ||
+      purchaseResult?.transaction?.identifier ||
+      purchaseResult?.customerInfo?.originalAppUserId;
 
-                if (!res.ok) throw new Error('Failed to update subscription');
+      const backendPayload = {
+        plan,
+        billingCycle,
+        price,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        paymentStatus: 'paid',
+        entitlementId,
+        transactionId,
+        autoRenew: true,
+      };
 
-                Alert.alert('Updated', `Your plan has been changed to ${plan} (${billingCycle}).`);
-                router.replace('(tabs)/profile');
-              } catch (error) {
-                console.error(error);
-                Alert.alert('Error', 'Failed to change plan. Please try again.');
-              }
-            },
-          },
-        ]
-      );
-    } else {
-      try {
-        // RevenueCat purchase
-        await purchases.purchasePackage(chosenPackage);
+      const endpoint = isSubscribed
+        ? `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/update-latest`
+        : `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`;
 
-        // Backend create
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            plan,
-            billingCycle,
-            price,
-            startDate: startDate.toISOString(),
-            endDate: endDate.toISOString(),
-            paymentStatus: 'paid',
-            autoRenew: true,
-          }),
-        });
+      const method = isSubscribed ? 'PUT' : 'POST';
 
-        if (!res.ok) throw new Error('Failed to create new subscription');
+      const res = await fetch(endpoint, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(backendPayload),
+      });
 
-        Alert.alert('Success', `Upgraded to ${plan} (${billingCycle})!`);
-        router.replace('(tabs)/profile');
-      } catch (error) {
-        console.error(error);
-        Alert.alert('Error', 'Something went wrong. Please try again.');
-      }
+      if (!res.ok) throw new Error('Failed to sync subscription with backend');
+
+      router.replace('(tabs)/profile');
+    } catch (error) {
+      console.error('Purchase or backend sync failed:', error);
+      // You can replace with silent fail UX or small toast if needed
     }
   };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator color={COLORS.primaryDark} size="large" />
+      </View>
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -226,7 +194,9 @@ export default function Upgrade() {
       </View>
 
       <TouchableOpacity style={styles.upgradeButton} onPress={handleUpgrade}>
-        <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
+        <Text style={styles.upgradeButtonText}>
+          {isSubscribed ? 'Change Plan' : 'Upgrade Now'}
+        </Text>
       </TouchableOpacity>
 
       <Text style={styles.trustNote}>Cancel anytime</Text>
