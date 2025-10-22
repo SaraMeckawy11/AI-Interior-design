@@ -24,23 +24,28 @@ export default function Upgrade() {
       try {
         purchases.setLogLevel(LOG_LEVEL.DEBUG);
 
-        // Get current user from auth store
-        let currentUser = null;
+        // Fetch user info from backend
+        let user = null;
         if (token) {
-          currentUser = await fetchUser(); // fetch from backend
+          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            user = data.user;
+          }
         }
 
-        if (!currentUser || !currentUser._id) {
+        if (!user?._id) {
           console.log("User not ready, skipping RevenueCat init.");
           return;
         }
+        console.log("RevenueCat will use appUserID:", user._id.toString());
 
-        console.log("Initializing RevenueCat with user ID:", currentUser._id);
-
-        // Initialize RevenueCat with direct API key
+        // Initialize RevenueCat with user ID
         await purchases.configure({
           apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
-          appUserID: currentUser._id,
+          appUserID: user._id.toString(),
         });
 
         // Fetch offerings
@@ -50,16 +55,16 @@ export default function Upgrade() {
 
           const weeklyPkg = o.current.weekly || o.current.availablePackages.find(p => p.packageType === 'WEEKLY');
           const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
+
           const product = weeklyPkg?.product || annualPkg?.product;
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
         // Set subscription state
-        setIsSubscribed(Boolean(currentUser.isSubscribed));
-        setFreeDesignsUsed(Number(currentUser.freeDesignsUsed || 0));
-
+        setIsSubscribed(Boolean(user?.isSubscribed));
+        setFreeDesignsUsed(Number(user?.freeDesignsUsed || 0));
       } catch (err) {
-        console.error("RevenueCat init error:", err);
+        console.error('Initialization error:', err);
       } finally {
         setLoading(false);
       }
@@ -71,18 +76,14 @@ export default function Upgrade() {
   const getPackageForPlan = (plan) => {
     if (!offerings?.current) return undefined;
     const current = offerings.current;
-    if (plan === 'weekly') {
-      return current.weekly || current.availablePackages.find(p => p.packageType === 'WEEKLY');
-    } else {
-      return current.annual || current.availablePackages.find(p => p.packageType === 'ANNUAL');
-    }
+    return plan === 'weekly'
+      ? current.weekly || current.availablePackages.find(p => p.packageType === 'WEEKLY')
+      : current.annual || current.availablePackages.find(p => p.packageType === 'ANNUAL');
   };
 
   const getPriceStringForPlan = (plan) => {
     const pkg = getPackageForPlan(plan);
-    if (pkg?.product?.priceString) {
-      return pkg.product.priceString;
-    }
+    if (pkg?.product?.priceString) return pkg.product.priceString;
     return `${(plan === 'weekly' ? weeklyPrice : yearlyPrice).toFixed(2)} ${currencyCode}`;
   };
 
@@ -131,49 +132,30 @@ export default function Upgrade() {
 
       const res = await fetch(endpoint, {
         method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(backendPayload),
       });
       if (!res.ok) throw new Error('Failed to sync subscription with backend');
 
-      // Refresh user data immediately after successful purchase
       await fetchUser();
-
-      // Instantly reflect subscription state in UI
       setIsSubscribed(true);
-
-      // Navigate to profile or stay on same page
       router.replace('(tabs)/profile');
-
     } catch (error) {
       console.error('Purchase or backend sync failed:', error);
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator color={COLORS.primaryDark} size="large" />
-      </View>
-    );
-  }
+  if (loading) return <ActivityIndicator color={COLORS.primaryDark} size="large" style={styles.container} />;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Upgrade to Pro</Text>
-      <Text style={styles.subtitle}>
-        Unlock the full LIVINAI experience with premium features.
-      </Text>
+      <Text style={styles.subtitle}>Unlock the full LIVINAI experience with premium features.</Text>
 
       {freeDesignsUsed >= 2 && !isSubscribed && (
         <View style={styles.warningBox}>
           <Text style={styles.warningTitle}>You have used your 2 free designs.</Text>
-          <Text style={styles.warningText}>
-            Upgrade now to continue using LIVINAI without limits.
-          </Text>
+          <Text style={styles.warningText}>Upgrade now to continue using LIVINAI without limits.</Text>
         </View>
       )}
 
@@ -210,9 +192,7 @@ export default function Upgrade() {
       </View>
 
       <TouchableOpacity style={styles.upgradeButton} onPress={handleUpgrade}>
-        <Text style={styles.upgradeButtonText}>
-          {isSubscribed ? 'Change Plan' : 'Upgrade Now'}
-        </Text>
+        <Text style={styles.upgradeButtonText}>{isSubscribed ? 'Change Plan' : 'Upgrade Now'}</Text>
       </TouchableOpacity>
 
       <Text style={styles.trustNote}>Cancel anytime</Text>

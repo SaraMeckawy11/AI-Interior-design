@@ -246,34 +246,52 @@ router.get("/history", isAuthenticated, async (req, res) => {
 });
 
 /**
- * REVENUECAT WEBHOOK — handles anonymous IDs
+ * REVENUECAT WEBHOOK — enhanced logging
  */
 router.post("/webhook", async (req, res) => {
   try {
     // Verify webhook secret
     const authHeader = req.headers.authorization;
     if (authHeader !== `Bearer ${process.env.REVENUECAT_WEBHOOK_SECRET}`) {
+      console.warn("Unauthorized RevenueCat webhook attempt:", req.headers);
       return res.status(401).json({ success: false, message: "Unauthorized webhook" });
     }
 
     const event = req.body;
     if (!event?.type || !event?.app_user_id) {
+      console.warn("Invalid RevenueCat event payload:", event);
       return res.status(400).json({ success: false, message: "Invalid RevenueCat event" });
     }
 
     let appUserId = event.app_user_id;
 
-    // Handle anonymous IDs ($RCAnonymousID:...)
+    // Handle anonymous IDs
     if (appUserId.startsWith("$RCAnonymousID:")) {
-      console.log("Received anonymous RevenueCat webhook for:", appUserId);
-      // skip syncing to DB or log separately if needed
+      console.log("Received anonymous RevenueCat webhook, ignoring:", appUserId);
       return res.status(200).json({ success: true, message: "Anonymous user, ignored." });
     }
 
     const user = await User.findById(appUserId);
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (!user) {
+      console.warn("RevenueCat webhook received for unknown user:", appUserId);
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
     const order = await Order.findOne({ user: user._id, transactionId: event.transaction_id }).sort({ createdAt: -1 });
+
+    // Log full event context
+    console.log(
+      "RevenueCat webhook received:",
+      {
+        type: event.type,
+        userId: user._id,
+        username: user.username,
+        transactionId: event.transaction_id,
+        entitlementId: event.entitlement_id,
+        expirationDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+        orderExists: !!order
+      }
+    );
 
     switch (event.type) {
       case "INITIAL_PURCHASE":
@@ -323,7 +341,7 @@ router.post("/webhook", async (req, res) => {
         break;
 
       default:
-        console.log("Unhandled RevenueCat event type:", event.type);
+        console.log("Unhandled RevenueCat event type:", event.type, "for user:", user._id);
         break;
     }
 
