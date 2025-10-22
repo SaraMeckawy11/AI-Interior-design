@@ -39,7 +39,7 @@ export default function RootLayout() {
       }
 
       console.log("Auth store user before fetch:", user);
-      console.log("Token:", token ? "✅ token loaded" : "❌ no token");
+      console.log("Token:", token ? " token loaded" : " no token");
 
       let currentUser = user;
       if ((!user || !user._id) && token) {

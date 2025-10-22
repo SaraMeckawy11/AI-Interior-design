@@ -256,7 +256,7 @@ router.post("/webhook", async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized webhook" });
     }
 
-    const event = req.body;
+    const event = req.body.event || req.body; // RevenueCat sometimes nests under `event`
     if (!event || !event.type || !event.app_user_id) {
       return res.status(400).json({ success: false, message: "Invalid RevenueCat event" });
     }
@@ -267,13 +267,31 @@ router.post("/webhook", async (req, res) => {
       transaction_id,
       expiration_at_ms,
       product_id,
+      entitlement_ids = [],
       environment,
+      price_in_purchased_currency,
+      purchased_at_ms,
     } = event;
 
-    // If the app_user_id is stored as your own DB _id (not anonymous)
+    // 🧩 Normalize plan and billingCycle from RevenueCat data
+    let plan = "premium"; // default
+    let billingCycle = "weekly"; // default
+
+    if (product_id?.includes("yearly")) {
+      billingCycle = "yearly";
+    } else if (product_id?.includes("weekly")) {
+      billingCycle = "weekly";
+    }
+
+    const entitlementName = entitlement_ids[0]?.toLowerCase() || "";
+    if (entitlementName.includes("pro")) plan = "pro";
+    else if (entitlementName.includes("basic")) plan = "basic";
+    else if (entitlementName.includes("premium")) plan = "premium";
+
+    // Find the user by RevenueCat app_user_id
     const user = await User.findById(app_user_id);
     if (!user) {
-      console.warn("Webhook user not found:", app_user_id);
+      console.warn("⚠️ Webhook user not found:", app_user_id);
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
@@ -286,20 +304,21 @@ router.post("/webhook", async (req, res) => {
       case "INITIAL_PURCHASE":
       case "RENEWAL":
         if (order) {
+          // ✅ Update existing order
           order.isActive = true;
           order.paymentStatus = "paid";
           order.endDate = expiration_at_ms ? new Date(Number(expiration_at_ms)) : order.endDate;
           order.autoRenew = true;
           await order.save();
         } else {
-          // Create new order if none exists
+          // ✅ Create new order with normalized values
           const newOrder = new Order({
             user: user._id,
-            plan: product_id || "unknown",
-            price: 0,
-            billingCycle: "unknown",
+            plan,
+            price: price_in_purchased_currency || 0,
+            billingCycle,
             paymentStatus: "paid",
-            startDate: new Date(),
+            startDate: purchased_at_ms ? new Date(Number(purchased_at_ms)) : new Date(),
             endDate: expiration_at_ms ? new Date(Number(expiration_at_ms)) : null,
             transactionId: transaction_id,
             autoRenew: true,
