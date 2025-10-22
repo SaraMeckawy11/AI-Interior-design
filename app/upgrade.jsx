@@ -24,6 +24,7 @@ export default function Upgrade() {
       try {
         purchases.setLogLevel(LOG_LEVEL.DEBUG);
 
+        // Fetch current offerings from RevenueCat
         const o = await purchases.getOfferings();
         if (o?.current?.availablePackages?.length > 0) {
           setOfferings(o);
@@ -35,6 +36,7 @@ export default function Upgrade() {
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
+        // Fetch user info from your backend
         if (token) {
           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
             headers: {
@@ -42,10 +44,18 @@ export default function Upgrade() {
               'Content-Type': 'application/json',
             },
           });
+
           if (res.ok) {
             const data = await res.json();
-            setIsSubscribed(Boolean(data.user?.isSubscribed));
-            setFreeDesignsUsed(Number(data.user?.freeDesignsUsed || 0));
+            const user = data.user;
+
+            // Ensure RevenueCat uses the same user ID as your database
+            if (user?._id) {
+              await purchases.logIn(user._id.toString());
+            }
+
+            setIsSubscribed(Boolean(user?.isSubscribed));
+            setFreeDesignsUsed(Number(user?.freeDesignsUsed || 0));
           }
         }
       } catch (err) {
@@ -97,9 +107,9 @@ export default function Upgrade() {
       const activeEntitlement = Object.values(entitlements || {})[0];
       const entitlementId = activeEntitlement?.identifier;
       const transactionId =
-      purchaseResult?.customerInfo?.transactionIdentifier ||
-      purchaseResult?.transaction?.identifier ||
-      purchaseResult?.customerInfo?.originalAppUserId;
+        purchaseResult?.customerInfo?.transactionIdentifier ||
+        purchaseResult?.transaction?.identifier ||
+        purchaseResult?.customerInfo?.originalAppUserId;
 
       const backendPayload = {
         plan,
@@ -133,7 +143,6 @@ export default function Upgrade() {
       router.replace('(tabs)/profile');
     } catch (error) {
       console.error('Purchase or backend sync failed:', error);
-      // You can replace with silent fail UX or small toast if needed
     }
   };
 
@@ -154,7 +163,7 @@ export default function Upgrade() {
 
       {freeDesignsUsed >= 2 && !isSubscribed && (
         <View style={styles.warningBox}>
-          <Text style={styles.warningTitle}>You’ve used your 2 free designs.</Text>
+          <Text style={styles.warningTitle}>You have used your 2 free designs.</Text>
           <Text style={styles.warningText}>
             Upgrade now to continue using LIVINAI without limits.
           </Text>

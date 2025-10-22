@@ -1,6 +1,9 @@
 import React, { useEffect } from "react";
-import { SplashScreen, Stack } from "expo-router";
-import { ThemeProvider, useTheme } from "@/context/theme.context";
+import { Stack } from "expo-router";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import purchases, { LOG_LEVEL } from "react-native-purchases";
+import { useAuthStore } from "../authStore";
+
 import {
   Poppins_600SemiBold,
   Poppins_300Light,
@@ -9,10 +12,10 @@ import {
   Poppins_500Medium,
   useFonts,
 } from "@expo-google-fonts/poppins";
-import { SafeAreaProvider } from "react-native-safe-area-context";
-import purchases, {LOG_LEVEL} from "react-native-purchases";
 
-export default function Rootlayout() {
+export default function RootLayout() {
+  const { user } = useAuthStore(); // must contain user._id when logged in
+
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     Poppins_600SemiBold,
@@ -23,27 +26,34 @@ export default function Rootlayout() {
   });
 
   useEffect(() => {
-    purchases.setLogLevel(LOG_LEVEL.VERBOSE);
-    purchases.configure({ apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp" });
-    //getCustomerInfo();
-  }, []);
+  if (!user?._id) return; // Wait until user is loaded
 
-  async function getCustomerInfo() {
+  const initRevenueCat = async () => {
     try {
-      const customerInfo = await purchases.getCustomerInfo();
-      console.log("Customer Info:", customerInfo);
+      purchases.setLogLevel(LOG_LEVEL.DEBUG);
+
+      await purchases.configure({
+        apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
+        appUserID: user._id, // pass your real user ID here
+      });
+
+      const info = await purchases.getCustomerInfo();
+      console.log("RevenueCat customer info:", info);
     } catch (error) {
-      console.error("Failed to fetch customer info:", error);
+      console.error("RevenueCat setup failed:", error);
     }
-  }
+  };
+
+  initRevenueCat();
+}, [user?._id]);
 
   return (
-    <SafeAreaProvider >
+    <SafeAreaProvider>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(routes)/onboarding/index" />
         <Stack.Screen name="(tabs)" />
       </Stack>
     </SafeAreaProvider>
-  )
+  );
 }
