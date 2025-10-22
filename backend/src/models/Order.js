@@ -7,9 +7,9 @@ const orderSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    // Store RevenueCat product identifier (like livinai_weekly:default)
     plan: {
       type: String,
-      enum: ["basic", "pro", "premium"],
       required: true,
     },
     price: {
@@ -36,6 +36,9 @@ const orderSchema = new mongoose.Schema(
     },
     transactionId: {
       type: String,
+    },
+    entitlementId: {
+      type: String, // RevenueCat entitlement ID
     },
     autoRenew: {
       type: Boolean,

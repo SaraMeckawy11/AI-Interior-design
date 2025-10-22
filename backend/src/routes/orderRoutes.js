@@ -246,102 +246,71 @@ router.get("/history", isAuthenticated, async (req, res) => {
 });
 
 /**
- * REVENUECAT WEBHOOK — syncs subscription events automatically
+ * REVENUECAT WEBHOOK — handles anonymous IDs
  */
 router.post("/webhook", async (req, res) => {
   try {
-    // Verify webhook secret for security
+    // Verify webhook secret
     const authHeader = req.headers.authorization;
     if (authHeader !== `Bearer ${process.env.REVENUECAT_WEBHOOK_SECRET}`) {
       return res.status(401).json({ success: false, message: "Unauthorized webhook" });
     }
 
-    const event = req.body.event || req.body; // RevenueCat sometimes nests under `event`
-    if (!event || !event.type || !event.app_user_id) {
+    const event = req.body;
+    if (!event?.type || !event?.app_user_id) {
       return res.status(400).json({ success: false, message: "Invalid RevenueCat event" });
     }
 
-    const {
-      type,
-      app_user_id,
-      transaction_id,
-      expiration_at_ms,
-      product_id,
-      entitlement_ids = [],
-      environment,
-      price_in_purchased_currency,
-      purchased_at_ms,
-    } = event;
+    let appUserId = event.app_user_id;
 
-    // 🧩 Normalize plan and billingCycle from RevenueCat data
-    let plan = "premium"; // default
-    let billingCycle = "weekly"; // default
-
-    if (product_id?.includes("yearly")) {
-      billingCycle = "yearly";
-    } else if (product_id?.includes("weekly")) {
-      billingCycle = "weekly";
+    // Handle anonymous IDs ($RCAnonymousID:...)
+    if (appUserId.startsWith("$RCAnonymousID:")) {
+      console.log("Received anonymous RevenueCat webhook for:", appUserId);
+      // skip syncing to DB or log separately if needed
+      return res.status(200).json({ success: true, message: "Anonymous user, ignored." });
     }
 
-    const entitlementName = entitlement_ids[0]?.toLowerCase() || "";
-    if (entitlementName.includes("pro")) plan = "pro";
-    else if (entitlementName.includes("basic")) plan = "basic";
-    else if (entitlementName.includes("premium")) plan = "premium";
+    const user = await User.findById(appUserId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    // Find the user by RevenueCat app_user_id
-    const user = await User.findById(app_user_id);
-    if (!user) {
-      console.warn("⚠️ Webhook user not found:", app_user_id);
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
+    const order = await Order.findOne({ user: user._id, transactionId: event.transaction_id }).sort({ createdAt: -1 });
 
-    const order = await Order.findOne({
-      user: user._id,
-      transactionId: transaction_id,
-    }).sort({ createdAt: -1 });
-
-    switch (type) {
+    switch (event.type) {
       case "INITIAL_PURCHASE":
       case "RENEWAL":
         if (order) {
-          // ✅ Update existing order
           order.isActive = true;
           order.paymentStatus = "paid";
-          order.endDate = expiration_at_ms ? new Date(Number(expiration_at_ms)) : order.endDate;
+          order.endDate = event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : order.endDate;
           order.autoRenew = true;
           await order.save();
         } else {
-          // ✅ Create new order with normalized values
           const newOrder = new Order({
             user: user._id,
-            plan,
-            price: price_in_purchased_currency || 0,
-            billingCycle,
+            plan: event.product_id || "unknown",
+            price: 0,
+            billingCycle: "unknown",
             paymentStatus: "paid",
-            startDate: purchased_at_ms ? new Date(Number(purchased_at_ms)) : new Date(),
-            endDate: expiration_at_ms ? new Date(Number(expiration_at_ms)) : null,
-            transactionId: transaction_id,
+            startDate: new Date(),
+            endDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+            transactionId: event.transaction_id,
             autoRenew: true,
             isActive: true,
           });
           await newOrder.save();
         }
-
         await User.findByIdAndUpdate(user._id, { isSubscribed: true });
         break;
 
       case "CANCELLATION":
       case "UNCANCELLATION":
         if (order) {
-          order.autoRenew = type === "CANCELLATION" ? false : true;
-          order.isActive = type !== "CANCELLATION";
-          order.canceledAt = type === "CANCELLATION" ? new Date() : null;
+          order.autoRenew = event.type === "CANCELLATION" ? false : true;
+          order.isActive = event.type !== "CANCELLATION";
+          order.canceledAt = event.type === "CANCELLATION" ? new Date() : null;
           await order.save();
         }
-
-        await User.findByIdAndUpdate(user._id, {
-          isSubscribed: type !== "CANCELLATION",
-        });
+        await User.findByIdAndUpdate(user._id, { isSubscribed: event.type !== "CANCELLATION" });
         break;
 
       case "EXPIRATION":
@@ -354,7 +323,7 @@ router.post("/webhook", async (req, res) => {
         break;
 
       default:
-        console.log("Unhandled RevenueCat event type:", type);
+        console.log("Unhandled RevenueCat event type:", event.type);
         break;
     }
 

@@ -24,37 +24,42 @@ export default function Upgrade() {
       try {
         purchases.setLogLevel(LOG_LEVEL.DEBUG);
 
+        // Get current user from auth store
+        let currentUser = null;
+        if (token) {
+          currentUser = await fetchUser(); // fetch from backend
+        }
+
+        if (!currentUser || !currentUser._id) {
+          console.log("User not ready, skipping RevenueCat init.");
+          return;
+        }
+
+        console.log("Initializing RevenueCat with user ID:", currentUser._id);
+
+        // Initialize RevenueCat with direct API key
+        await purchases.configure({
+          apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
+          appUserID: currentUser._id,
+        });
+
+        // Fetch offerings
         const o = await purchases.getOfferings();
         if (o?.current?.availablePackages?.length > 0) {
           setOfferings(o);
+
           const weeklyPkg = o.current.weekly || o.current.availablePackages.find(p => p.packageType === 'WEEKLY');
           const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
           const product = weeklyPkg?.product || annualPkg?.product;
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
-        if (token) {
-          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-          });
+        // Set subscription state
+        setIsSubscribed(Boolean(currentUser.isSubscribed));
+        setFreeDesignsUsed(Number(currentUser.freeDesignsUsed || 0));
 
-          if (res.ok) {
-            const data = await res.json();
-            const user = data.user;
-
-            if (user?._id) {
-              await purchases.logIn(user._id.toString());
-            }
-
-            setIsSubscribed(Boolean(user?.isSubscribed));
-            setFreeDesignsUsed(Number(user?.freeDesignsUsed || 0));
-          }
-        }
       } catch (err) {
-        console.error('Initialization error:', err);
+        console.error("RevenueCat init error:", err);
       } finally {
         setLoading(false);
       }
