@@ -8,7 +8,7 @@ import { useAuthStore } from '../authStore';
 import purchases, { LOG_LEVEL } from 'react-native-purchases';
 
 export default function Upgrade() {
-  const { token } = useAuthStore();
+  const { token, fetchUser } = useAuthStore();
   const [selectedPlan, setSelectedPlan] = useState('weekly');
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [weeklyPrice, setWeeklyPrice] = useState(5.99);
@@ -24,19 +24,15 @@ export default function Upgrade() {
       try {
         purchases.setLogLevel(LOG_LEVEL.DEBUG);
 
-        // Fetch current offerings from RevenueCat
         const o = await purchases.getOfferings();
         if (o?.current?.availablePackages?.length > 0) {
           setOfferings(o);
-
           const weeklyPkg = o.current.weekly || o.current.availablePackages.find(p => p.packageType === 'WEEKLY');
           const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
-
           const product = weeklyPkg?.product || annualPkg?.product;
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
-        // Fetch user info from your backend
         if (token) {
           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
             headers: {
@@ -49,7 +45,6 @@ export default function Upgrade() {
             const data = await res.json();
             const user = data.user;
 
-            // Ensure RevenueCat uses the same user ID as your database
             if (user?._id) {
               await purchases.logIn(user._id.toString());
             }
@@ -137,10 +132,17 @@ export default function Upgrade() {
         },
         body: JSON.stringify(backendPayload),
       });
-
       if (!res.ok) throw new Error('Failed to sync subscription with backend');
 
+      // Refresh user data immediately after successful purchase
+      await fetchUser();
+
+      // Instantly reflect subscription state in UI
+      setIsSubscribed(true);
+
+      // Navigate to profile or stay on same page
       router.replace('(tabs)/profile');
+
     } catch (error) {
       console.error('Purchase or backend sync failed:', error);
     }

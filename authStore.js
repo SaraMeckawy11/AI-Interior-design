@@ -138,5 +138,28 @@ export const useAuthStore = create((set) => ({
     const { token } = useAuthStore.getState();
     return token;
   },
+
+    // ✅ Fetch user data from backend and update store
+  fetchUser: async () => {
+    const { token } = useAuthStore.getState();
+    if (!token) return;
+
+    try {
+      const res = await axios.get(
+        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (res.data?.user) {
+        await AsyncStorage.setItem("user", JSON.stringify(res.data.user));
+        useAuthStore.setState({ user: res.data.user });
+      }
+    } catch (error) {
+      console.error("❌ fetchUser error:", error.response?.data || error.message);
+    }
+  },
+
 }));
 

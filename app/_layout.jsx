@@ -14,7 +14,7 @@ import {
 } from "@expo-google-fonts/poppins";
 
 export default function RootLayout() {
-  const { user } = useAuthStore(); // must contain user._id when logged in
+  const { user, token, isCheckingAuth, checkAuth, fetchUserFromDB } = useAuthStore();
 
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
@@ -25,27 +25,51 @@ export default function RootLayout() {
     Poppins_500Medium,
   });
 
+  // Step 1: Run checkAuth on first load
   useEffect(() => {
-  if (!user?._id) return; // Wait until user is loaded
+    checkAuth();
+  }, []);
 
-  const initRevenueCat = async () => {
-    try {
-      purchases.setLogLevel(LOG_LEVEL.DEBUG);
+  // Step 2: Initialize RevenueCat only when auth check is done
+  useEffect(() => {
+    const init = async () => {
+      if (isCheckingAuth) {
+        console.log("Still checking auth...");
+        return;
+      }
 
-      await purchases.configure({
-        apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
-        appUserID: user._id, // pass your real user ID here
-      });
+      console.log("Auth store user before fetch:", user);
+      console.log("Token:", token ? "✅ token loaded" : "❌ no token");
 
-      const info = await purchases.getCustomerInfo();
-      console.log("RevenueCat customer info:", info);
-    } catch (error) {
-      console.error("RevenueCat setup failed:", error);
-    }
-  };
+      let currentUser = user;
+      if ((!user || !user._id) && token) {
+        console.log("Fetching user from DB...");
+        currentUser = await fetchUserFromDB();
+      }
 
-  initRevenueCat();
-}, [user?._id]);
+      if (!currentUser || !currentUser._id) {
+        console.log("User not ready yet, skipping RevenueCat init.");
+        return;
+      }
+
+      console.log("Initializing RevenueCat with user ID:", currentUser._id);
+
+      try {
+        purchases.setLogLevel(LOG_LEVEL.DEBUG);
+        await purchases.configure({
+          apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
+          appUserID: currentUser._id,
+        });
+
+        const info = await purchases.getCustomerInfo();
+        console.log("RevenueCat customer info:", info);
+      } catch (error) {
+        console.error("RevenueCat setup failed:", error);
+      }
+    };
+
+    init();
+  }, [isCheckingAuth, user, token]);
 
   return (
     <SafeAreaProvider>
