@@ -107,10 +107,10 @@ export default function Upgrade() {
       const entitlements = purchaseResult?.customerInfo?.entitlements?.active;
       const activeEntitlement = Object.values(entitlements || {})[0];
       const entitlementId = activeEntitlement?.identifier;
-      const transactionId =
-        purchaseResult?.customerInfo?.transactionIdentifier ||
-        purchaseResult?.transaction?.identifier ||
-        purchaseResult?.customerInfo?.originalAppUserId;
+      
+      const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+      const transactionId = `TXN-${datePart}-${randomPart}`;
 
       const backendPayload = {
         plan,
@@ -124,11 +124,8 @@ export default function Upgrade() {
         autoRenew: true,
       };
 
-      const endpoint = isSubscribed
-        ? `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/update-latest`
-        : `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`;
-
-      const method = isSubscribed ? 'PUT' : 'POST';
+      const endpoint = `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`;
+      const method = 'POST';
 
       const res = await fetch(endpoint, {
         method,

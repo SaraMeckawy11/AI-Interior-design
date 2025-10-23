@@ -56,7 +56,7 @@ export default function Profile() {
       ) : (
         <View style={styles.familyMessage}>
           <Text style={styles.familyText}>
-        Being part of our family gives you exclusive access! Keep creating and designing freely.          </Text>
+            Being part of our family gives you exclusive access! Keep creating and designing freely.          </Text>
         </View>
       )}
 

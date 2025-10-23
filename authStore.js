@@ -8,7 +8,7 @@ export const useAuthStore = create((set) => ({
   isLoading: false,
   isCheckingAuth: true,
 
-  // ✅ Login with Google
+  //Login with Google
   loginGoogle: async (googleUser, idToken) => {
     try {
       set({ isLoading: true });
@@ -36,7 +36,7 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  // ✅ Login with email + password
+  //Login with email + password
   loginWithEmail: async (email, password) => {
     try {
       set({ isLoading: true });
@@ -69,7 +69,7 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  // ✅ Signup with email + password
+  //Signup with email + password
   signupWithEmail: async (username, email, password) => {
     try {
       set({ isLoading: true });
@@ -102,12 +102,12 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  // ✅ Aliases (shortcuts)
+  //Aliases (shortcuts)
   register: (...args) => useAuthStore.getState().signupWithEmail(...args),
   signup: (...args) => useAuthStore.getState().signupWithEmail(...args),
   login: (...args) => useAuthStore.getState().loginWithEmail(...args),
 
-  // ✅ Check persisted login
+  //Check persisted login
   checkAuth: async () => {
     try {
       const [token, userJson] = await AsyncStorage.multiGet(["token", "user"]);
@@ -123,7 +123,7 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  // ✅ Logout
+  //Logout
   logout: async () => {
     try {
       await AsyncStorage.multiRemove(["token", "user"]);
@@ -139,7 +139,7 @@ export const useAuthStore = create((set) => ({
     return token;
   },
 
-    // ✅ Fetch user data from backend and update store
+    // Fetch user data from backend and update store
   fetchUser: async () => {
     const { token } = useAuthStore.getState();
     if (!token) return;
@@ -157,7 +157,7 @@ export const useAuthStore = create((set) => ({
         useAuthStore.setState({ user: res.data.user });
       }
     } catch (error) {
-      console.error("❌ fetchUser error:", error.response?.data || error.message);
+      console.error(" fetchUser error:", error.response?.data || error.message);
     }
   },
 

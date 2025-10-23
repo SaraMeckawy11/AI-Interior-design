@@ -50,9 +50,10 @@ export default function Create() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
-  const [showMissingValueModal, setShowMissingValueModal] = useState(false);
   const [showFreeDesignsModal, setShowFreeDesignsModal] = useState(false);
-  
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalData, setModalData] = useState({ title: '', message: '' });
+
  useEffect(() => {
   const fetchUserStatus = async () => {
     if (!token) return;
@@ -77,9 +78,13 @@ export default function Create() {
       setFreeDesignsUsed(freeDesignsUsed || 0);
       setIsPremium(isPremium || false);
 
-      // 👉 directly decide here if disclaimer should show
+      //  directly decide here if disclaimer should show
       if (!isSubscribed && !isPremium) {
-        setShowFreeDesignsModal(true);
+        setModalData({
+          title: 'Free Designs Disclaimer',
+          message: `${2 - (freeDesignsUsed || 0)} free design${freeDesignsUsed === 1 ? '' : 's'} left. Subscribe to keep generating designs.`,
+        });
+        setModalVisible(true);
       }
     } catch (err) {
       console.error('Failed to fetch user status:', err);
@@ -95,7 +100,11 @@ export default function Create() {
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission Denied', 'We need camera roll permissions to upload an image');
+          setModalData({
+            title: 'Access Needed',
+            message: 'We need permission to access your photos or camera. Please enable access in your device settings.',
+          });
+          setModalVisible(true);
           return;
         }
       }
@@ -120,7 +129,11 @@ export default function Create() {
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      Alert.alert('Error', 'There was a problem selecting your image');
+      setModalData({
+        title: 'Image Issue',
+        message: 'Something went wrong while selecting your image. Please try again.',
+      });
+      setModalVisible(true);
     }
   };
 
@@ -129,11 +142,14 @@ export default function Create() {
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission Denied', 'We need camera permissions to take a photo');
+           setModalData({
+            title: 'Access Needed',
+            message: 'We need permission to access your camera. Please enable access in your device settings.',
+          });
+          setModalVisible(true);
           return;
         }
       }
-
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.3,
@@ -154,26 +170,21 @@ export default function Create() {
       }
     } catch (error) {
       console.error('Error taking photo:', error);
-      Alert.alert('Error', 'There was a problem taking your photo');
+      setModalData({
+        title: 'Camera Error',
+        message: 'There was a problem taking your photo. Please try again.',
+      });
+      setModalVisible(true);
     }
   };
 
-  const chooseImageSource = () => {
-    Alert.alert(
-      "Upload Photo",
-      "Choose an option",
-      [
-        { text: "Take Photo", onPress: takePhoto },
-        { text: "Choose from Gallery", onPress: pickImage },
-        { text: "Cancel", style: "cancel" }
-      ]
-    );
-  };
-
-
   const handleSubmit = async () => {
     if (!roomType || !designStyle || !colorTone || !image) {
-      setShowMissingValueModal(true);
+      setModalData({
+        title: 'Missing Information',
+        message: 'Please upload a photo before continuing.',
+      });
+      setModalVisible(true);
       return;
     }
 
@@ -231,7 +242,11 @@ export default function Create() {
           },
         });
       } else {
-        Alert.alert('Error', 'No image URL received from the server.');
+       setModalData({
+        title: 'Design Generation Failed',
+        message: 'There was a problem generating your design from the server. Please try again later.',
+      });
+      setModalVisible(true);
       }
 
       setPrompt('');
@@ -242,7 +257,11 @@ export default function Create() {
       // setColorTone('Neutral');
     } catch (error) {
       console.error('Error generating design:', error);
-      Alert.alert('Error', error.message || 'Something went wrong');
+      setModalData({
+        title: 'Design Generation Failed',
+        message: 'There was a problem generating your design. Please try again later.',
+      });
+      setModalVisible(true);
     } finally {
       setLoading(false);
     }
@@ -392,24 +411,23 @@ export default function Create() {
           </View>
         </View>
       </Modal>
-
-      {/* Missing Value Modal */}
+      {/* Dynamic Error / Info Modal */}
       <Modal
-        visible={showMissingValueModal}
+        visible={modalVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setShowMissingValueModal(false)}
+        onRequestClose={() => setModalVisible(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowMissingValueModal(false)}>
+        <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
           <View style={styles.modalMissingOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.modalMissingContainer}>
-                <Text style={styles.modalTitle}>Missing Information</Text>
-                <Text style={styles.modalSubtitle}>Please upload a photo before continuing.</Text>
+                <Text style={styles.modalTitle}>{modalData.title}</Text>
+                <Text style={styles.modalSubtitle}>{modalData.message}</Text>
 
                 <TouchableOpacity
                   style={[styles.modalMissingButton, styles.modalConfirmButton]}
-                  onPress={() => setShowMissingValueModal(false)}
+                  onPress={() => setModalVisible(false)}
                 >
                   <Text style={styles.modalButtonText}>OK</Text>
                 </TouchableOpacity>
@@ -418,34 +436,6 @@ export default function Create() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-
-      <Modal
-        visible={showFreeDesignsModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowFreeDesignsModal(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setShowFreeDesignsModal(false)}>
-          <View style={styles.freeDesignsOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.freeDesignsContainer}>
-                <Text style={styles.freeDesignsTitle}>Free Designs Disclaimer</Text>
-                <Text style={styles.modalSubtitle}>
-                  {2 - freeDesignsUsed} free design{freeDesignsUsed === 1 ? '' : 's'} left.  
-                  Subscribe after that to keep generating designs.
-                </Text>
-                <TouchableOpacity
-                  style={styles.freeDesignsButton}
-                  onPress={() => setShowFreeDesignsModal(false)}
-                >
-                  <Text style={styles.freeDesignsButtonText}>Got it</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-
     </KeyboardAvoidingView>
   );
 }

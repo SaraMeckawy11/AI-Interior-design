@@ -1,5 +1,6 @@
 import express from "express";
 import PrePremium from "../models/PrePremium.js";
+import User from "../models/User.js";
 
 const router = express.Router();
 
@@ -61,5 +62,48 @@ router.delete("/pre-premium/:email", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
+/**
+ * @route PATCH /admin/set-subscription
+ * @desc Admin manually sets isSubscribed (true/false) for a user by email
+ * @access Private (admin-only)
+ */
+
+router.patch("/set-subscription", async (req, res) => {
+  try {
+    const { email, isSubscribed } = req.body;
+
+    if (!email || typeof isSubscribed !== "boolean") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and isSubscribed (boolean) required" });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      { isSubscribed },
+      { new: true }
+    );
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      message: `User ${user.email} subscription updated to ${isSubscribed}`,
+      user: {
+        email: user.email,
+        isSubscribed: user.isSubscribed,
+      },
+    });
+  } catch (error) {
+    console.error("Admin set-subscription error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 
 export default router;

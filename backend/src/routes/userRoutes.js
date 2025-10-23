@@ -28,7 +28,7 @@ router.get('/me', isAuthenticated, async (req, res) => {
         profileImage: user.profileImage,
         freeDesignsUsed: user.freeDesignsUsed || 0,
         isSubscribed,
-        isPremium: user.isPremium || false,   // ✅ include manual premium flag
+        isPremium: user.isPremium || false,   //  include manual premium flag
         autoRenew,
         subscriptionEndDate,
       },

@@ -8,7 +8,7 @@ import { sendToken } from "../../utils/sendToken.js";
 
 const router = express.Router();
 
-// ✅ Signup with email + password
+//Signup with email + password
 router.post("/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -30,7 +30,7 @@ router.post("/signup", async (req, res) => {
       email,
       password,
       profileImage: "",
-      isPremium: !!prePremium, // 👈 auto-set premium
+      isPremium: !!prePremium, // auto-set premium
     });
 
     await sendToken(user, res);
@@ -40,7 +40,7 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// ✅ Login with email + password OR Google
+//Login with email + password OR Google
 router.post("/login", async (req, res) => {
   try {
     const { email, password, signedToken } = req.body;

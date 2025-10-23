@@ -291,6 +291,7 @@ modalMissingContainer: {
   shadowOpacity: 0.15,
   shadowRadius: 6,
   elevation: 6,
+  alignItems: 'center',
 },
 modalMissingButton: {
   flexDirection: 'row',
@@ -300,59 +301,7 @@ modalMissingButton: {
   borderRadius: moderateScale(16),
   paddingVertical: verticalScale(8),
   marginBottom: verticalScale(10),
-},
-
-// Add these new styles for the Free Designs modal
-freeDesignsOverlay: {
-  flex: 1,
-  justifyContent: 'center',
-  alignItems: 'center',
-  backgroundColor: 'rgba(0,0,0,0.4)',
-},
-
-freeDesignsContainer: {
-  backgroundColor: COLORS.cardBackground,
-  width: '85%',
-  borderRadius: moderateScale(20),
-  padding: moderateScale(20),
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.2,
-  shadowRadius: 8,
-  elevation: 8,
-  alignItems: 'center',
-},
-
-freeDesignsTitle: {
-  fontSize: moderateScale(17),
-  fontWeight: '700',
-  color: COLORS.primaryDark,
-  marginBottom: verticalScale(10),
-  textAlign: 'center',
-},
-
-freeDesignsMessage: {
-  fontSize: moderateScale(14),
-  color: COLORS.textSecondary,
-  textAlign: 'center',
-  marginBottom: verticalScale(16),
-  lineHeight: verticalScale(20),
-},
-
-freeDesignsButton: {
-  backgroundColor: COLORS.primaryDark,
-  borderRadius: moderateScale(16),
-  paddingVertical: verticalScale(8),
-  paddingHorizontal: moderateScale(20),
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '60%',
-},
-
-freeDesignsButtonText: {
-  fontSize: moderateScale(14),
-  fontWeight: '600',
-  color: COLORS.white,
+  width: '50%',
 },
 
 });

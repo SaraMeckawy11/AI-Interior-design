@@ -1,6 +1,13 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Dimensions } from 'react-native';
 import COLORS from '../../constants/colors';
-import { scale, verticalScale } from 'react-native-size-matters';
+//import { scale, verticalScale } from 'react-native-size-matters';
+const { width, height } = Dimensions.get("window");
+
+// Scaling functions
+const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
+const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
+const moderateScale = (size, factor = 0.5) =>
+  size + (scale(size) - size) * factor;
 
 export default StyleSheet.create({
   container: {
@@ -241,6 +248,59 @@ warningTitle: {
 warningText: {
   color: '#555',
   fontSize: 14,
+},
+
+modalMissingOverlay: {
+  flex: 1,
+  justifyContent: 'center',
+  alignItems: "center",
+  backgroundColor: 'rgba(0,0,0,0.4)',
+},
+modalMissingContainer: {
+  backgroundColor: COLORS.cardBackground,
+  width: "80%",
+  borderRadius: moderateScale(20),  
+  padding: moderateScale(20),
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: -2 },
+  shadowOpacity: 0.15,
+  shadowRadius: 6,
+  elevation: 6,
+},
+modalTitle: {
+  fontSize: moderateScale(16),
+  fontWeight: '600',
+  color: COLORS.primaryDark,
+  textAlign: 'center',
+  marginBottom: verticalScale(4),
+},
+modalSubtitle: {
+  fontSize: moderateScale(13),
+  color: COLORS.textSecondary,
+  textAlign: 'center',
+  marginBottom: verticalScale(4),
+},
+modalMissingButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: COLORS.primaryDark,
+  borderRadius: moderateScale(16),
+  paddingVertical: verticalScale(8),
+  marginBottom: verticalScale(10),
+},
+modalCancelButton: {
+  backgroundColor: COLORS.roomCard,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+},
+modalButtonText: {
+  fontSize: moderateScale(14),
+  fontWeight: '600',
+  color: COLORS.white,
+},
+modalIcon: {
+  marginRight: moderateScale(8),
 },
 
 });
