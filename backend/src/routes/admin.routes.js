@@ -99,3 +99,5 @@ router.post("/set-subscription", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
+export default router;
