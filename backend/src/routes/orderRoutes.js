@@ -246,7 +246,7 @@ router.get("/history", isAuthenticated, async (req, res) => {
 });
 
 /**
- * REVENUECAT WEBHOOK — enhanced logging
+ * REVENUECAT WEBHOOK — enhanced logging (creates new order each time)
  */
 router.post("/webhook", async (req, res) => {
   try {
@@ -263,82 +263,94 @@ router.post("/webhook", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid RevenueCat event" });
     }
 
-    let appUserId = event.app_user_id;
+    const appUserId = event.app_user_id;
 
-    // Handle anonymous IDs
+    // Ignore anonymous users
     if (appUserId.startsWith("$RCAnonymousID:")) {
       console.log("Received anonymous RevenueCat webhook, ignoring:", appUserId);
-      return res.status(200).json({ success: true, message: "Anonymous user, ignored." });
+      return res.status(200).json({ success: true, message: "Anonymous user ignored." });
     }
 
+    // Find the user
     const user = await User.findById(appUserId);
     if (!user) {
       console.warn("RevenueCat webhook received for unknown user:", appUserId);
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    const order = await Order.findOne({ user: user._id, transactionId: event.transaction_id }).sort({ createdAt: -1 });
+    // Log incoming event
+    console.log("📩 RevenueCat webhook received:", {
+      type: event.type,
+      userId: user._id,
+      username: user.username,
+      transactionId: event.transaction_id,
+      entitlementId: event.entitlement_id,
+      expirationDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+    });
 
-    // Log full event context
-    console.log(
-      "RevenueCat webhook received:",
-      {
-        type: event.type,
-        userId: user._id,
-        username: user.username,
-        transactionId: event.transaction_id,
-        entitlementId: event.entitlement_id,
-        expirationDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
-        orderExists: !!order
-      }
-    );
-
+    // Handle different event types
     switch (event.type) {
+      /**
+       * INITIAL PURCHASE or RENEWAL — always create new order
+       */
       case "INITIAL_PURCHASE":
-      case "RENEWAL":
-        if (order) {
-          order.isActive = true;
-          order.paymentStatus = "paid";
-          order.endDate = event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : order.endDate;
-          order.autoRenew = true;
-          await order.save();
-        } else {
-          const newOrder = new Order({
-            user: user._id,
-            plan: event.product_id || "unknown",
-            price: 0,
-            billingCycle: "unknown",
-            paymentStatus: "paid",
-            startDate: new Date(),
-            endDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
-            transactionId: event.transaction_id,
-            autoRenew: true,
-            isActive: true,
-          });
-          await newOrder.save();
-        }
+      case "RENEWAL": {
+        const newOrder = new Order({
+          user: user._id,
+          plan: event.product_id || "unknown",
+          price: 0,
+          billingCycle: event.product_id?.toLowerCase().includes("year") ? "yearly" : "weekly",
+          paymentStatus: "paid",
+          startDate: new Date(),
+          endDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
+          transactionId: event.transaction_id || `tx_${Date.now()}`,
+          entitlementId: event.entitlement_id || null,
+          autoRenew: true,
+          isActive: true,
+        });
+
+        await newOrder.save();
         await User.findByIdAndUpdate(user._id, { isSubscribed: true });
-        break;
 
+        console.log("✅ Created new order for user:", user._id);
+        break;
+      }
+
+      /**
+       * CANCELLATION / UNCANCELLATION — update latest order
+       */
       case "CANCELLATION":
-      case "UNCANCELLATION":
-        if (order) {
-          order.autoRenew = event.type === "CANCELLATION" ? false : true;
-          order.isActive = event.type !== "CANCELLATION";
-          order.canceledAt = event.type === "CANCELLATION" ? new Date() : null;
-          await order.save();
-        }
-        await User.findByIdAndUpdate(user._id, { isSubscribed: event.type !== "CANCELLATION" });
-        break;
+      case "UNCANCELLATION": {
+        const latestOrder = await Order.findOne({ user: user._id }).sort({ createdAt: -1 });
 
-      case "EXPIRATION":
-        if (order) {
-          order.isActive = false;
-          order.autoRenew = false;
-          await order.save();
+        if (latestOrder) {
+          latestOrder.autoRenew = event.type === "CANCELLATION" ? false : true;
+          latestOrder.isActive = event.type !== "CANCELLATION";
+          latestOrder.canceledAt = event.type === "CANCELLATION" ? new Date() : null;
+          await latestOrder.save();
         }
-        await User.findByIdAndUpdate(user._id, { isSubscribed: false });
+
+        await User.findByIdAndUpdate(user._id, { isSubscribed: event.type !== "CANCELLATION" });
+        console.log(`⚙️ ${event.type} processed for user:`, user._id);
         break;
+      }
+
+      /**
+       * EXPIRATION — mark latest order inactive
+       */
+      case "EXPIRATION": {
+        const latestOrder = await Order.findOne({ user: user._id }).sort({ createdAt: -1 });
+
+        if (latestOrder) {
+          latestOrder.isActive = false;
+          latestOrder.autoRenew = false;
+          await latestOrder.save();
+        }
+
+        await User.findByIdAndUpdate(user._id, { isSubscribed: false });
+        console.log("⏰ Subscription expired for user:", user._id);
+        break;
+      }
 
       default:
         console.log("Unhandled RevenueCat event type:", event.type, "for user:", user._id);
@@ -347,7 +359,7 @@ router.post("/webhook", async (req, res) => {
 
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error("RevenueCat webhook error:", err);
+    console.error("❌ RevenueCat webhook error:", err);
     res.status(500).json({ success: false, message: "Webhook handling failed." });
   }
 });
