@@ -27,56 +27,35 @@ router.post("/", isAuthenticated, async (req, res) => {
       autoRenew = true,
     } = req.body;
 
-    const existingOrder = await Order.findOne({
+    // 1️⃣ Deactivate all previous active orders for this user
+    await Order.updateMany(
+      { user: req.user._id, isActive: true },
+      { $set: { isActive: false } }
+    );
+
+    // 2️⃣ Create a brand new order for every transaction
+    const newOrder = new Order({
       user: req.user._id,
-      isActive: true,
-      paymentStatus: "paid",
-    }).sort({ createdAt: -1 });
+      plan,
+      price,
+      billingCycle,
+      paymentStatus: paymentStatus || "paid",
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      transactionId: transactionId || `tx_${Date.now()}`, // ensure unique ID
+      entitlementId,
+      autoRenew,
+      isActive: paymentStatus === "paid",
+    });
 
-    let order;
-    if (existingOrder) {
-      existingOrder.plan = plan || existingOrder.plan;
-      existingOrder.billingCycle = billingCycle || existingOrder.billingCycle;
-      existingOrder.price = price || existingOrder.price;
-      existingOrder.startDate = new Date(startDate || existingOrder.startDate);
-      existingOrder.endDate = new Date(endDate || existingOrder.endDate);
-      existingOrder.transactionId = transactionId || existingOrder.transactionId;
-      existingOrder.entitlementId = entitlementId || existingOrder.entitlementId;
-      existingOrder.autoRenew = autoRenew;
-      existingOrder.paymentStatus = paymentStatus || existingOrder.paymentStatus;
-      existingOrder.isActive = paymentStatus === "paid";
-      await existingOrder.save();
-      order = existingOrder;
-    } else {
-      await Order.updateMany(
-        { user: req.user._id, isActive: true },
-        { $set: { isActive: false } }
-      );
+    const order = await newOrder.save();
 
-      const newOrder = new Order({
-        user: req.user._id,
-        plan,
-        price,
-        billingCycle,
-        paymentStatus: paymentStatus || "paid",
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        transactionId,
-        entitlementId,
-        autoRenew,
-        isActive: paymentStatus === "paid",
-      });
+    // 3️⃣ Update user subscription flag
+    await User.findByIdAndUpdate(req.user._id, {
+      isSubscribed: paymentStatus === "paid",
+    });
 
-      order = await newOrder.save();
-    }
-
-    if (paymentStatus === "paid") {
-      await User.findByIdAndUpdate(req.user._id, { isSubscribed: true });
-    } else {
-      await User.findByIdAndUpdate(req.user._id, { isSubscribed: false });
-    }
-
-    // Sync to RevenueCat
+    // 4️⃣ Sync to RevenueCat
     if (entitlementId && transactionId) {
       try {
         await axios.post(
@@ -104,7 +83,7 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     res.status(201).json({ success: true, order });
   } catch (err) {
-    console.error("Order creation/update failed:", err);
+    console.error("Order creation failed:", err);
     res.status(500).json({ success: false, message: "Order creation failed." });
   }
 });
@@ -246,7 +225,7 @@ router.get("/history", isAuthenticated, async (req, res) => {
 });
 
 /**
- * REVENUECAT WEBHOOK — enhanced logging (creates new order each time)
+ * REVENUECAT WEBHOOK — enhanced logging
  */
 router.post("/webhook", async (req, res) => {
   try {
@@ -278,8 +257,7 @@ router.post("/webhook", async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // Log incoming event
-    console.log("📩 RevenueCat webhook received:", {
+    console.log("RevenueCat webhook received:", {
       type: event.type,
       userId: user._id,
       username: user.username,
@@ -288,13 +266,18 @@ router.post("/webhook", async (req, res) => {
       expirationDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
     });
 
-    // Handle different event types
     switch (event.type) {
       /**
        * INITIAL PURCHASE or RENEWAL — always create new order
        */
       case "INITIAL_PURCHASE":
       case "RENEWAL": {
+        // Deactivate previous active orders
+        await Order.updateMany(
+          { user: user._id, isActive: true },
+          { $set: { isActive: false } }
+        );
+
         const newOrder = new Order({
           user: user._id,
           plan: event.product_id || "unknown",
@@ -312,7 +295,7 @@ router.post("/webhook", async (req, res) => {
         await newOrder.save();
         await User.findByIdAndUpdate(user._id, { isSubscribed: true });
 
-        console.log("✅ Created new order for user:", user._id);
+        console.log("Created new order for user:", user._id);
         break;
       }
 
@@ -331,7 +314,7 @@ router.post("/webhook", async (req, res) => {
         }
 
         await User.findByIdAndUpdate(user._id, { isSubscribed: event.type !== "CANCELLATION" });
-        console.log(`⚙️ ${event.type} processed for user:`, user._id);
+        console.log(`${event.type} processed for user:`, user._id);
         break;
       }
 
@@ -348,7 +331,7 @@ router.post("/webhook", async (req, res) => {
         }
 
         await User.findByIdAndUpdate(user._id, { isSubscribed: false });
-        console.log("⏰ Subscription expired for user:", user._id);
+        console.log("Subscription expired for user:", user._id);
         break;
       }
 
@@ -359,7 +342,7 @@ router.post("/webhook", async (req, res) => {
 
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error("❌ RevenueCat webhook error:", err);
+    console.error("RevenueCat webhook error:", err);
     res.status(500).json({ success: false, message: "Webhook handling failed." });
   }
 });
