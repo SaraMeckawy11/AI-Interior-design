@@ -69,28 +69,33 @@ router.delete("/pre-premium/:email", async (req, res) => {
  * @access Private (admin-only)
  */
 router.post("/set-subscription", async (req, res) => {
-  const { email, isSubscribed } = req.body;
+  try {
+    const { email, isSubscribed } = req.body;
 
-  if (!email || typeof isSubscribed !== "boolean") {
-    return res.status(400).json({
-      success: false,
-      message: "Email and isSubscribed (boolean) required",
+    if (!email || typeof isSubscribed !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "Email and isSubscribed (boolean) required",
+      });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      { isSubscribed },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      message: `User ${user.email} subscription updated to ${isSubscribed}`,
+      user: { email: user.email, isSubscribed: user.isSubscribed },
     });
+  } catch (error) {
+    console.error("Admin set-subscription error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
-
-  const user = await User.findOneAndUpdate(
-    { email: email.toLowerCase().trim() },
-    { isSubscribed },
-    { new: true }
-  );
-
-  if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-  res.json({
-    success: true,
-    message: `User ${user.email} subscription updated to ${isSubscribed}`,
-    user: { email: user.email, isSubscribed: user.isSubscribed },
-  });
 });
-
-export default router;
