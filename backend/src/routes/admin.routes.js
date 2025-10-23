@@ -11,7 +11,7 @@ const router = express.Router();
  */
 router.post("/pre-premium", async (req, res) => {
   try {
-    const { emails } = req.body; // 👈 accept array of emails
+    const { emails } = req.body; //  accept array of emails
 
     if (!emails || !Array.isArray(emails)) {
       return res.status(400).json({ success: false, message: "Emails array required" });
@@ -68,42 +68,29 @@ router.delete("/pre-premium/:email", async (req, res) => {
  * @desc Admin manually sets isSubscribed (true/false) for a user by email
  * @access Private (admin-only)
  */
+router.post("/set-subscription", async (req, res) => {
+  const { email, isSubscribed } = req.body;
 
-router.patch("/set-subscription", async (req, res) => {
-  try {
-    const { email, isSubscribed } = req.body;
-
-    if (!email || typeof isSubscribed !== "boolean") {
-      return res
-        .status(400)
-        .json({ success: false, message: "Email and isSubscribed (boolean) required" });
-    }
-
-    const user = await User.findOneAndUpdate(
-      { email: email.toLowerCase().trim() },
-      { isSubscribed },
-      { new: true }
-    );
-
-    if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
-    }
-
-    res.json({
-      success: true,
-      message: `User ${user.email} subscription updated to ${isSubscribed}`,
-      user: {
-        email: user.email,
-        isSubscribed: user.isSubscribed,
-      },
+  if (!email || typeof isSubscribed !== "boolean") {
+    return res.status(400).json({
+      success: false,
+      message: "Email and isSubscribed (boolean) required",
     });
-  } catch (error) {
-    console.error("Admin set-subscription error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
   }
-});
 
+  const user = await User.findOneAndUpdate(
+    { email: email.toLowerCase().trim() },
+    { isSubscribed },
+    { new: true }
+  );
+
+  if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+  res.json({
+    success: true,
+    message: `User ${user.email} subscription updated to ${isSubscribed}`,
+    user: { email: user.email, isSubscribed: user.isSubscribed },
+  });
+});
 
 export default router;
