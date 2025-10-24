@@ -2,6 +2,7 @@
 import express from 'express';
 import { isAuthenticated } from '../middleware/auth.middleware.js';
 import Order from '../models/Order.js';
+import User from '../models/User.js';
 
 const router = express.Router();
 
@@ -11,11 +12,11 @@ router.get('/me', isAuthenticated, async (req, res) => {
 
     // Get latest order
     const latestOrder = await Order.findOne({
-      user: user._id,
-      isActive: true,
+      user: user._id,      // get latest order regardless of isActive
     }).sort({ createdAt: -1 });
 
-    const isSubscribed = latestOrder && new Date(latestOrder.endDate) > new Date();
+    const isExpired = latestOrder ? new Date(latestOrder.endDate) < new Date() : true;
+    const isSubscribed = latestOrder && !isExpired && !user.manualDisabled;
     const autoRenew = latestOrder?.autoRenew || false;
     const subscriptionEndDate = latestOrder?.endDate || null;
 
@@ -28,9 +29,10 @@ router.get('/me', isAuthenticated, async (req, res) => {
         profileImage: user.profileImage,
         freeDesignsUsed: user.freeDesignsUsed || 0,
         isSubscribed,
-        isPremium: user.isPremium || false,   //  include manual premium flag
+        isPremium: user.isPremium || false,
         autoRenew,
         subscriptionEndDate,
+        manualDisabled: user.manualDisabled || false,
       },
     });
   } catch (err) {

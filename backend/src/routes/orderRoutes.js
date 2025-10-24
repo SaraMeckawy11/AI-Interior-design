@@ -306,16 +306,29 @@ router.post("/webhook", async (req, res) => {
       case "UNCANCELLATION": {
         const latestOrder = await Order.findOne({ user: user._id }).sort({ createdAt: -1 });
 
-        if (latestOrder) {
-          latestOrder.autoRenew = event.type === "CANCELLATION" ? false : true;
-          latestOrder.isActive = event.type !== "CANCELLATION";
-          latestOrder.canceledAt = event.type === "CANCELLATION" ? new Date() : null;
-          await latestOrder.save();
+       if (latestOrder) {
+        if (event.type === "CANCELLATION") {
+          // User canceled, disable auto-renew but keep subscription active until endDate
+          latestOrder.autoRenew = false;
+          latestOrder.canceledAt = new Date();
+          latestOrder.isActive = true; // subscription still valid until endDate
+        } else if (event.type === "UNCANCELLATION") {
+          // Only re-enable auto-renew if the user did NOT manually cancel
+          if (!latestOrder.canceledAt) {
+            latestOrder.autoRenew = true;
+          }
+          latestOrder.canceledAt = null;
+          latestOrder.isActive = true;
         }
+        await latestOrder.save();
+      }
 
-        await User.findByIdAndUpdate(user._id, { isSubscribed: event.type !== "CANCELLATION" });
-        console.log(`${event.type} processed for user:`, user._id);
-        break;
+      // Update user subscription flag based on isActive and endDate
+      const isExpired = new Date(latestOrder.endDate) < new Date();
+      await User.findByIdAndUpdate(user._id, { isSubscribed: latestOrder.isActive && !isExpired });
+
+      console.log(`${event.type} processed for user:`, user._id);
+
       }
 
       /**

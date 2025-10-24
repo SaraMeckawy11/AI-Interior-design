@@ -27,12 +27,12 @@ const userSchema = new mongoose.Schema(
         ref: "Order",
       },
     ],
-    // ✅ Track number of free designs used
+    //  Track number of free designs used
     freeDesignsUsed: {
       type: Number,
       default: 0,
     },
-    // ✅ Track total number of designs created
+    // Track total number of designs created
     designCount: {
       type: Number,
       default: 0,  // lifetime total
@@ -42,16 +42,20 @@ const userSchema = new mongoose.Schema(
       default: 0,  // currently not deleted
     },
 
-    // ✅ Subscription status (paid users)
+    // Subscription status (paid users)
     isSubscribed: {
       type: Boolean,
       default: false,
     },
-    // ✅ Manual Premium flag (friends/family accounts)
+    // Manual Premium flag (friends/family accounts)
     isPremium: {
       type: Boolean,
       default: false,
     },
+     manualDisabled: { 
+      type: Boolean, 
+      default: false 
+    }, // manually disabled by admin
   },
   { timestamps: true }
 );

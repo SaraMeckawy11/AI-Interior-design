@@ -11,7 +11,7 @@ const router = express.Router();
  */
 router.post("/pre-premium", async (req, res) => {
   try {
-    const { emails } = req.body; //  accept array of emails
+    const { emails } = req.body; // accept array of emails
 
     if (!emails || !Array.isArray(emails)) {
       return res.status(400).json({ success: false, message: "Emails array required" });
@@ -79,9 +79,10 @@ router.post("/set-subscription", async (req, res) => {
       });
     }
 
+    // Update user flag and manualDisabled directly on the user
     const user = await User.findOneAndUpdate(
       { email: email.toLowerCase().trim() },
-      { isSubscribed },
+      { isSubscribed, manualDisabled: !isSubscribed },
       { new: true }
     );
 
@@ -91,8 +92,12 @@ router.post("/set-subscription", async (req, res) => {
 
     res.json({
       success: true,
-      message: `User ${user.email} subscription updated to ${isSubscribed}`,
-      user: { email: user.email, isSubscribed: user.isSubscribed },
+      message: `User ${user.email} subscription manually updated to ${isSubscribed}`,
+      user: {
+        email: user.email,
+        isSubscribed: user.isSubscribed,
+        manualDisabled: user.manualDisabled,
+      },
     });
   } catch (error) {
     console.error("Admin set-subscription error:", error);
