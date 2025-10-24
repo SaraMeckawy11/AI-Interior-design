@@ -50,9 +50,9 @@ export default function Create() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
-  const [showFreeDesignsModal, setShowFreeDesignsModal] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalData, setModalData] = useState({ title: '', message: '' });
+  const [isManualDisabled, setIsManualDisabled] = useState(false);
 
  useEffect(() => {
   const fetchUserStatus = async () => {
@@ -72,13 +72,14 @@ export default function Create() {
       }
 
       const data = await res.json();
-      const { isSubscribed, freeDesignsUsed, isPremium } = data.user || {};
+      const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled } = data.user || {};
 
       setIsSubscribed(isSubscribed || false);
       setFreeDesignsUsed(freeDesignsUsed || 0);
       setIsPremium(isPremium || false);
+      setIsManualDisabled(manualDisabled || false); // <- add this
 
-      //  directly decide here if disclaimer should show
+      // Show free designs disclaimer
       if (!isSubscribed && !isPremium) {
         setModalData({
           title: 'Free Designs Disclaimer',
@@ -93,7 +94,6 @@ export default function Create() {
 
   fetchUserStatus();
 }, [token]);
-
 
   const pickImage = async () => {
     try {
@@ -183,6 +183,16 @@ export default function Create() {
       setModalData({
         title: 'Missing Information',
         message: 'Please upload a photo before continuing.',
+      });
+      setModalVisible(true);
+      return;
+    }
+
+    // Block user if manualDisabled is true
+    if (isManualDisabled) { // <- make sure you fetched this from /me API
+      setModalData({
+        title: 'Access Denied',
+        message: 'Your account is blocked from generating designs. Please contact support if this is a mistake.',
       });
       setModalVisible(true);
       return;

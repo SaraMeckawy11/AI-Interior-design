@@ -64,25 +64,24 @@ router.delete("/pre-premium/:email", async (req, res) => {
 });
 
 /**
- * @route PATCH /admin/set-subscription
- * @desc Admin manually sets isSubscribed (true/false) for a user by email
+ * @route POST /admin/block-user
+ * @desc Admin manually blocks or unblocks a user from generating designs
  * @access Private (admin-only)
  */
-router.post("/set-subscription", async (req, res) => {
+router.post("/block-user", async (req, res) => {
   try {
-    const { email, isSubscribed } = req.body;
+    const { email, block } = req.body; // block: true = block user, false = unblock
 
-    if (!email || typeof isSubscribed !== "boolean") {
+    if (!email || typeof block !== "boolean") {
       return res.status(400).json({
         success: false,
-        message: "Email and isSubscribed (boolean) required",
+        message: "Email and block (boolean) required",
       });
     }
 
-    // Update user flag and manualDisabled directly on the user
     const user = await User.findOneAndUpdate(
       { email: email.toLowerCase().trim() },
-      { isSubscribed, manualDisabled: !isSubscribed },
+      { manualDisabled: block },
       { new: true }
     );
 
@@ -92,17 +91,17 @@ router.post("/set-subscription", async (req, res) => {
 
     res.json({
       success: true,
-      message: `User ${user.email} subscription manually updated to ${isSubscribed}`,
+      message: `User ${user.email} has been ${block ? 'blocked' : 'unblocked'}.`,
       user: {
         email: user.email,
-        isSubscribed: user.isSubscribed,
         manualDisabled: user.manualDisabled,
       },
     });
   } catch (error) {
-    console.error("Admin set-subscription error:", error);
+    console.error("Admin block-user error:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 
 export default router;
