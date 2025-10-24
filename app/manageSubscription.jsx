@@ -115,7 +115,7 @@ export default function Subscription() {
         await Linking.openURL('https://play.google.com/store/account/subscriptions');
       }
 
-      await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/mark-cancel-request`, {
+      await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/cancel-latest`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

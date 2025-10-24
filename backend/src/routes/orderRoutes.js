@@ -169,7 +169,7 @@ router.post("/cancel-latest", isAuthenticated, async (req, res) => {
       return res.status(404).json({ success: false, message: "No active subscription found." });
     }
 
-    latestOrder.autoRenew = false;
+    latestOrder.autoRenew = false;  // stop auto-renew
     latestOrder.canceledAt = new Date();
     await latestOrder.save();
 
@@ -306,29 +306,23 @@ router.post("/webhook", async (req, res) => {
       case "UNCANCELLATION": {
         const latestOrder = await Order.findOne({ user: user._id }).sort({ createdAt: -1 });
 
-       if (latestOrder) {
-        if (event.type === "CANCELLATION") {
-          // User canceled, disable auto-renew but keep subscription active until endDate
-          latestOrder.autoRenew = false;
-          latestOrder.canceledAt = new Date();
-          latestOrder.isActive = true; // subscription still valid until endDate
-        } else if (event.type === "UNCANCELLATION") {
-          // Only re-enable auto-renew if the user did NOT manually cancel
-          if (!latestOrder.canceledAt) {
-            latestOrder.autoRenew = true;
+        if (latestOrder) {
+          if (event.type === "CANCELLATION") {
+            // RevenueCat cancellation (system), keep subscription active until endDate
+            latestOrder.autoRenew = false;
+            latestOrder.isActive = true;
+            // Do NOT set manualCancel here, only user-triggered cancel sets that
+          } else if (event.type === "UNCANCELLATION") {
+              // Re-enable auto-renew if subscription is still active
+              latestOrder.autoRenew = true;
           }
-          latestOrder.canceledAt = null;
-          latestOrder.isActive = true;
+          await latestOrder.save();
         }
-        await latestOrder.save();
-      }
 
-      // Update user subscription flag based on isActive and endDate
-      const isExpired = new Date(latestOrder.endDate) < new Date();
-      await User.findByIdAndUpdate(user._id, { isSubscribed: latestOrder.isActive && !isExpired });
+        const isExpired = new Date(latestOrder.endDate) < new Date();
+        await User.findByIdAndUpdate(user._id, { isSubscribed: latestOrder.isActive && !isExpired });
 
-      console.log(`${event.type} processed for user:`, user._id);
-
+        break;
       }
 
       /**

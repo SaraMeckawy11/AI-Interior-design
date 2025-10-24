@@ -16,7 +16,7 @@ router.get('/me', isAuthenticated, async (req, res) => {
     }).sort({ createdAt: -1 });
 
     const isExpired = latestOrder ? new Date(latestOrder.endDate) < new Date() : true;
-    const isSubscribed = latestOrder && !isExpired && !user.manualDisabled;
+    const isSubscribed = latestOrder && !isExpired 
     const autoRenew = latestOrder?.autoRenew || false;
     const subscriptionEndDate = latestOrder?.endDate || null;
 
