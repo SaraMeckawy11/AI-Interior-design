@@ -19,12 +19,26 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+      },
+      "android": {
+        "image": "latest"
+      },
+      "buildEnvironment": {
+        "NDK_VERSION": "27.1.12297006",
+        "JDK_VERSION": "17"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+      },
+      "android": {
+        "image": "latest"
+      },
+      "buildEnvironment": {
+        "NDK_VERSION": "27.1.12297006",
+        "JDK_VERSION": "17"
       }
     }
   },
