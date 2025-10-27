@@ -42,7 +42,8 @@
       "expo-image-picker",
       "expo-media-library",
       "expo-file-system",
-      "expo-localization"
+      "expo-localization",
+      "expo-build-properties"
     ]
   }
 }
