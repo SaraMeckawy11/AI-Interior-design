@@ -33,13 +33,5 @@ allprojects {
   }
 }
 
-// ✅ Define global SDK config
-ext {
-  compileSdkVersion = 35
-  targetSdkVersion = 35
-  buildToolsVersion = "35.0.0"
-  ndkVersion = "27.1.12297006" // ✅ Add this line to ensure 16KB memory page support
-}
-
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
