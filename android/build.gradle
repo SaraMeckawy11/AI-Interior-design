@@ -1,37 +1,28 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
+// Top-level build file for Livinai
 
 buildscript {
-  repositories {
-    google()
-    mavenCentral()
-  }
-  dependencies {
-    classpath('com.android.tools.build:gradle')
-    classpath('com.facebook.react:react-native-gradle-plugin')
-    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
-  }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Android Gradle Plugin
+        classpath("com.android.tools.build:gradle:8.1.0")
+        // Kotlin Gradle Plugin
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10")
+        // React Native Gradle Plugin
+        classpath("com.facebook.react:react-native-gradle-plugin:0.72.0")
+    }
 }
-
-def reactNativeAndroidDir = new File(
-  providers.exec {
-    workingDir(rootDir)
-    commandLine("node", "--print", "require.resolve('react-native/package.json')")
-  }.standardOutput.asText.get().trim(),
-  "../android"
-)
 
 allprojects {
-  repositories {
-    maven {
-      // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
-      url(reactNativeAndroidDir)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://www.jitpack.io' }
     }
-
-    google()
-    mavenCentral()
-    maven { url 'https://www.jitpack.io' }
-  }
 }
 
+// Apply Expo and React Native root project plugins
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
