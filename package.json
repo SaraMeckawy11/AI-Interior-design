@@ -26,7 +26,6 @@
     "cron": "^4.3.3",
     "csv-parser": "^3.2.0",
     "expo": "~53.0.23",
-    "expo-ads-admob": "^13.0.0",
     "expo-auth-session": "~6.2.1",
     "expo-blur": "~14.1.5",
     "expo-build-properties": "~0.14.8",
