@@ -14,10 +14,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.livinai.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      },
-      "config": {
-        "googleMobileAdsAppId": "ca-app-pub-4470538534931449~7850095110"
+        "ITSAppUsesNonExemptEncryption": false,
+        "GADApplicationIdentifier": "ca-app-pub-4470538534931449~7850095110" 
       }
     },
     "android": {
@@ -42,6 +40,7 @@
           "iosUrlScheme": "com.googleusercontent.apps.365853441307-c1frc7jb4tt7custuqaqn5ua7hnpu7i8"
         }
       ],
+      "react-native-google-mobile-ads",
       "expo-router",
       "expo-web-browser",
       "expo-secure-store",
@@ -49,14 +48,7 @@
       "expo-media-library",
       "expo-file-system",
       "expo-localization",
-      "expo-build-properties",
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-4470538534931449~7850095110",
-          "iosAppId": "ca-app-pub-4470538534931449~7850095110"
-        }
-      ]
+      "expo-build-properties"
     ]
   }
 }
