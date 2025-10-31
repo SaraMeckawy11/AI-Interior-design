@@ -14,8 +14,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.livinai.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "GADApplicationIdentifier": "ca-app-pub-4470538534931449~7850095110"
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -23,9 +22,6 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon1.png",
         "backgroundColor": "#ffffff"
-      },
-      "config": {
-        "googleMobileAdsAppId": "ca-app-pub-4470538534931449~7850095110"
       }
     },
     "extra": {
