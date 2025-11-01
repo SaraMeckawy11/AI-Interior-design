@@ -90,9 +90,14 @@ export default function Upgrade() {
   const handleWatchAd = () => {
     rewardedAd.load();
 
-    const adListener = rewardedAd.addAdEventListener('rewarded', (event) => {
-      if (event.type === RewardedAdEventType.EARNED_REWARD) {
-        if (adsWatched + 1 >= 3) {
+    const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      rewardedAd.show();
+    });
+
+    const unsubscribeEarned = rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
+      setAdsWatched(prev => {
+        const newCount = prev + 1;
+        if (newCount >= 3) {
           // Unlock 1 design render
           fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
             method: 'POST',
@@ -101,21 +106,26 @@ export default function Upgrade() {
           })
             .then(() => {
               setFreeDesignsUsed(prev => Math.max(0, prev - 1));
-              setAdsWatched(0);
               Alert.alert('🎉 Unlocked!', 'You can now generate 1 extra design render.');
             })
             .catch(err => console.error(err));
+          return 0; // reset counter after unlocking
         } else {
-          setAdsWatched(prev => prev + 1);
-          Alert.alert('🎬 Video watched', `You watched ${adsWatched + 1}/3 videos`);
+          Alert.alert('🎬 Video watched', `You watched ${newCount}/3 videos`);
+          return newCount;
         }
-      }
-      if (event.type === RewardedAdEventType.CLOSED) {
-        rewardedAd.load();
-      }
+      });
     });
 
-    return () => adListener(); // cleanup
+    const unsubscribeClosed = rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+      rewardedAd.load(); // preload next ad
+    });
+
+    return () => {
+      unsubscribeLoaded();
+      unsubscribeEarned();
+      unsubscribeClosed();
+    };
   };
 
   const handleUpgrade = async () => {
@@ -140,7 +150,7 @@ export default function Upgrade() {
       const entitlementId = activeEntitlement?.identifier;
 
       const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+      const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const transactionId = `TXN-${datePart}-${randomPart}`;
 
       const backendPayload = {

@@ -58,4 +58,30 @@ router.post('/unlock-design', isAuthenticated, async (req, res) => {
   }
 });
 
+router.post('/watch-ad', isAuthenticated, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    user.adsWatched = (user.adsWatched || 0) + 1;
+
+    // Unlock free design every 3 ads
+    if (user.adsWatched >= 3) {
+      user.freeDesignsUsed = Math.max(0, (user.freeDesignsUsed || 0) - 1);
+      user.adsWatched = 0; // reset counter
+    }
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      freeDesignsUsed: user.freeDesignsUsed,
+      adsWatched: user.adsWatched,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+
 export default router;
