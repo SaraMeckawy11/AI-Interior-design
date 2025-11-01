@@ -6,7 +6,8 @@ import COLORS from '../constants/colors';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../authStore';
 import purchases, { LOG_LEVEL } from 'react-native-purchases';
-import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
+import { RewardedAd, AdEventType, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
+
 
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
@@ -18,7 +19,6 @@ export default function Upgrade() {
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [offerings, setOfferings] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [adsWatched, setAdsWatched] = useState(0);
   const router = useRouter();
 
   // Rewarded ad setup
@@ -30,7 +30,6 @@ export default function Upgrade() {
       try {
         purchases.setLogLevel(LOG_LEVEL.DEBUG);
 
-        // Fetch user info
         let user = null;
         if (token) {
           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
@@ -41,16 +40,13 @@ export default function Upgrade() {
             user = data.user;
           }
         }
-
         if (!user?._id) return;
 
-        // RevenueCat init
         await purchases.configure({
           apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
           appUserID: user._id.toString(),
         });
 
-        // Fetch offerings
         const o = await purchases.getOfferings();
         if (o?.current?.availablePackages?.length > 0) {
           setOfferings(o);
@@ -68,7 +64,6 @@ export default function Upgrade() {
         setLoading(false);
       }
     };
-
     init();
   }, [token]);
 
@@ -90,37 +85,42 @@ export default function Upgrade() {
   const handleWatchAd = () => {
     rewardedAd.load();
 
+    // Show ad when loaded
     const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
       rewardedAd.show();
     });
 
-    const unsubscribeEarned = rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
-      setAdsWatched(prev => {
-        const newCount = prev + 1;
-        if (newCount >= 3) {
-          // Unlock 1 design render
-          fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
+    // Track reward and update DB
+    const unsubscribeEarned = rewardedAd.addAdEventListener(
+      RewardedAdEventType.EARNED_REWARD,
+      async () => {
+        try {
+          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ decrement: 1 }),
-          })
-            .then(() => {
-              setFreeDesignsUsed(prev => Math.max(0, prev - 1));
-              Alert.alert('🎉 Unlocked!', 'You can now generate 1 extra design render.');
-            })
-            .catch(err => console.error(err));
-          return 0; // reset counter after unlocking
-        } else {
-          Alert.alert('🎬 Video watched', `You watched ${newCount}/3 videos`);
-          return newCount;
+          });
+          const data = await res.json();
+          if (data.success) {
+            setFreeDesignsUsed(data.freeDesignsUsed);
+            Alert.alert(
+              '🎬 Video watched',
+              data.adsWatched === 0
+                ? '🎉 Unlocked! You can now generate 1 extra design render.'
+                : `You watched ${data.adsWatched}/3 videos`
+            );
+          }
+        } catch (err) {
+          console.error(err);
         }
-      });
-    });
+      }
+    );
 
+    // Preload next ad
     const unsubscribeClosed = rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-      rewardedAd.load(); // preload next ad
+      rewardedAd.load();
     });
 
+    // Cleanup listeners
     return () => {
       unsubscribeLoaded();
       unsubscribeEarned();
@@ -144,7 +144,6 @@ export default function Upgrade() {
 
     try {
       const purchaseResult = await purchases.purchasePackage(chosenPackage);
-
       const entitlements = purchaseResult?.customerInfo?.entitlements?.active;
       const activeEntitlement = Object.values(entitlements || {})[0];
       const entitlementId = activeEntitlement?.identifier;
