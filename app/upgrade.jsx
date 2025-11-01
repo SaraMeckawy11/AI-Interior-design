@@ -6,8 +6,7 @@ import COLORS from '../constants/colors';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../authStore';
 import purchases, { LOG_LEVEL } from 'react-native-purchases';
-import { RewardedAd, AdEventType, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
-
+import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
@@ -16,7 +15,7 @@ export default function Upgrade() {
   const [weeklyPrice, setWeeklyPrice] = useState(5.99);
   const [yearlyPrice, setYearlyPrice] = useState(50.99);
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
+  const [coins, setCoins] = useState(0);
   const [offerings, setOfferings] = useState(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -57,7 +56,7 @@ export default function Upgrade() {
         }
 
         setIsSubscribed(Boolean(user?.isSubscribed));
-        setFreeDesignsUsed(Number(user?.freeDesignsUsed || 0));
+        setCoins(Number(user?.coins || 0)); // 🪙 load user coins
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
@@ -81,16 +80,14 @@ export default function Upgrade() {
     return `${(plan === 'weekly' ? weeklyPrice : yearlyPrice).toFixed(2)} ${currencyCode}`;
   };
 
-  // Watch rewarded ad
+  // 🎥 Watch rewarded ad → earn coins
   const handleWatchAd = () => {
     rewardedAd.load();
 
-    // Show ad when loaded
     const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
       rewardedAd.show();
     });
 
-    // Track reward and update DB
     const unsubscribeEarned = rewardedAd.addAdEventListener(
       RewardedAdEventType.EARNED_REWARD,
       async () => {
@@ -101,31 +98,49 @@ export default function Upgrade() {
           });
           const data = await res.json();
           if (data.success) {
-            setFreeDesignsUsed(data.freeDesignsUsed);
-            Alert.alert(
-              '🎬 Video watched',
-              data.adsWatched === 0
-                ? '🎉 Unlocked! You can now generate 1 extra design render.'
-                : `You watched ${data.adsWatched}/3 videos`
-            );
+            setCoins(data.coins);
+            Alert.alert('🎬 Video watched', `You earned +1 coin! You now have ${data.coins} coins.`);
           }
         } catch (err) {
           console.error(err);
+          Alert.alert('Error', 'Failed to update coins after watching ad.');
         }
       }
     );
 
-    // Preload next ad
     const unsubscribeClosed = rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-      rewardedAd.load();
+      rewardedAd.load(); // preload next ad
     });
 
-    // Cleanup listeners
     return () => {
       unsubscribeLoaded();
       unsubscribeEarned();
       unsubscribeClosed();
     };
+  };
+
+  // 🪙 Spend coins to unlock design
+  const handleUnlockDesign = async () => {
+    if (coins <= 0) {
+      Alert.alert('Not enough coins', 'You need at least 1 coin to unlock a design render.');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decrement: 1 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCoins(data.coins);
+        Alert.alert('🎨 Unlocked!', 'You successfully used 1 coin to unlock a design render.');
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'Failed to unlock design.');
+    }
   };
 
   const handleUpgrade = async () => {
@@ -188,17 +203,23 @@ export default function Upgrade() {
       <Text style={styles.title}>Upgrade to Pro</Text>
       <Text style={styles.subtitle}>Unlock the full LIVINAI experience with premium features.</Text>
 
-      {freeDesignsUsed >= 2 && !isSubscribed && (
-        <View style={styles.warningBox}>
-          <Text style={styles.warningTitle}>You have used your 2 free designs.</Text>
-          <Text style={styles.warningText}>
-            Watch 3 ads to unlock 1 extra design render or upgrade for unlimited access.
-          </Text>
-          <TouchableOpacity style={styles.upgradeButton} onPress={handleWatchAd}>
-            <Text style={styles.upgradeButtonText}>Watch Ad</Text>
+      {/* 🪙 Coins System */}
+      <View style={styles.warningBox}>
+        <Text style={styles.warningTitle}>Your Coins: {coins}</Text>
+        <Text style={styles.warningText}>
+          Watch ads to earn coins. Each render costs 1 coin.
+        </Text>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 10 }}>
+          <TouchableOpacity style={[styles.upgradeButton, { marginRight: 8 }]} onPress={handleWatchAd}>
+            <Text style={styles.upgradeButtonText}>Watch Ad (+1 Coin)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.upgradeButton} onPress={handleUnlockDesign}>
+            <Text style={styles.upgradeButtonText}>Use 1 Coin</Text>
           </TouchableOpacity>
         </View>
-      )}
+      </View>
 
       <View style={styles.featureList}>
         {['Ad-free experience', 'Unlimited design renders'].map((feature, idx) => (

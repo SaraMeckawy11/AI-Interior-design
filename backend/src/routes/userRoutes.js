@@ -1,4 +1,3 @@
-// routes/userRoutes.js
 import express from 'express';
 import { isAuthenticated } from '../middleware/auth.middleware.js';
 import Order from '../models/Order.js';
@@ -6,17 +5,18 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
+// GET /api/users/me
 router.get('/me', isAuthenticated, async (req, res) => {
   try {
     const user = req.user;
 
     // Get latest order
     const latestOrder = await Order.findOne({
-      user: user._id,      // get latest order regardless of isActive
+      user: user._id,
     }).sort({ createdAt: -1 });
 
     const isExpired = latestOrder ? new Date(latestOrder.endDate) < new Date() : true;
-    const isSubscribed = latestOrder && !isExpired 
+    const isSubscribed = latestOrder && !isExpired;
     const autoRenew = latestOrder?.autoRenew || false;
     const subscriptionEndDate = latestOrder?.endDate || null;
 
@@ -37,24 +37,22 @@ router.get('/me', isAuthenticated, async (req, res) => {
         manualDisabled: user.manualDisabled || false,
       },
     });
-
   } catch (err) {
     console.error('/api/users/me error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-
-// POST /api/users/unlock-design
 // POST /api/users/unlock-design
 router.post('/unlock-design', isAuthenticated, async (req, res) => {
   try {
     const user = req.user;
 
-    // Prefer using adCoins before decrementing freeDesignsUsed
+    // Use coins to unlock designs
     if ((user.adCoins || 0) > 0) {
       user.adCoins -= 1;
     } else {
+      // fallback to old logic just in case
       const decrement = Number(req.body.decrement) || 1;
       user.freeDesignsUsed = Math.max(0, user.freeDesignsUsed - decrement);
     }
@@ -63,15 +61,14 @@ router.post('/unlock-design', isAuthenticated, async (req, res) => {
 
     res.status(200).json({
       success: true,
-      freeDesignsUsed: user.freeDesignsUsed,
       adCoins: user.adCoins,
+      freeDesignsUsed: user.freeDesignsUsed,
     });
   } catch (err) {
     console.error('/api/users/unlock-design error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
-
 
 // POST /api/users/watch-ad
 router.post('/watch-ad', isAuthenticated, async (req, res) => {
@@ -82,7 +79,7 @@ router.post('/watch-ad', isAuthenticated, async (req, res) => {
 
     // Every 3 watched ads gives 1 adCoin
     if (user.adsWatched >= 3) {
-      user.adCoins = (user.adCoins || 0) + 1; // add 1 coin
+      user.adCoins = (user.adCoins || 0) + 1;
       user.adsWatched = 0; // reset counter
     }
 
@@ -97,7 +94,7 @@ router.post('/watch-ad', isAuthenticated, async (req, res) => {
       remaining,
       message:
         remaining === 0
-          ? '🎉 You earned 1 design coin!'
+          ? 'You earned 1 design coin!'
           : `Watch ${remaining} more ads to earn 1 coin.`,
     });
   } catch (err) {
@@ -105,6 +102,5 @@ router.post('/watch-ad', isAuthenticated, async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
-
 
 export default router;
