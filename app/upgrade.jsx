@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import styles from '../assets/styles/upgrade.styles';
 import COLORS from '../constants/colors';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../authStore';
 import purchases, { LOG_LEVEL } from 'react-native-purchases';
+import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
@@ -17,14 +18,19 @@ export default function Upgrade() {
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [offerings, setOfferings] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [adsWatched, setAdsWatched] = useState(0);
   const router = useRouter();
+
+  // Rewarded ad setup
+  const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+  const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 
   useEffect(() => {
     const init = async () => {
       try {
         purchases.setLogLevel(LOG_LEVEL.DEBUG);
 
-        // Fetch user info from backend
+        // Fetch user info
         let user = null;
         if (token) {
           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
@@ -36,13 +42,9 @@ export default function Upgrade() {
           }
         }
 
-        if (!user?._id) {
-          console.log("User not ready, skipping RevenueCat init.");
-          return;
-        }
-        console.log("RevenueCat will use appUserID:", user._id.toString());
+        if (!user?._id) return;
 
-        // Initialize RevenueCat with user ID
+        // RevenueCat init
         await purchases.configure({
           apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
           appUserID: user._id.toString(),
@@ -52,15 +54,12 @@ export default function Upgrade() {
         const o = await purchases.getOfferings();
         if (o?.current?.availablePackages?.length > 0) {
           setOfferings(o);
-
           const weeklyPkg = o.current.weekly || o.current.availablePackages.find(p => p.packageType === 'WEEKLY');
           const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
-
           const product = weeklyPkg?.product || annualPkg?.product;
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
-        // Set subscription state
         setIsSubscribed(Boolean(user?.isSubscribed));
         setFreeDesignsUsed(Number(user?.freeDesignsUsed || 0));
       } catch (err) {
@@ -87,6 +86,38 @@ export default function Upgrade() {
     return `${(plan === 'weekly' ? weeklyPrice : yearlyPrice).toFixed(2)} ${currencyCode}`;
   };
 
+  // Watch rewarded ad
+  const handleWatchAd = () => {
+    rewardedAd.load();
+
+    const adListener = rewardedAd.addAdEventListener('rewarded', (event) => {
+      if (event.type === RewardedAdEventType.EARNED_REWARD) {
+        if (adsWatched + 1 >= 3) {
+          // Unlock 1 design render
+          fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decrement: 1 }),
+          })
+            .then(() => {
+              setFreeDesignsUsed(prev => Math.max(0, prev - 1));
+              setAdsWatched(0);
+              Alert.alert('🎉 Unlocked!', 'You can now generate 1 extra design render.');
+            })
+            .catch(err => console.error(err));
+        } else {
+          setAdsWatched(prev => prev + 1);
+          Alert.alert('🎬 Video watched', `You watched ${adsWatched + 1}/3 videos`);
+        }
+      }
+      if (event.type === RewardedAdEventType.CLOSED) {
+        rewardedAd.load();
+      }
+    });
+
+    return () => adListener(); // cleanup
+  };
+
   const handleUpgrade = async () => {
     const chosenPackage = getPackageForPlan(selectedPlan);
     if (!chosenPackage) return;
@@ -107,7 +138,7 @@ export default function Upgrade() {
       const entitlements = purchaseResult?.customerInfo?.entitlements?.active;
       const activeEntitlement = Object.values(entitlements || {})[0];
       const entitlementId = activeEntitlement?.identifier;
-      
+
       const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
       const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
       const transactionId = `TXN-${datePart}-${randomPart}`;
@@ -125,10 +156,9 @@ export default function Upgrade() {
       };
 
       const endpoint = `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`;
-      const method = 'POST';
 
       const res = await fetch(endpoint, {
-        method,
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(backendPayload),
       });
@@ -152,7 +182,12 @@ export default function Upgrade() {
       {freeDesignsUsed >= 2 && !isSubscribed && (
         <View style={styles.warningBox}>
           <Text style={styles.warningTitle}>You have used your 2 free designs.</Text>
-          <Text style={styles.warningText}>Upgrade now to continue using LIVINAI without limits.</Text>
+          <Text style={styles.warningText}>
+            Watch 3 ads to unlock 1 extra design render or upgrade for unlimited access.
+          </Text>
+          <TouchableOpacity style={styles.upgradeButton} onPress={handleWatchAd}>
+            <Text style={styles.upgradeButtonText}>Watch Ad</Text>
+          </TouchableOpacity>
         </View>
       )}
 

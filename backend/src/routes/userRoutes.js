@@ -41,4 +41,21 @@ router.get('/me', isAuthenticated, async (req, res) => {
   }
 });
 
+
+// POST /api/users/unlock-design
+router.post('/unlock-design', isAuthenticated, async (req, res) => {
+  try {
+    const user = req.user;
+    const decrement = Number(req.body.decrement) || 1;
+
+    user.freeDesignsUsed = Math.max(0, user.freeDesignsUsed - decrement);
+    await user.save();
+
+    res.status(200).json({ success: true, freeDesignsUsed: user.freeDesignsUsed });
+  } catch (err) {
+    console.error('/api/users/unlock-design error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 export default router;
