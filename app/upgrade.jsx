@@ -1,29 +1,32 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import styles from '../assets/styles/upgrade.styles';
-import COLORS from '../constants/colors';
 import { useRouter } from 'expo-router';
-import { useAuthStore } from '../authStore';
-import purchases, { LOG_LEVEL } from 'react-native-purchases';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
+import purchases, { LOG_LEVEL } from 'react-native-purchases';
+import styles from '../assets/styles/upgrade.styles';
+import { useAuthStore } from '../authStore';
+import COLORS from '../constants/colors';
+
+// ✅ Create the rewarded ad only once (outside component)
+const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
   const [selectedPlan, setSelectedPlan] = useState('weekly');
   const [currencyCode, setCurrencyCode] = useState('USD');
-  const [weeklyPrice, setWeeklyPrice] = useState(5.99);
-  const [yearlyPrice, setYearlyPrice] = useState(50.99);
+  const [weeklyPrice] = useState(5.99);
+  const [yearlyPrice] = useState(50.99);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [coins, setCoins] = useState(0);
   const [offerings, setOfferings] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [adMessage, setAdMessage] = useState('');
+  const [isAdLoaded, setIsAdLoaded] = useState(false);
   const router = useRouter();
 
-  // Rewarded ad setup
-  const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
-  const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
-
+  // ✅ Initialize purchases and user data
   useEffect(() => {
     const init = async () => {
       try {
@@ -42,21 +45,19 @@ export default function Upgrade() {
         if (!user?._id) return;
 
         await purchases.configure({
-          apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
+          apiKey: 'goog_uVORiYiVgmggjNiOAHvBLferRyp',
           appUserID: user._id.toString(),
         });
 
         const o = await purchases.getOfferings();
-        if (o?.current?.availablePackages?.length > 0) {
+        if (o?.current) {
           setOfferings(o);
-          const weeklyPkg = o.current.weekly || o.current.availablePackages.find(p => p.packageType === 'WEEKLY');
-          const annualPkg = o.current.annual || o.current.availablePackages.find(p => p.packageType === 'ANNUAL');
-          const product = weeklyPkg?.product || annualPkg?.product;
+          const product = o.current.weekly?.product || o.current.annual?.product;
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
         setIsSubscribed(Boolean(user?.isSubscribed));
-        setCoins(Number(user?.coins || 0)); // 🪙 load user coins
+        setCoins(Number(user?.adCoins || 0));
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
@@ -66,81 +67,88 @@ export default function Upgrade() {
     init();
   }, [token]);
 
+  // ✅ Setup rewarded ad (each ad gives 1 coin directly)
+  useEffect(() => {
+    if (!RewardedAdEventType || typeof RewardedAdEventType !== 'object') {
+      console.error('RewardedAdEventType is not defined properly');
+      return;
+    }
+
+    const listeners = [];
+
+    if (RewardedAdEventType.LOADED) {
+      listeners.push(
+        rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+          setIsAdLoaded(true);
+          setAdMessage('Ad loaded — showing now...');
+          rewardedAd.show();
+          setIsAdLoaded(false);
+        })
+      );
+    }
+
+    if (RewardedAdEventType.EARNED_REWARD) {
+      listeners.push(
+        rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
+          try {
+            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/add-coin`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            });
+            const data = await res.json();
+            if (data.success) {
+              setCoins(Number(data.adCoins || coins + 1));
+              setAdMessage('You earned 1 coin!');
+            } else {
+              setCoins((prev) => prev + 1); // fallback local increment
+              setAdMessage('You earned 1 coin!');
+            }
+          } catch (err) {
+            console.error('reward error', err);
+            // fallback local increment if backend fails
+            setCoins((prev) => prev + 1);
+            setAdMessage('You earned 1 coin!');
+          }
+        })
+      );
+    }
+
+    if (RewardedAdEventType.CLOSED) {
+      listeners.push(
+        rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+          rewardedAd.load();
+        })
+      );
+    }
+
+    rewardedAd.load();
+
+    return () => listeners.forEach((unsub) => unsub());
+  }, [token]);
+
+  const handleWatchAd = () => {
+    if (isAdLoaded) {
+      setAdMessage('Playing ad...');
+      rewardedAd.show();
+      setIsAdLoaded(false);
+    } else {
+      setAdMessage('Loading ad...');
+      rewardedAd.load();
+    }
+  };
+
   const getPackageForPlan = (plan) => {
     if (!offerings?.current) return undefined;
     const current = offerings.current;
     return plan === 'weekly'
-      ? current.weekly || current.availablePackages.find(p => p.packageType === 'WEEKLY')
-      : current.annual || current.availablePackages.find(p => p.packageType === 'ANNUAL');
+      ? current.weekly || current.availablePackages.find((p) => p.packageType === 'WEEKLY')
+      : current.annual || current.availablePackages.find((p) => p.packageType === 'ANNUAL');
   };
 
   const getPriceStringForPlan = (plan) => {
     const pkg = getPackageForPlan(plan);
     if (pkg?.product?.priceString) return pkg.product.priceString;
     return `${(plan === 'weekly' ? weeklyPrice : yearlyPrice).toFixed(2)} ${currencyCode}`;
-  };
-
-  // 🎥 Watch rewarded ad → earn coins
-  const handleWatchAd = () => {
-    rewardedAd.load();
-
-    const unsubscribeLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
-      rewardedAd.show();
-    });
-
-    const unsubscribeEarned = rewardedAd.addAdEventListener(
-      RewardedAdEventType.EARNED_REWARD,
-      async () => {
-        try {
-          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          });
-          const data = await res.json();
-          if (data.success) {
-            setCoins(data.coins);
-            Alert.alert('🎬 Video watched', `You earned +1 coin! You now have ${data.coins} coins.`);
-          }
-        } catch (err) {
-          console.error(err);
-          Alert.alert('Error', 'Failed to update coins after watching ad.');
-        }
-      }
-    );
-
-    const unsubscribeClosed = rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-      rewardedAd.load(); // preload next ad
-    });
-
-    return () => {
-      unsubscribeLoaded();
-      unsubscribeEarned();
-      unsubscribeClosed();
-    };
-  };
-
-  // 🪙 Spend coins to unlock design
-  const handleUnlockDesign = async () => {
-    if (coins <= 0) {
-      Alert.alert('Not enough coins', 'You need at least 1 coin to unlock a design render.');
-      return;
-    }
-
-    try {
-      const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decrement: 1 }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCoins(data.coins);
-        Alert.alert('🎨 Unlocked!', 'You successfully used 1 coin to unlock a design render.');
-      }
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Error', 'Failed to unlock design.');
-    }
   };
 
   const handleUpgrade = async () => {
@@ -180,7 +188,6 @@ export default function Upgrade() {
       };
 
       const endpoint = `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`;
-
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -192,33 +199,32 @@ export default function Upgrade() {
       setIsSubscribed(true);
       router.replace('(tabs)/profile');
     } catch (error) {
-      console.error('Purchase or backend sync failed:', error);
+      console.error('Purchase failed:', error);
+      setAdMessage('Purchase failed. Try again.');
     }
   };
 
-  if (loading) return <ActivityIndicator color={COLORS.primaryDark} size="large" style={styles.container} />;
+  if (loading)
+    return <ActivityIndicator color={COLORS.primaryDark} size="large" style={styles.container} />;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Upgrade to Pro</Text>
       <Text style={styles.subtitle}>Unlock the full LIVINAI experience with premium features.</Text>
 
-      {/* 🪙 Coins System */}
-      <View style={styles.warningBox}>
-        <Text style={styles.warningTitle}>Your Coins: {coins}</Text>
-        <Text style={styles.warningText}>
-          Watch ads to earn coins. Each render costs 1 coin.
-        </Text>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 10 }}>
-          <TouchableOpacity style={[styles.upgradeButton, { marginRight: 8 }]} onPress={handleWatchAd}>
-            <Text style={styles.upgradeButtonText}>Watch Ad (+1 Coin)</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.upgradeButton} onPress={handleUnlockDesign}>
-            <Text style={styles.upgradeButtonText}>Use 1 Coin</Text>
-          </TouchableOpacity>
+      {/* Coins section */}
+      <View style={styles.coinContainer}>
+        <View style={styles.coinRow}>
+          <Text style={styles.coinValue}>{coins} Coins</Text>
         </View>
+        <Text style={styles.coinSubtitle}>Watch ads to earn coins — each ad gives 1 coin</Text>
+
+        <TouchableOpacity style={styles.watchAdButton} onPress={handleWatchAd}>
+          <Ionicons name="play-circle-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+          <Text style={styles.watchAdButtonText}>Watch Ad</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.adStatusText}>{adMessage || 'Watch an ad to earn a coin.'}</Text>
       </View>
 
       <View style={styles.featureList}>

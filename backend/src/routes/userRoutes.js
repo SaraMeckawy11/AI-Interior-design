@@ -71,31 +71,20 @@ router.post('/unlock-design', isAuthenticated, async (req, res) => {
 });
 
 // POST /api/users/watch-ad
+// POST /api/users/watch-ad
 router.post('/watch-ad', isAuthenticated, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
-    user.adsWatched = (user.adsWatched || 0) + 1;
-
-    // Every 3 watched ads gives 1 adCoin
-    if (user.adsWatched >= 3) {
-      user.adCoins = (user.adCoins || 0) + 1;
-      user.adsWatched = 0; // reset counter
-    }
+    // Each watched ad gives 1 coin directly
+    user.adCoins = (user.adCoins || 0) + 1;
 
     await user.save();
-
-    const remaining = 3 - user.adsWatched;
 
     res.status(200).json({
       success: true,
       adCoins: user.adCoins,
-      adsWatched: user.adsWatched,
-      remaining,
-      message:
-        remaining === 0
-          ? 'You earned 1 design coin!'
-          : `Watch ${remaining} more ads to earn 1 coin.`,
+      message: 'You earned 1 coin!',
     });
   } catch (err) {
     console.error('/api/users/watch-ad error:', err);

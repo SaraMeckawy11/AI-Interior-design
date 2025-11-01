@@ -56,10 +56,6 @@ const userSchema = new mongoose.Schema(
       type: Boolean, 
       default: false 
     }, // manually disabled by admin
-    adsWatched: { 
-      type: Number, 
-      default: 0 
-    },
     adCoins: { 
       type: Number, 
       default: 0 

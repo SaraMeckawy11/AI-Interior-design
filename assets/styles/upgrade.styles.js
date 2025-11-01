@@ -302,5 +302,74 @@ modalButtonText: {
 modalIcon: {
   marginRight: moderateScale(8),
 },
+coinContainer: {
+  backgroundColor: COLORS.cardBackground || '#ffffff',
+  borderRadius: 20,
+  paddingVertical: verticalScale(18),
+  paddingHorizontal: scale(20),
+  marginBottom: verticalScale(28),
+  alignItems: 'center',
+  justifyContent: 'center',
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.08,
+  shadowRadius: 10,
+  elevation: 4,
+  borderWidth: 1,
+  borderColor: 'rgba(0,0,0,0.05)',
+},
+
+coinRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginBottom: verticalScale(8),
+},
+
+coinIcon: {
+  marginRight: 8,
+},
+
+coinValue: {
+  fontSize: 22,
+  fontWeight: '700',
+  color: COLORS.primaryDark,
+},
+
+coinSubtitle: {
+  fontSize: 14,
+  color: '#666',
+  textAlign: 'center',
+  marginBottom: verticalScale(12),
+},
+
+watchAdButton: {
+  backgroundColor: COLORS.primaryDark,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingVertical: verticalScale(10),
+  paddingHorizontal: scale(26),
+  borderRadius: 30,
+  shadowColor: COLORS.primaryDark,
+  shadowOffset: { width: 0, height: 3 },
+  shadowOpacity: 0.15,
+  shadowRadius: 5,
+  elevation: 3,
+},
+
+watchAdButtonText: {
+  color: '#fff',
+  fontSize: 15,
+  fontWeight: '600',
+},
+
+adStatusText: {
+  fontSize: 13,
+  color: COLORS.textSecondary || '#777',
+  textAlign: 'center',
+  marginTop: 10,
+},
+
 
 });
