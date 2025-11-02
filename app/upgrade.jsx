@@ -24,6 +24,7 @@ export default function Upgrade() {
   const [loading, setLoading] = useState(true);
   const [adMessage, setAdMessage] = useState('');
   const [isAdLoaded, setIsAdLoaded] = useState(false);
+  const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
   const router = useRouter();
 
   // ✅ Initialize purchases and user data
@@ -56,7 +57,8 @@ export default function Upgrade() {
           if (product?.currencyCode) setCurrencyCode(product.currencyCode);
         }
 
-        setIsSubscribed(Boolean(user?.isSubscribed));
+        // ✅ Ensure isSubscribed is strictly boolean
+        setIsSubscribed(user?.isSubscribed === true || user?.isSubscribed === 'true');
         setCoins(Number(user?.adCoins || 0));
       } catch (err) {
         console.error('Initialization error:', err);
@@ -67,7 +69,7 @@ export default function Upgrade() {
     init();
   }, [token]);
 
-  // ✅ Setup rewarded ad (each ad gives 1 coin directly)
+  // ✅ Setup rewarded ad logic
   useEffect(() => {
     if (!RewardedAdEventType || typeof RewardedAdEventType !== 'object') {
       console.error('RewardedAdEventType is not defined properly');
@@ -80,9 +82,11 @@ export default function Upgrade() {
       listeners.push(
         rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
           setIsAdLoaded(true);
-          setAdMessage('Ad loaded — showing now...');
-          rewardedAd.show();
-          setIsAdLoaded(false);
+          if (userInitiatedLoad) {
+            setAdMessage('Ad loaded. Playing now...');
+            rewardedAd.show();
+            setUserInitiatedLoad(false);
+          }
         })
       );
     }
@@ -91,23 +95,21 @@ export default function Upgrade() {
       listeners.push(
         rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
           try {
-            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/add-coin`, {
+            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`, {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             });
             const data = await res.json();
             if (data.success) {
               setCoins(Number(data.adCoins || coins + 1));
-              setAdMessage('You earned 1 coin!');
             } else {
-              setCoins((prev) => prev + 1); // fallback local increment
-              setAdMessage('You earned 1 coin!');
+              setCoins((prev) => prev + 1);
             }
           } catch (err) {
             console.error('reward error', err);
-            // fallback local increment if backend fails
             setCoins((prev) => prev + 1);
-            setAdMessage('You earned 1 coin!');
+          } finally {
+            setAdMessage('');
           }
         })
       );
@@ -116,25 +118,19 @@ export default function Upgrade() {
     if (RewardedAdEventType.CLOSED) {
       listeners.push(
         rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+          setIsAdLoaded(false);
           rewardedAd.load();
         })
       );
     }
 
-    rewardedAd.load();
-
     return () => listeners.forEach((unsub) => unsub());
-  }, [token]);
+  }, [token, userInitiatedLoad]);
 
   const handleWatchAd = () => {
-    if (isAdLoaded) {
-      setAdMessage('Playing ad...');
-      rewardedAd.show();
-      setIsAdLoaded(false);
-    } else {
-      setAdMessage('Loading ad...');
-      rewardedAd.load();
-    }
+    setUserInitiatedLoad(true);
+    setAdMessage('Loading ad...');
+    rewardedAd.load();
   };
 
   const getPackageForPlan = (plan) => {
@@ -212,20 +208,24 @@ export default function Upgrade() {
       <Text style={styles.title}>Upgrade to Pro</Text>
       <Text style={styles.subtitle}>Unlock the full LIVINAI experience with premium features.</Text>
 
-      {/* Coins section */}
-      <View style={styles.coinContainer}>
-        <View style={styles.coinRow}>
-          <Text style={styles.coinValue}>{coins} Coins</Text>
+      {/* Coins section - only show if NOT subscribed and loading finished */}
+      {!loading && !isSubscribed && (
+        <View style={styles.coinContainer}>
+          <View style={styles.coinRow}>
+            <Text style={styles.coinValue}>{coins} Coins</Text>
+          </View>
+          <Text style={styles.coinSubtitle}>
+            Watch ads to earn coins and unlock new designs — each design costs 3 coins.
+          </Text>
+
+          <TouchableOpacity style={styles.watchAdButton} onPress={handleWatchAd}>
+            <Ionicons name="play-circle-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={styles.watchAdButtonText}>Watch Ad</Text>
+          </TouchableOpacity>
+
+          {adMessage ? <Text style={styles.adStatusText}>{adMessage}</Text> : null}
         </View>
-        <Text style={styles.coinSubtitle}>Watch ads to earn coins — each ad gives 1 coin</Text>
-
-        <TouchableOpacity style={styles.watchAdButton} onPress={handleWatchAd}>
-          <Ionicons name="play-circle-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-          <Text style={styles.watchAdButtonText}>Watch Ad</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.adStatusText}>{adMessage || 'Watch an ad to earn a coin.'}</Text>
-      </View>
+      )}
 
       <View style={styles.featureList}>
         {['Ad-free experience', 'Unlimited design renders'].map((feature, idx) => (
@@ -260,7 +260,9 @@ export default function Upgrade() {
       </View>
 
       <TouchableOpacity style={styles.upgradeButton} onPress={handleUpgrade}>
-        <Text style={styles.upgradeButtonText}>{isSubscribed ? 'Change Plan' : 'Upgrade Now'}</Text>
+        <Text style={styles.upgradeButtonText}>
+          {isSubscribed ? 'Change Plan' : 'Upgrade Now'}
+        </Text>
       </TouchableOpacity>
 
       <Text style={styles.trustNote}>Cancel anytime</Text>

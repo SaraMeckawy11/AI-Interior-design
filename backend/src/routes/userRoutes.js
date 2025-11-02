@@ -48,13 +48,16 @@ router.post('/unlock-design', isAuthenticated, async (req, res) => {
   try {
     const user = req.user;
 
-    // Use coins to unlock designs
-    if ((user.adCoins || 0) > 0) {
-      user.adCoins -= 1;
+    // Each design costs 2 coins
+    const COST_PER_DESIGN = 2;
+
+    if ((user.adCoins || 0) >= COST_PER_DESIGN) {
+      user.adCoins -= COST_PER_DESIGN;
     } else {
-      // fallback to old logic just in case
-      const decrement = Number(req.body.decrement) || 1;
-      user.freeDesignsUsed = Math.max(0, user.freeDesignsUsed - decrement);
+      return res.status(400).json({
+        success: false,
+        message: 'Not enough coins. Each design costs 2 coins.',
+      });
     }
 
     await user.save();
@@ -79,11 +82,15 @@ router.post('/watch-ad', isAuthenticated, async (req, res) => {
     // Each watched ad gives 1 coin directly
     user.adCoins = (user.adCoins || 0) + 1;
 
+    // ✅ Increment total ads watched for analytics
+    user.adsWatched = (user.adsWatched || 0) + 1;
+
     await user.save();
 
     res.status(200).json({
       success: true,
       adCoins: user.adCoins,
+      adsWatched: user.adsWatched,
       message: 'You earned 1 coin!',
     });
   } catch (err) {

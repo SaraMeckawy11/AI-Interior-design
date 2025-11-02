@@ -53,48 +53,43 @@ export default function Create() {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalData, setModalData] = useState({ title: '', message: '' });
   const [isManualDisabled, setIsManualDisabled] = useState(false);
+  const [coins, setCoins] = useState(0);
 
- useEffect(() => {
-  const fetchUserStatus = async () => {
-    if (!token) return;
+  // Fetch user status
+  useEffect(() => {
+    const fetchUserStatus = async () => {
+      if (!token) return;
 
-    try {
-      const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!res.ok) {
-        console.error('Failed to fetch user status:', res.status);
-        return;
-      }
-
-      const data = await res.json();
-      const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled } = data.user || {};
-
-      setIsSubscribed(isSubscribed || false);
-      setFreeDesignsUsed(freeDesignsUsed || 0);
-      setIsPremium(isPremium || false);
-      setIsManualDisabled(manualDisabled || false); // <- add this
-
-      // Show free designs disclaimer
-      if (!isSubscribed && !isPremium) {
-        setModalData({
-          title: 'Free Designs Disclaimer',
-          message: `${2 - (freeDesignsUsed || 0)} free design${freeDesignsUsed === 1 ? '' : 's'} left. Subscribe to keep generating designs.`,
+      try {
+        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
         });
-        setModalVisible(true);
+
+        if (!res.ok) {
+          console.error('Failed to fetch user status:', res.status);
+          return;
+        }
+
+        const data = await res.json();
+        const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
+
+        setIsSubscribed(isSubscribed || false);
+        setFreeDesignsUsed(freeDesignsUsed || 0);
+        setIsPremium(isPremium || false);
+        setIsManualDisabled(manualDisabled || false);
+        setCoins(Number(adCoins || 0));
+      } catch (err) {
+        console.error('Failed to fetch user status:', err);
       }
-    } catch (err) {
-      console.error('Failed to fetch user status:', err);
-    }
-  };
+    };
 
-  fetchUserStatus();
-}, [token]);
+    fetchUserStatus();
+  }, [token]);
 
+  // Pick image
   const pickImage = async () => {
     try {
       if (Platform.OS !== 'web') {
@@ -137,12 +132,13 @@ export default function Create() {
     }
   };
 
+  // Take photo
   const takePhoto = async () => {
     try {
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-           setModalData({
+          setModalData({
             title: 'Access Needed',
             message: 'We need permission to access your camera. Please enable access in your device settings.',
           });
@@ -178,6 +174,7 @@ export default function Create() {
     }
   };
 
+  // Handle design generation
   const handleSubmit = async () => {
     if (!roomType || !designStyle || !colorTone || !image) {
       setModalData({
@@ -189,18 +186,62 @@ export default function Create() {
     }
 
     // Block user if manualDisabled is true
-    if (isManualDisabled) { // <- make sure you fetched this from /me API
+    if (isManualDisabled) {
       setModalData({
         title: 'Access Denied',
-        message: 'Your account is blocked from generating designs. Please contact support if this is a mistake.',
+        message:
+          'Your account is blocked from generating designs. Please contact support if this is a mistake.',
       });
       setModalVisible(true);
       return;
     }
 
-    if (!isSubscribed && !isPremium && freeDesignsUsed >= 2) {
-      router.push('/upgrade');
-      return;
+    // ✅ Access logic for non-premium / non-subscribed users
+    if (!isSubscribed && !isPremium) {
+      if (freeDesignsUsed < 2) {
+        // User still has free designs left — use one
+        try {
+          await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ useFreeDesign: true }),
+          });
+          setFreeDesignsUsed((prev) => prev + 1);
+        } catch (err) {
+          console.error('Error using free design:', err);
+        }
+      } else if (coins >= 2) {
+        // No free designs left — use coins
+        try {
+          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          const result = await res.json();
+
+          if (!result.success) {
+            router.push('/upgrade');
+            return;
+          }
+
+          setCoins(result.adCoins || 0);
+        } catch (err) {
+          console.error('Error using coins:', err);
+          router.push('/upgrade');
+          return;
+        }
+      } else {
+        // Neither free designs nor enough coins — redirect to upgrade
+        router.push('/upgrade');
+        return;
+      }
     }
 
     try {
@@ -239,24 +280,27 @@ export default function Create() {
 
       if (!response.ok) throw new Error(data.message || 'Something went wrong');
 
-      const imageUri = data.generatedImageUrl || data.generatedImage || data.image || data.output || null;
+      const imageUri =
+        data.generatedImageUrl || data.generatedImage || data.image || data.output || null;
+
       if (imageUri) {
         router.push({
           pathname: '/outputScreen',
-           params: {
+          params: {
             imageUri,
             roomType,
             designStyle,
             colorTone,
-            createdAt: new Date().toISOString(), // or Date.now()
+            createdAt: new Date().toISOString(),
           },
         });
       } else {
-       setModalData({
-        title: 'Design Generation Failed',
-        message: 'There was a problem generating your design from the server. Please try again later.',
-      });
-      setModalVisible(true);
+        setModalData({
+          title: 'Design Generation Failed',
+          message:
+            'There was a problem generating your design from the server. Please try again later.',
+        });
+        setModalVisible(true);
       }
 
       setPrompt('');
@@ -277,6 +321,7 @@ export default function Create() {
     }
   };
 
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
@@ -290,8 +335,6 @@ export default function Create() {
               <Text style={styles.label}>Add photo</Text>
               <TouchableOpacity
                 style={[styles.imagePickerModern, image && styles.imagePickerSelected]}
-                // onPress={pickImage}
-                //  
                 onPress={() => setShowImageSourceModal(true)}
                 activeOpacity={0.9}
               >
@@ -325,7 +368,7 @@ export default function Create() {
             <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
 
             {/* Custom Prompt */}
-            {/* <View style={styles.textGroup}>
+            <View style={styles.textGroup}>
               <Text style={styles.label}>Custom Prompt</Text>
               <TextInput
                 style={styles.textArea}
@@ -335,7 +378,7 @@ export default function Create() {
                 onChangeText={setPrompt}
                 multiline
               />
-            </View> */}
+            </View>
 
             {/* Submit Button */}
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
@@ -363,6 +406,7 @@ export default function Create() {
           </View>
         </View>
       </ScrollView>
+
       {/* Image Source Picker Modal */}
       <Modal
         visible={showImageSourceModal}
@@ -372,7 +416,7 @@ export default function Create() {
       >
         <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
           <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>{/* prevent closing when tapping inside */}
+            <TouchableWithoutFeedback>
               <View style={styles.modalContainer}>
                 <Text style={styles.modalTitle}>Upload Photo</Text>
                 <Text style={styles.modalSubtitle}>Choose an option</Text>
@@ -421,7 +465,8 @@ export default function Create() {
           </View>
         </View>
       </Modal>
-      {/* Dynamic Error / Info Modal */}
+
+      {/* Info / Error Modal */}
       <Modal
         visible={modalVisible}
         transparent
