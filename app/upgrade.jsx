@@ -215,7 +215,7 @@ export default function Upgrade() {
             <Text style={styles.coinValue}>{coins} Coins</Text>
           </View>
           <Text style={styles.coinSubtitle}>
-            Watch ads to earn coins and unlock new designs — each design costs 3 coins.
+            Watch ads to earn coins and unlock new designs — each design costs 2 coins.
           </Text>
 
           <TouchableOpacity style={styles.watchAdButton} onPress={handleWatchAd}>

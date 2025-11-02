@@ -33,12 +33,29 @@ router.post("/", isAuthenticated, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (!user.isSubscribed && !user.isPremium && user.freeDesignsUsed >= 2) {
-      console.log("Free design limit reached for user:", user._id);
-      return res.status(403).json({
-        message: "Upgrade required",
-        reason: "You have used your 2 free designs. Please upgrade to continue.",
-      });
+    // ✅ Combined freeDesign + coin logic
+    const COST_PER_DESIGN = 2;
+
+    if (!user.isSubscribed && !user.isPremium) {
+      if (user.freeDesignsUsed >= 2) {
+        // If no free designs left, try using coins
+        if ((user.adCoins || 0) >= COST_PER_DESIGN) {
+          user.adCoins -= COST_PER_DESIGN;
+          await user.save();
+          console.log(`Deducted ${COST_PER_DESIGN} coins from user ${user._id}. Remaining coins: ${user.adCoins}`);
+        } else {
+          console.log("User has no free designs and insufficient coins:", user._id);
+          return res.status(403).json({
+            message: "Upgrade required",
+            reason: "You have used your 2 free designs and don't have enough coins.",
+          });
+        }
+      } else {
+        // Still has free designs → consume one
+        user.freeDesignsUsed += 1;
+        await user.save();
+        console.log(`Used one free design for user ${user._id}. Total used: ${user.freeDesignsUsed}`);
+      }
     }
 
     // Upload original image
@@ -79,7 +96,6 @@ router.post("/", isAuthenticated, async (req, res) => {
     console.log("RunPod job submitted:", jobId, "initial status:", jobResponse.data.status);
 
     // Poll RunPod job until completed
-    // Poll RunPod job until completed
     let generatedImageBase64 = null;
     const maxRetries = 30;
     let retries = 0;
@@ -88,7 +104,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       await sleep(2000); // wait 2 seconds
 
       const statusResp = await axios.get(
-        `https://api.runpod.ai/v2/x6jka3ci9vkelj/status/${jobId}`, // ✅ fixed URL
+        `https://api.runpod.ai/v2/x6jka3ci9vkelj/status/${jobId}`,
         {
           headers: {
             "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
@@ -108,7 +124,6 @@ router.post("/", isAuthenticated, async (req, res) => {
 
       retries++;
     }
-
 
     if (!generatedImageBase64) {
       console.warn("RunPod job did not complete in time, returning original image only");
@@ -147,12 +162,8 @@ router.post("/", isAuthenticated, async (req, res) => {
     await newDesign.save();
 
     // ✅ Update user stats
-    user.designCount = (user.designCount || 0) + 1;   // lifetime total
-    user.activeDesigns = (user.activeDesigns || 0) + 1; // current active
-
-    if (!user.isSubscribed && !user.isPremium) {
-      user.freeDesignsUsed += 1;
-    }
+    user.designCount = (user.designCount || 0) + 1;
+    user.activeDesigns = (user.activeDesigns || 0) + 1;
 
     await user.save();
 
@@ -252,9 +263,6 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
       user.activeDesigns = Math.max((user.activeDesigns || 0) - 1, 0);
       await user.save();
     }
-
-    res.json({ message: "Design deleted successfully" });
-
 
     res.json({ message: "Design deleted successfully" });
   } catch (error) {
