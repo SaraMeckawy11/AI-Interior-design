@@ -5,7 +5,7 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
-// GET /api/users/me
+// ✅ GET /api/users/me
 router.get('/me', isAuthenticated, async (req, res) => {
   try {
     const user = req.user;
@@ -43,46 +43,13 @@ router.get('/me', isAuthenticated, async (req, res) => {
   }
 });
 
-// POST /api/users/unlock-design
-router.post('/unlock-design', isAuthenticated, async (req, res) => {
-  try {
-    const user = req.user;
-
-    // Each design costs 2 coins
-    const COST_PER_DESIGN = 2;
-
-    if ((user.adCoins || 0) >= COST_PER_DESIGN) {
-      user.adCoins -= COST_PER_DESIGN;
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: 'Not enough coins. Each design costs 2 coins.',
-      });
-    }
-
-    await user.save();
-
-    res.status(200).json({
-      success: true,
-      adCoins: user.adCoins,
-      freeDesignsUsed: user.freeDesignsUsed,
-    });
-  } catch (err) {
-    console.error('/api/users/unlock-design error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// POST /api/users/watch-ad
-// POST /api/users/watch-ad
+// ✅ POST /api/users/watch-ad
 router.post('/watch-ad', isAuthenticated, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
-    // Each watched ad gives 1 coin directly
+    // Each watched ad gives 1 coin
     user.adCoins = (user.adCoins || 0) + 1;
-
-    // ✅ Increment total ads watched for analytics
     user.adsWatched = (user.adsWatched || 0) + 1;
 
     await user.save();

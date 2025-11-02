@@ -197,51 +197,9 @@ export default function Create() {
     }
 
     // ✅ Access logic for non-premium / non-subscribed users
-    if (!isSubscribed && !isPremium) {
-      if (freeDesignsUsed < 2) {
-        // User still has free designs left — use one
-        try {
-          await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ useFreeDesign: true }),
-          });
-          setFreeDesignsUsed((prev) => prev + 1);
-        } catch (err) {
-          console.error('Error using free design:', err);
-        }
-      } else if (coins >= 2) {
-        // No free designs left — use coins
-        try {
-          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/unlock-design`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          const result = await res.json();
-
-          if (!result.success) {
-            router.push('/upgrade');
-            return;
-          }
-
-          setCoins(result.adCoins || 0);
-        } catch (err) {
-          console.error('Error using coins:', err);
-          router.push('/upgrade');
-          return;
-        }
-      } else {
-        // Neither free designs nor enough coins — redirect to upgrade
-        router.push('/upgrade');
-        return;
-      }
+    if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins < 2) {
+    router.push('/upgrade');
+    return;
     }
 
     try {
