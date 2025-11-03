@@ -324,18 +324,25 @@ export default function Create() {
 
             {/* Color Tone */}
             <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
+            
+            {/* Custom Prompt (Optional) */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>
+                Add a Personal Touch <Text style={{ color: COLORS.textSecondary, fontWeight: '400' }}>(optional)</Text>
+              </Text>
 
-            {/* Custom Prompt */}
-            <View style={styles.textGroup}>
-              <Text style={styles.label}>Custom Prompt</Text>
-              <TextInput
-                style={styles.textArea}
-                placeholder="Write your design preferences..."
-                placeholderTextColor={COLORS.placeholderText}
-                value={prompt}
-                onChangeText={setPrompt}
-                multiline
-              />
+              <View style={styles.promptCard}>
+                <TextInput
+                  style={styles.promptInput}
+                  placeholder="Add any ideas or elements you’d like in your space..."
+                  placeholderTextColor={COLORS.textSecondary}
+                  value={prompt}
+                  onChangeText={setPrompt}
+                  multiline
+                  textAlignVertical="top"
+                  returnKeyType="done"
+                />
+              </View>
             </View>
 
             {/* Submit Button */}

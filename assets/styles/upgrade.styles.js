@@ -343,33 +343,34 @@ coinSubtitle: {
   marginBottom: verticalScale(12),
 },
 
+coinSubtitle: {
+  color: COLORS.textSecondary,       
+  fontSize: 14,
+  textAlign: 'center',
+  lineHeight: 20,
+},
+
 watchAdButton: {
-  backgroundColor: COLORS.primaryDark,
   flexDirection: 'row',
   alignItems: 'center',
   justifyContent: 'center',
-  paddingVertical: verticalScale(10),
-  paddingHorizontal: scale(26),
-  borderRadius: 30,
-  shadowColor: COLORS.primaryDark,
-  shadowOffset: { width: 0, height: 3 },
-  shadowOpacity: 0.15,
-  shadowRadius: 5,
-  elevation: 3,
+  backgroundColor: COLORS.primaryDark,
+  borderRadius: 20,
+  paddingVertical: 10,
+  paddingHorizontal: 16,
+  marginTop: 12,
+  alignSelf: 'center',
 },
-
 watchAdButtonText: {
   color: '#fff',
-  fontSize: 15,
   fontWeight: '600',
+  fontSize: 15,
 },
-
 adStatusText: {
-  fontSize: 13,
-  color: COLORS.textSecondary || '#777',
+  marginTop: 6,
   textAlign: 'center',
-  marginTop: 10,
+  color: COLORS.textMedium,
+  fontSize: 13,
 },
-
 
 });

@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(16),
   },
   formGroup: {
-    marginBottom: verticalScale(24),
+    marginBottom: verticalScale(20),
   },
   label: {
     fontSize: moderateScale(13),
@@ -302,6 +302,27 @@ modalMissingButton: {
   paddingVertical: verticalScale(8),
   marginBottom: verticalScale(10),
   width: '50%',
+},
+promptCard: {
+  backgroundColor: COLORS.inputBackground,
+  borderRadius: moderateScale(16),
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  paddingHorizontal: moderateScale(14),
+  paddingVertical: verticalScale(8),
+  shadowColor: COLORS.black,
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.05,
+  shadowRadius: 2,
+  elevation: 1,
+  marginTop:4
+},
+
+promptInput: {
+  minHeight: verticalScale(32),
+  fontSize: moderateScale(12),
+  color: COLORS.textPrimary,
+  fontFamily: 'Poppins_400Regular',
 },
 
 });
