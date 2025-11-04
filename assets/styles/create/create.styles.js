@@ -325,31 +325,22 @@ promptInput: {
   fontFamily: 'Poppins_400Regular',
 },
 coinsContainer: {
-  marginTop: verticalScale(6),
-  backgroundColor: COLORS.white,
-  borderRadius: moderateScale(14),
-  paddingVertical: verticalScale(4),
-  paddingHorizontal: moderateScale(16),
-  alignSelf: 'center',
-  shadowColor: '#000',
-  shadowOpacity: 0.05,
-  shadowOffset: { width: 0, height: 1 },
-  shadowRadius: 2,
-  elevation: 1,
+  alignSelf: 'flex-end',
 },
 
 coinsText: {
-  fontSize: moderateScale(13),
+  fontSize: moderateScale(12),
   fontWeight: '500',
-  color: COLORS.textPrimary,
+  color: COLORS.textSecondary,
   fontFamily: 'Poppins_500Medium',
+  marginRight: moderateScale(8),
 },
 
 labelRow: {
   flexDirection: 'row',
   alignItems: 'center',
   justifyContent: 'space-between',
-  marginTop: verticalScale(6),
+  marginTop: verticalScale(4),
 },
 
 watchAdButton: {

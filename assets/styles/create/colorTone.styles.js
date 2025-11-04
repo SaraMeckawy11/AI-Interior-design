@@ -10,7 +10,7 @@ const moderateScale = (size, factor = 0.5) =>
 
 const styles = StyleSheet.create({
   formGroup: {
-    marginBottom: verticalScale(12),
+    marginBottom: verticalScale(8),
   },
   labelRow: {
     flexDirection: "row",

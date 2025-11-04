@@ -361,11 +361,11 @@ export default function Create() {
             <Text style={styles.title}>LIVINAI</Text>
 
             {/* Coins Balance */}
-            {/* {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
+            {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
               <View style={styles.coinsContainer}>
                 <Text style={styles.coinsText}>{coins} Coins</Text>
               </View>
-            )} */}
+            )}
           </View>
 
           <View style={styles.form}>
