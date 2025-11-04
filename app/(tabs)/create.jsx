@@ -26,6 +26,7 @@ import RoomTypeSelector from '../../components/create/RoomTypeSelector';
 import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 
 const { width, height } = Dimensions.get("window");
 
@@ -34,6 +35,10 @@ const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhon
 const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
 const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
+
+// const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
+const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 
 export default function Create() {
   const router = useRouter();
@@ -54,6 +59,73 @@ export default function Create() {
   const [modalData, setModalData] = useState({ title: '', message: '' });
   const [isManualDisabled, setIsManualDisabled] = useState(false);
   const [coins, setCoins] = useState(0);
+  const [adMessage, setAdMessage] = useState('');
+  const [isAdLoaded, setIsAdLoaded] = useState(false);
+  const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
+
+  // Setup rewarded ad logic
+  useEffect(() => {
+    if (!RewardedAdEventType || typeof RewardedAdEventType !== 'object') {
+      console.error('RewardedAdEventType is not defined properly');
+      return;
+    }
+
+    const listeners = [];
+
+    if (RewardedAdEventType.LOADED) {
+      listeners.push(
+        rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+          setIsAdLoaded(true);
+          if (userInitiatedLoad) {
+            setAdMessage('Ad loaded. Playing now...');
+            rewardedAd.show();
+            setUserInitiatedLoad(false);
+          }
+        })
+      );
+    }
+
+    if (RewardedAdEventType.EARNED_REWARD) {
+      listeners.push(
+        rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
+          try {
+            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            });
+            const data = await res.json();
+            if (data.success) {
+              setCoins(Number(data.adCoins || coins + 1));
+            } else {
+              setCoins((prev) => prev + 1);
+            }
+          } catch (err) {
+            console.error('reward error', err);
+            setCoins((prev) => prev + 1);
+          } finally {
+            setAdMessage('');
+          }
+        })
+      );
+    }
+
+    if (RewardedAdEventType.CLOSED) {
+      listeners.push(
+        rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+          setIsAdLoaded(false);
+          rewardedAd.load();
+        })
+      );
+    }
+
+    return () => listeners.forEach((unsub) => unsub());
+  }, [token, userInitiatedLoad]);
+
+  const handleWatchAd = () => {
+    setUserInitiatedLoad(true);
+    setAdMessage('Loading ad...');
+    rewardedAd.load();
+  };
 
   // Fetch user status
   useEffect(() => {
@@ -287,11 +359,32 @@ export default function Create() {
         <View>
           <View style={styles.header}>
             <Text style={styles.title}>LIVINAI</Text>
+
+            {/* Coins Balance */}
+            {/* {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
+              <View style={styles.coinsContainer}>
+                <Text style={styles.coinsText}>{coins} Coins</Text>
+              </View>
+            )} */}
           </View>
 
           <View style={styles.form}>
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Add photo</Text>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>Add photo</Text>
+
+                {/* Small watch ad button for non-premium users */}
+                {!isSubscribed && !isPremium && (
+                  <TouchableOpacity
+                    onPress={handleWatchAd}
+                    activeOpacity={0.8}
+                    style={styles.watchAdButton}
+                  >
+                    <Ionicons name="play-circle-outline" size={14} color="#fff" />
+                    <Text style={styles.watchAdText}>Watch Ad</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
               <TouchableOpacity
                 style={[styles.imagePickerModern, image && styles.imagePickerSelected]}
                 onPress={() => setShowImageSourceModal(true)}

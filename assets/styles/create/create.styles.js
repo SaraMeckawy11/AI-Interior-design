@@ -324,6 +324,56 @@ promptInput: {
   color: COLORS.textPrimary,
   fontFamily: 'Poppins_400Regular',
 },
+coinsContainer: {
+  marginTop: verticalScale(6),
+  backgroundColor: COLORS.white,
+  borderRadius: moderateScale(14),
+  paddingVertical: verticalScale(4),
+  paddingHorizontal: moderateScale(16),
+  alignSelf: 'center',
+  shadowColor: '#000',
+  shadowOpacity: 0.05,
+  shadowOffset: { width: 0, height: 1 },
+  shadowRadius: 2,
+  elevation: 1,
+},
+
+coinsText: {
+  fontSize: moderateScale(13),
+  fontWeight: '500',
+  color: COLORS.textPrimary,
+  fontFamily: 'Poppins_500Medium',
+},
+
+labelRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginTop: verticalScale(6),
+},
+
+watchAdButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: COLORS.primaryDark,
+  paddingHorizontal: moderateScale(10),
+  paddingVertical: verticalScale(2),
+  borderRadius: moderateScale(12),
+  marginLeft: moderateScale(10),
+  shadowColor: '#000',
+  shadowOpacity: 0.1,
+  shadowOffset: { width: 0, height: 1 },
+  shadowRadius: 2,
+  elevation: 2,
+},
+
+watchAdText: {
+  color: '#fff',
+  fontSize: moderateScale(12),
+  marginLeft: moderateScale(4),
+  fontWeight: '500',
+  fontFamily: 'Poppins_500Medium',
+},
 
 });
 
