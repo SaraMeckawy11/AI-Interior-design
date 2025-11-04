@@ -9,7 +9,8 @@ import { useAuthStore } from '../authStore';
 import COLORS from '../constants/colors';
 
 // ✅ Create the rewarded ad only once (outside component)
-const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+// const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
 const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 
 export default function Upgrade() {

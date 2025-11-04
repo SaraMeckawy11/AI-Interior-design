@@ -18,7 +18,6 @@ import Loader from '../../components/Loader';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-
 export default function Collection() {
   const { token } = useAuthStore();
   const [designs, setDesigns] = useState([]);
@@ -30,41 +29,37 @@ export default function Collection() {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedDesignId, setSelectedDesignId] = useState(null);
 
-
   const router = useRouter();
 
   const fetchDesigns = async (pageNum = 1, refresh = false) => {
-  try {
-    if (refresh) setRefreshing(true);
-    else if (pageNum === 1) setLoading(true);
+    try {
+      if (refresh) setRefreshing(true);
+      else if (pageNum === 1) setLoading(true);
 
-    const response = await fetch(
-      `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs?page=${pageNum}&limit=5`,
-      {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-          "Content-Type": "application/json",
-        },
-      }
-    );
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs?page=${pageNum}&limit=5`,
+        {
+          headers: {
+            Authorization: token ? `Bearer ${token}` : "",
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-    const data = await response.json();
-    // console.log("Fetched data:", data);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Failed to fetch designs");
 
-    if (!response.ok) throw new Error(data.message || "Failed to fetch designs");
-
-    const newDesigns = data.designs || data.output || [];
-
-    setDesigns((prev) => (refresh ? newDesigns : [...prev, ...newDesigns]));
-    setHasMore(pageNum < data.totalPages);
-    setPage(pageNum);
-  } catch (error) {
-    console.log(" Error fetching designs:", error.message);
-  } finally {
-    if (refresh) setRefreshing(false);
-    else setLoading(false);
-  }
-};
+      const newDesigns = data.designs || data.output || [];
+      setDesigns((prev) => (refresh ? newDesigns : [...prev, ...newDesigns]));
+      setHasMore(pageNum < data.totalPages);
+      setPage(pageNum);
+    } catch (error) {
+      console.log("Error fetching designs:", error.message);
+    } finally {
+      if (refresh) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchDesigns();
@@ -90,12 +85,10 @@ export default function Collection() {
     }
   };
 
-
   const confirmDelete = (designId) => {
     setSelectedDesignId(designId);
     setDeleteModalVisible(true);
   };
-
 
   const handleLoadMore = () => {
     if (hasMore && !loading && !refreshing) {
@@ -104,59 +97,62 @@ export default function Collection() {
   };
 
   const renderItem = ({ item }) => {
-  const imageUri = item.generatedImage || item.image || 'https://via.placeholder.com/150';
+    const generatedImage = item.generatedImage || null;
+    const originalImage = item.image || null;
 
-  return (
-    <TouchableOpacity
-      style={styles.bookCard}
-      onPress={() => router.push({
-        pathname: '/outputScreen',
-         params: {
-            imageUri: imageUri,
-            roomType: item.roomType,
-            designStyle: item.designStyle,
-            colorTone: item.colorTone,
-            createdAt: item.createdAt,
-          },
-      })}
-
-    >
-      <View style={styles.bookImageContainer}>
-        <Image
-          source={{ uri: imageUri }}
-          style={styles.bookImage}
-          contentFit="cover"
-        />
-      </View>
-
-      <View style={styles.detailsContainer}>
-        <View style={styles.bookDetails}>
-          <Text style={styles.bookTitle}><Text style={styles.label}>Room Type:</Text> {item.roomType}</Text>
-          <Text style={styles.caption}><Text style={styles.label}>Design Style:</Text> {item.designStyle}</Text>
-          <Text style={styles.caption}><Text style={styles.label}>Color Tone:</Text> {item.colorTone}</Text>
-          <Text style={styles.date}>Created on {formatPublishDate(item.createdAt)}</Text>
+    return (
+      <TouchableOpacity
+        style={styles.bookCard}
+        onPress={() =>
+          router.push({
+            pathname: '/outputScreen',
+            params: {
+              generatedImage: generatedImage,
+              image: originalImage,
+              roomType: item.roomType,
+              designStyle: item.designStyle,
+              colorTone: item.colorTone,
+              createdAt: item.createdAt,
+            },
+          })
+        }
+      >
+        <View style={styles.bookImageContainer}>
+          <Image
+            source={{ uri: generatedImage || originalImage || 'https://via.placeholder.com/150' }}
+            style={styles.bookImage}
+            contentFit="cover"
+          />
         </View>
 
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => confirmDelete(item._id)}
-        >
-          <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-};
+        <View style={styles.detailsContainer}>
+          <View style={styles.bookDetails}>
+            <Text style={styles.bookTitle}><Text style={styles.label}>Room Type:</Text> {item.roomType}</Text>
+            <Text style={styles.caption}><Text style={styles.label}>Design Style:</Text> {item.designStyle}</Text>
+            <Text style={styles.caption}><Text style={styles.label}>Color Tone:</Text> {item.colorTone}</Text>
+            <Text style={styles.date}>Created on {formatPublishDate(item.createdAt)}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => confirmDelete(item._id)}
+          >
+            <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   if (loading && !refreshing && designs.length === 0) return <Loader />;
 
   const renderFooter = () =>
     loading && !refreshing ? (
-      <ActivityIndicator  style={styles.footerLoader} size="small" color={COLORS.primary} />
+      <ActivityIndicator style={styles.footerLoader} size="small" color={COLORS.primary} />
     ) : null;
 
   return (
-    <View style={styles.container} >
+    <View style={styles.container}>
       <FlatList
         data={designs}
         renderItem={renderItem}
@@ -176,18 +172,16 @@ export default function Collection() {
         ListHeaderComponent={
           <View style={styles.header}>
             <Text style={styles.title}>LIVINAI</Text>
-            {/* <Text style={styles.headerSubtitle}>Design your dream home</Text> */}
           </View>
         }
         ListFooterComponent={renderFooter}
         ListEmptyComponent={
           !loading && (
-            <Text style={styles.emptyText}>
-              No designs found.
-            </Text>
+            <Text style={styles.emptyText}>No designs found.</Text>
           )
         }
       />
+      
       {/* Delete Confirmation Modal */}
       <Modal
         transparent
@@ -199,7 +193,6 @@ export default function Collection() {
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.modalContent}>
-                {/* <Ionicons name="trash-outline" size={36} color={COLORS.primary} /> */}
                 <Text style={styles.modalTitle}>Delete Design</Text>
                 <Text style={styles.modalMessage}>
                   Are you sure you want to delete this design?

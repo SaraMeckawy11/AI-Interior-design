@@ -12,61 +12,58 @@ import {
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import { useLocalSearchParams } from 'expo-router';
-import styles from '../assets/styles/output.styles';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { formatPublishDate } from '../lib/utils';
+import Slider from '@react-native-community/slider';
+import styles from '../assets/styles/output.styles'; // Import styles
+import COLORS from '../constants/colors';
 
 export default function OutputScreen() {
-  const { imageUri, roomType, designStyle, colorTone, createdAt } = useLocalSearchParams();
+  const { generatedImage, image, roomType, designStyle, colorTone, createdAt } =
+    useLocalSearchParams();
+
   const [imageHeight, setImageHeight] = useState(240);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
+  const [sliderValue, setSliderValue] = useState(1);
+
+  const screenWidth = Dimensions.get('window').width - 32;
 
   useEffect(() => {
-    if (imageUri) {
+    const uri = generatedImage || image;
+    if (uri) {
       Image.getSize(
-        imageUri,
+        uri,
         (width, height) => {
-          const screenWidth = Dimensions.get('window').width - 32; // match padding
           const ratio = height / width;
           setImageHeight(screenWidth * ratio);
         },
-        (error) => {
-          console.error("Failed to get image size", error);
-        }
+        (error) => console.error("Failed to get image size", error)
       );
     }
-  }, [imageUri]);
-
-  if (!imageUri) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>No image URI provided.</Text>
-      </View>
-    );
-  }
+  }, [generatedImage, image]);
 
   const handleShare = async () => {
+    if (!generatedImage) return;
     try {
       const fileUri = FileSystem.documentDirectory + 'temp-share.jpg';
-      const downloadRes = await FileSystem.downloadAsync(imageUri, fileUri);
-
+      const downloadRes = await FileSystem.downloadAsync(generatedImage, fileUri);
       const isAvailable = await Sharing.isAvailableAsync();
       if (!isAvailable) {
         setModalMessage("Sharing is not available on this device.");
         setModalVisible(true);
         return;
       }
-
       await Sharing.shareAsync(downloadRes.uri);
-    } catch (error) {
+    } catch {
       setModalMessage("Failed to share image.");
       setModalVisible(true);
     }
   };
 
   const handleDownload = async () => {
+    if (!generatedImage) return;
     try {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) {
@@ -74,13 +71,12 @@ export default function OutputScreen() {
         setModalVisible(true);
         return;
       }
-
       const fileUri = FileSystem.documentDirectory + 'generated-image.jpg';
-      const downloadRes = await FileSystem.downloadAsync(imageUri, fileUri);
+      const downloadRes = await FileSystem.downloadAsync(generatedImage, fileUri);
       await MediaLibrary.saveToLibraryAsync(downloadRes.uri);
       setModalMessage("Image saved to your gallery.");
       setModalVisible(true);
-    } catch (error) {
+    } catch {
       setModalMessage("Failed to download image.");
       setModalVisible(true);
     }
@@ -109,44 +105,79 @@ export default function OutputScreen() {
     </Modal>
   );
 
+  if (!generatedImage || !image) {
+    return (
+      <View style={[styles.container, { backgroundColor: '#f5f5f5' }]}>
+        <Text style={styles.errorText}>Images not available.</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView
-      style={{ flex: 1 }} // full screen
-      contentContainerStyle={{
-        padding: 16,
-        alignItems: 'center', // center content horizontally
-      }}
+      style={{ flex: 1, backgroundColor: COLORS.background, }}
+      contentContainerStyle={{ padding: 16, alignItems: 'center' }}
       showsVerticalScrollIndicator={false}
     >
       <Text style={styles.title}>Your Design</Text>
 
-      <View style={[styles.imageContainer, { height: imageHeight }]}>
+      {/* Images stacked with overlay */}
+      <View style={{ width: screenWidth, height: imageHeight, marginVertical: 16 }}>
         <Image
-          source={{ uri: imageUri }}
-          style={styles.image}
-          resizeMode="contain"
+          source={{ uri: image }}
+          style={{ width: '100%', height: '100%', borderRadius: 12 }}
+          resizeMode="cover"
         />
+        <View
+          style={{
+            width: `${sliderValue * 100}%`,
+            overflow: 'hidden',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            height: '100%',
+            borderRadius: 12,
+          }}
+        >
+          <Image
+            source={{ uri: generatedImage }}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+          />
+        </View>
       </View>
 
-      {/* Item Details Section */}
+      {/* Slider under image */}
+      <View style={styles.sliderContainer}>
+        <Slider
+          minimumValue={0}
+          maximumValue={1}
+          value={sliderValue}
+          onValueChange={setSliderValue}
+          minimumTrackTintColor={COLORS.primaryDark}
+          maximumTrackTintColor="#d0d0d0"
+          thumbTintColor={COLORS.primaryDark}
+          style={styles.slider}
+        />
+        <Text style={styles.sliderLabel}>Slide to compare before & after</Text>
+      </View>
+
+      {/* Item Details */}
       <View style={styles.detailsContainer}>
         <View style={styles.bookDetails}>
           {roomType && (
             <Text style={styles.bookTitle}>
-              <Text style={styles.label}>Room Type: </Text>
-              {roomType}
+              <Text style={styles.label}>Room Type: </Text>{roomType}
             </Text>
           )}
           {designStyle && (
             <Text style={styles.caption}>
-              <Text style={styles.label}>Design Style: </Text>
-              {designStyle}
+              <Text style={styles.label}>Design Style: </Text>{designStyle}
             </Text>
           )}
           {colorTone && (
             <Text style={styles.caption}>
-              <Text style={styles.label}>Color Tone: </Text>
-              {colorTone}
+              <Text style={styles.label}>Color Tone: </Text>{colorTone}
             </Text>
           )}
           {createdAt && (

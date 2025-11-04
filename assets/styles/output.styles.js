@@ -8,7 +8,6 @@ const verticalScale = (size) => (height / 667) * size; // vertical scaling (base
 const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
-
 export default StyleSheet.create({
   container: {
     flex: 1,
@@ -98,16 +97,14 @@ export default StyleSheet.create({
     paddingVertical: verticalScale(8),
     paddingHorizontal: moderateScale(24),
     borderRadius: moderateScale(20),
-    width: '100%',
+    width: '50%',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '50%', 
   },
   modalButtonText: {
     color: COLORS.cardBackground,
     fontSize: moderateScale(14),
     fontWeight: "600",
-
   },
   detailsContainer: {
     flexDirection: 'row',
@@ -137,4 +134,21 @@ export default StyleSheet.create({
     color: COLORS.textSecondary,
   },
 
+  // ===== New styles for slider =====
+  sliderContainer: {
+    width: '100%',
+    marginBottom: verticalScale(24),
+    alignItems: 'center',
+  },
+  slider: {
+    width: '100%',
+    height: verticalScale(40),
+  },
+  sliderLabel: {
+    marginTop: verticalScale(8),
+    fontSize: moderateScale(14),
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    textAlign: 'center',
+  },
 });

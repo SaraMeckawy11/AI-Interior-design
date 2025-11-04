@@ -245,7 +245,8 @@ export default function Create() {
         router.push({
           pathname: '/outputScreen',
           params: {
-            imageUri,
+            generatedImage: imageUri, 
+            image: image || null, 
             roomType,
             designStyle,
             colorTone,
@@ -326,7 +327,7 @@ export default function Create() {
             <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
             
             {/* Custom Prompt (Optional) */}
-            <View style={styles.formGroup}>
+            {/* <View style={styles.formGroup}>
               <Text style={styles.label}>
                 Add a Personal Touch <Text style={{ color: COLORS.textSecondary, fontWeight: '400' }}>(optional)</Text>
               </Text>
@@ -343,7 +344,7 @@ export default function Create() {
                   returnKeyType="done"
                 />
               </View>
-            </View>
+            </View> */}
 
             {/* Submit Button */}
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
