@@ -27,6 +27,8 @@ import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AdEventType } from 'react-native-google-mobile-ads'; // ✅ make sure this import exists
 
 const { width, height } = Dimensions.get("window");
 
@@ -36,9 +38,10 @@ const verticalScale = (size) => (height / 667) * size; // vertical scaling (base
 const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
-// const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
-const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
+const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+// const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
 const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
+const autoAd = RewardedAd.createForAdRequest(adUnitId);
 
 export default function Create() {
   const router = useRouter();
@@ -52,8 +55,8 @@ export default function Create() {
   const [designStyle, setDesignStyle] = useState('Modern');
   const [colorTone, setColorTone] = useState('Neutral');
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(null);
+  const [isPremium, setIsPremium] = useState(null);
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalData, setModalData] = useState({ title: '', message: '' });
@@ -126,7 +129,7 @@ export default function Create() {
     setAdMessage('Loading ad...');
     rewardedAd.load();
   };
-
+  
   // Fetch user status
   useEffect(() => {
     const fetchUserStatus = async () => {
@@ -160,6 +163,62 @@ export default function Create() {
 
     fetchUserStatus();
   }, [token]);
+
+  // Automatically show one ad when user opens the app, respecting frequency
+  useEffect(() => {
+    let intervalId;
+    let hasLoadedListener = false;
+    let hasClosedListener = false;
+
+    const showAutoAd = async () => {
+      try {
+        // 🛑 Skip for premium or subscribed users
+        if (isSubscribed || isPremium) {
+          console.log("🚫 Auto ad skipped — user has premium or subscription");
+          return;
+        }
+
+        const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
+        const now = Date.now();
+        const AD_INTERVAL_MINUTES = 8;
+
+        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
+          console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
+          return;
+        }
+
+        console.log('⌛ Loading autoAd...');
+        autoAd.load();
+
+        // ✅ Attach listeners only once
+        if (!hasLoadedListener) {
+          hasLoadedListener = true;
+          autoAd.addAdEventListener(RewardedAdEventType.LOADED, async () => {
+            console.log('✅ Auto ad loaded — showing now');
+            autoAd.show();
+            await AsyncStorage.setItem('lastAutoAdTime', Date.now().toString());
+          });
+        }
+
+        if (!hasClosedListener) {
+          hasClosedListener = true;
+          autoAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+            console.log('👋 Auto ad closed');
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error handling autoAd:', error);
+      }
+    };
+
+    // ✅ Run once and then every minute
+    if (isSubscribed !== null && isPremium !== null) {
+      showAutoAd();
+      intervalId = setInterval(showAutoAd, 4 * 60 * 1000);
+    }
+
+    return () => clearInterval(intervalId);
+  }, [isSubscribed, isPremium]);
 
   // Pick image
   const pickImage = async () => {
@@ -374,7 +433,7 @@ export default function Create() {
                 <Text style={styles.label}>Add photo</Text>
 
                 {/* Small watch ad button for non-premium users */}
-                {!isSubscribed && !isPremium && (
+                {!isSubscribed && (
                   <TouchableOpacity
                     onPress={handleWatchAd}
                     activeOpacity={0.8}
@@ -518,7 +577,7 @@ export default function Create() {
       <Modal transparent animationType="fade" visible={loading}>
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
+            <ActivityIndicator size="large" color={COLORS.primaryDark} />
             <Text style={styles.loadingText}>Designing your dream room...</Text>
             <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
           </View>

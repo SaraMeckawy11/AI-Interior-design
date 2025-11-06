@@ -214,7 +214,7 @@ loadingText: {
   marginTop: verticalScale(14),
   fontSize: moderateScale(14),
   fontWeight: '600',
-  color: COLORS.primary,
+  color: COLORS.primaryDark,
 },
 
 loadingSubtext: {
