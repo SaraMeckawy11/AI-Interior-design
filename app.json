@@ -51,6 +51,6 @@
       "expo-file-system",
       "expo-localization",
       "expo-build-properties"
-    ]
+   ]
   }
 }

@@ -165,60 +165,60 @@ export default function Create() {
   }, [token]);
 
   // Automatically show one ad when user opens the app, respecting frequency
-  useEffect(() => {
-    let intervalId;
-    let hasLoadedListener = false;
-    let hasClosedListener = false;
+  // useEffect(() => {
+  //   let intervalId;
+  //   let hasLoadedListener = false;
+  //   let hasClosedListener = false;
 
-    const showAutoAd = async () => {
-      try {
-        // 🛑 Skip for premium or subscribed users
-        if (isSubscribed || isPremium) {
-          console.log("🚫 Auto ad skipped — user has premium or subscription");
-          return;
-        }
+  //   const showAutoAd = async () => {
+  //     try {
+  //       // 🛑 Skip for premium or subscribed users
+  //       if (isSubscribed || isPremium) {
+  //         console.log("🚫 Auto ad skipped — user has premium or subscription");
+  //         return;
+  //       }
 
-        const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
-        const now = Date.now();
-        const AD_INTERVAL_MINUTES = 8;
+  //       const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
+  //       const now = Date.now();
+  //       const AD_INTERVAL_MINUTES = 8;
 
-        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
-          console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
-          return;
-        }
+  //       if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
+  //         console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
+  //         return;
+  //       }
 
-        console.log('⌛ Loading autoAd...');
-        autoAd.load();
+  //       console.log('⌛ Loading autoAd...');
+  //       autoAd.load();
 
-        // ✅ Attach listeners only once
-        if (!hasLoadedListener) {
-          hasLoadedListener = true;
-          autoAd.addAdEventListener(RewardedAdEventType.LOADED, async () => {
-            console.log('✅ Auto ad loaded — showing now');
-            autoAd.show();
-            await AsyncStorage.setItem('lastAutoAdTime', Date.now().toString());
-          });
-        }
+  //       // ✅ Attach listeners only once
+  //       if (!hasLoadedListener) {
+  //         hasLoadedListener = true;
+  //         autoAd.addAdEventListener(RewardedAdEventType.LOADED, async () => {
+  //           console.log('✅ Auto ad loaded — showing now');
+  //           autoAd.show();
+  //           await AsyncStorage.setItem('lastAutoAdTime', Date.now().toString());
+  //         });
+  //       }
 
-        if (!hasClosedListener) {
-          hasClosedListener = true;
-          autoAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-            console.log('👋 Auto ad closed');
-          });
-        }
-      } catch (error) {
-        console.error('❌ Error handling autoAd:', error);
-      }
-    };
+  //       if (!hasClosedListener) {
+  //         hasClosedListener = true;
+  //         autoAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+  //           console.log('👋 Auto ad closed');
+  //         });
+  //       }
+  //     } catch (error) {
+  //       console.error('❌ Error handling autoAd:', error);
+  //     }
+  //   };
 
-    // ✅ Run once and then every minute
-    if (isSubscribed !== null && isPremium !== null) {
-      showAutoAd();
-      intervalId = setInterval(showAutoAd, 4 * 60 * 1000);
-    }
+  //   // ✅ Run once and then every minute
+  //   if (isSubscribed !== null && isPremium !== null) {
+  //     showAutoAd();
+  //     intervalId = setInterval(showAutoAd, 4 * 60 * 1000);
+  //   }
 
-    return () => clearInterval(intervalId);
-  }, [isSubscribed, isPremium]);
+  //   return () => clearInterval(intervalId);
+  // }, [isSubscribed, isPremium]);
 
   // Pick image
   const pickImage = async () => {
