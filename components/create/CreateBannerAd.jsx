@@ -2,9 +2,9 @@ import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
 
-const AD_UNIT_ID = __DEV__
-  ? TestIds.BANNER // Test banner
-  : "ca-app-pub-4470538534931449/9120930286"; // Replace with your real unit ID
+// const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : "ca-app-pub-4470538534931449/9120930286"; // real unit ID
+  const AD_UNIT_ID = "ca-app-pub-4470538534931449/9120930286"; // real unit ID
+
 
 export default function CreateBannerAd() {
   return (

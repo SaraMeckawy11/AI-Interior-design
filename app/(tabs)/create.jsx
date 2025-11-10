@@ -26,9 +26,8 @@ import RoomTypeSelector from '../../components/create/RoomTypeSelector';
 import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { RewardedAd, RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
+import { RewardedAd, RewardedInterstitialAd,RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AdEventType } from 'react-native-google-mobile-ads'; // ✅ make sure this import exists
 import CreateBannerAd from "../../components/create/CreateBannerAd";
 
 const { width, height } = Dimensions.get("window");
@@ -39,8 +38,8 @@ const verticalScale = (size) => (height / 667) * size; // vertical scaling (base
 const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
-const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
-// const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
+// const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
+const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
 const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 const autoAd = RewardedAd.createForAdRequest(adUnitId);
 
@@ -66,7 +65,7 @@ export default function Create() {
   const [adMessage, setAdMessage] = useState('');
   const [isAdLoaded, setIsAdLoaded] = useState(false);
   const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
-
+  
   // Setup rewarded ad logic
   useEffect(() => {
     if (!RewardedAdEventType || typeof RewardedAdEventType !== 'object') {
@@ -164,6 +163,62 @@ export default function Create() {
 
     fetchUserStatus();
   }, [token]);
+
+  // Automatically show one ad when user opens the app, respecting frequency
+  useEffect(() => {
+    let intervalId;
+    let hasLoadedListener = false;
+    let hasClosedListener = false;
+
+    const showAutoAd = async () => {
+      try {
+        // 🛑 Skip for premium or subscribed users
+        if (isSubscribed || isPremium) {
+          console.log("🚫 Auto ad skipped — user has premium or subscription");
+          return;
+        }
+
+        const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
+        const now = Date.now();
+        const AD_INTERVAL_MINUTES = 8;
+
+        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
+          console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
+          return;
+        }
+
+        console.log('⌛ Loading autoAd...');
+        autoAd.load();
+
+        // ✅ Attach listeners only once
+        if (!hasLoadedListener) {
+          hasLoadedListener = true;
+          autoAd.addAdEventListener(RewardedAdEventType.LOADED, async () => {
+            console.log('✅ Auto ad loaded — showing now');
+            autoAd.show();
+            await AsyncStorage.setItem('lastAutoAdTime', Date.now().toString());
+          });
+        }
+
+        if (!hasClosedListener) {
+          hasClosedListener = true;
+          autoAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
+            console.log('👋 Auto ad closed');
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error handling autoAd:', error);
+      }
+    };
+
+    // ✅ Run once and then every minute
+    if (isSubscribed !== null && isPremium !== null) {
+      showAutoAd();
+      intervalId = setInterval(showAutoAd, 4 * 60 * 1000);
+    }
+
+    return () => clearInterval(intervalId);
+  }, [isSubscribed, isPremium]);
 
   // Pick image
   const pickImage = async () => {
@@ -322,7 +377,7 @@ export default function Create() {
         if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins >= 2) {
           setCoins(prev => prev - 2);
         }
-        
+
         router.push({
           pathname: '/outputScreen',
           params: {
