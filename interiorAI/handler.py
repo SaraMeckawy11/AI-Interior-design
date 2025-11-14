@@ -26,7 +26,7 @@ dpt_processor = DPTImageProcessor.from_pretrained(
 )
 dpt_model = DPTForDepthEstimation.from_pretrained(
     "Intel/dpt-large",
-    torch_dtype=dtype,
+    torch_dtype=torch.float32,
     cache_dir="/home/user/.cache/huggingface"
 ).to(device)
 
@@ -37,7 +37,7 @@ seg_processor = AutoImageProcessor.from_pretrained(
 )
 seg_model = UperNetForSemanticSegmentation.from_pretrained(
     "openmmlab/upernet-convnext-small",
-    torch_dtype=dtype,
+    torch_dtype=torch.float32,
     cache_dir="/home/user/.cache/huggingface"
 ).to(device)
 
