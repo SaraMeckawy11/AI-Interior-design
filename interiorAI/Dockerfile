@@ -18,7 +18,7 @@ COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # -------------------------------------------------------------------
-# 🟦 Pre-download all HuggingFace models for faster cold-start
+#  Pre-download all HuggingFace models for faster cold-start
 # -------------------------------------------------------------------
 RUN python -c "\
 from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProcessor; \
