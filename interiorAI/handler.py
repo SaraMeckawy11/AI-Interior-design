@@ -201,8 +201,8 @@ def handler(event):
         )
 
         negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
-        if not has_window:
-            negative += ", no window"
+        # if not has_window:
+        #     negative += ", no window"
 
         result = pipe(
             prompt=prompt,
