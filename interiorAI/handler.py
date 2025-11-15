@@ -193,17 +193,26 @@ def handler(event):
 
         has_window = detect_window(seg_map)
 
-        # IDENTICAL TO DESKTOP PROMPT
+        # -------------------------------------------------------------------
+        # BUILD PROMPT BASE
+        # -------------------------------------------------------------------
         prompt = (
             f"{design_style} {room_type}, interior design, soft ambient lighting, high detail, "
-            f"{color_tone} tones, realistic textures, highly detailed, "
-            "photorealistic, 8k, designed by an interior architect"
+            f"{color_tone} tones, realistic textures, highly detailed, photorealistic, 8k, "
+            "designed by an interior architect"
         )
 
+        # Always define negative BEFORE any conditional modification
         negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+
+        # -------------------------------------------------------------------
+        # WINDOW LOGIC
+        # -------------------------------------------------------------------
         if has_window:
-            prompt += ", window in place"
+            # Insert "window in place" directly after the room_type word
+            prompt = prompt.replace(f"{room_type}", f"{room_type} with window in place")
         else:
+            # NO window → modify ONLY negative prompt, as you requested
             negative += ", no window"
 
         result = pipe(
