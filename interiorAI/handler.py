@@ -204,7 +204,7 @@ def handler(event):
         if has_window:
             prompt += ", window in place"
         else:
-            prompt += ", no window"
+            negative += ", no window"
 
         result = pipe(
             prompt=prompt,
