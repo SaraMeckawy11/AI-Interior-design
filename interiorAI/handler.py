@@ -1,4 +1,4 @@
-# runpod_server_match_local_fixed.py
+# runpod_server_match_local_fixed_fp32.py
 import runpod
 import base64
 import io
@@ -15,7 +15,6 @@ from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProc
 use_cuda = torch.cuda.is_available()
 device = "cuda" if use_cuda else "cpu"
 
-FP16 = torch.float16
 FP32 = torch.float32
 
 # ---------------------------------------------------------------------------
@@ -24,52 +23,50 @@ FP32 = torch.float32
 CACHE_DIR = "/home/user/.cache/huggingface"
 
 # ---------------------------------------------------------------------------
-# LOAD MODELS — MATCH DESKTOP + FIXES
+# LOAD MODELS — ALL FP32 to avoid mixed-dtype errors
 # ---------------------------------------------------------------------------
 
-# Depth model MUST be float32 to avoid fp16 LayerNorm failures
+# Depth model (FP32)
 dpt_processor = DPTImageProcessor.from_pretrained(
     "Intel/dpt-large",
     cache_dir=CACHE_DIR
 )
-
 dpt_model = DPTForDepthEstimation.from_pretrained(
     "Intel/dpt-large",
-    torch_dtype=FP32,          # IMPORTANT FIX
+    torch_dtype=FP32,
     cache_dir=CACHE_DIR
 ).to(device)
 dpt_model.eval()
 
-# Segmentation model = fp16 OK
+# Segmentation model (FP32 to avoid dtype mismatch)
 seg_processor = AutoImageProcessor.from_pretrained(
     "openmmlab/upernet-convnext-small",
     cache_dir=CACHE_DIR
 )
-
 seg_model = UperNetForSemanticSegmentation.from_pretrained(
     "openmmlab/upernet-convnext-small",
-    torch_dtype=FP16,
+    torch_dtype=FP32,
     cache_dir=CACHE_DIR
 ).to(device)
 seg_model.eval()
 
-# ControlNets = fp16
+# ControlNets (FP32)
 depth_controlnet = ControlNetModel.from_pretrained(
     "lllyasviel/sd-controlnet-depth",
-    torch_dtype=FP16,
+    torch_dtype=FP32,
     cache_dir=CACHE_DIR
 )
 seg_controlnet = ControlNetModel.from_pretrained(
     "lllyasviel/control_v11p_sd15_seg",
-    torch_dtype=FP16,
+    torch_dtype=FP32,
     cache_dir=CACHE_DIR
 )
 
-# Stable Diffusion = fp16
+# Stable Diffusion pipeline (FP32)
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
     "Lykon/dreamshaper-8",
     controlnet=[depth_controlnet, seg_controlnet],
-    torch_dtype=FP16,
+    torch_dtype=FP32,
     safety_checker=None,
     cache_dir=CACHE_DIR
 ).to(device)
@@ -99,11 +96,10 @@ def resize_orientation(img):
     if w > h:
         return (768, 512)  # width, height
     else:
-        # Portrait: TARGET_WIDTH=512, TARGET_HEIGHT=768
         return (512, 768)
 
 # ---------------------------------------------------------------------------
-# DEPTH (FP32 MODEL!)
+# DEPTH (FP32 MODEL)
 # ---------------------------------------------------------------------------
 def get_depth_image(image_bgr, size_wh):
     width, height = size_wh
@@ -112,12 +108,10 @@ def get_depth_image(image_bgr, size_wh):
     image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
 
     inputs = dpt_processor(images=Image.fromarray(image_rgb), return_tensors="pt").to(device)
-
-    # Depth model is FP32 → Keep inputs FP32 (no .half())
+    # keep inputs FP32 for FP32 model
     with torch.no_grad():
         depth = dpt_model(**inputs).predicted_depth
 
-    # Interpolate to (height, width)
     depth_resized = torch.nn.functional.interpolate(
         depth.unsqueeze(1),
         size=(height, width),
@@ -128,11 +122,10 @@ def get_depth_image(image_bgr, size_wh):
     depth_norm = ((depth_resized - depth_resized.min()) /
                   (depth_resized.max() - depth_resized.min()) * 255).astype(np.uint8)
 
-    # Return PIL RGB just like local code
     return Image.fromarray(depth_norm).convert("RGB")
 
 # ---------------------------------------------------------------------------
-# SEGMENTATION (FP16 MODEL)
+# SEGMENTATION (FP32 MODEL)
 # ---------------------------------------------------------------------------
 def get_segmentation_map(image_bgr):
     width, height = resize_orientation(image_bgr)
@@ -141,10 +134,7 @@ def get_segmentation_map(image_bgr):
     image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
 
     inputs = seg_processor(images=Image.fromarray(image_rgb), return_tensors="pt").to(device)
-
-    # Segmentation model is FP16 → convert input tensors to FP16
-    inputs = {k: v.half() for k, v in inputs.items()}
-
+    # keep inputs FP32 for FP32 model
     with torch.no_grad():
         outputs = seg_model(**inputs)
 
