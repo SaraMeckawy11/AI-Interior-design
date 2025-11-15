@@ -184,11 +184,11 @@ export default function Collection() {
         </TouchableOpacity>
 
         {/* ✅ Show native ads only for non-premium/non-subscribed users */}
-        {showAds && ((index + 1) % 4 === 0 || index === 0) && (
+        {/* {showAds && ((index + 1) % 4 === 0 || index === 0) && (
           <View style={{ marginVertical: 10 }}>
             <NativeCollectionAd />
           </View>
-        )}
+        )} */}
       </>
     );
   };

@@ -2,11 +2,10 @@ import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 
-// ✅ Use this test ad unit for now to confirm everything works
-// Replace with your real one later: "ca-app-pub-4470538534931449/9120930286"
-const AD_UNIT_ID = __DEV__
-  ? "ca-app-pub-3940256099942544/6300978111" // Google test banner
-  : "ca-app-pub-4470538534931449/9120930286";
+
+const AD_UNIT_ID = __DEV__? "ca-app-pub-3940256099942544/6300978111" : "ca-app-pub-4470538534931449/9120930286";
+
+// const AD_UNIT_ID = "ca-app-pub-4470538534931449/9120930286";
 
 export default function NativeCollectionAd() {
   return (

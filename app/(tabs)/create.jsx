@@ -180,7 +180,7 @@ export default function Create() {
 
         const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
         const now = Date.now();
-        const AD_INTERVAL_MINUTES = 8;
+        const AD_INTERVAL_MINUTES = 15;
 
         if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
           console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
@@ -527,9 +527,9 @@ export default function Create() {
             </TouchableOpacity>
 
             {/* Banner ad for non-subscribed users */}
-            {!isSubscribed  && (
+            {/* {!isSubscribed  && (
               <CreateBannerAd />
-            )}
+            )} */}
 
           </View>
         </View>
