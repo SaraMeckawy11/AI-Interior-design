@@ -82,7 +82,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     console.log("Submitting job to RunPod:", { payload });
 
     const jobResponse = await axios.post(
-      "https://api.runpod.ai/v2/x6jka3ci9vkelj/run",
+      "https://api.runpod.ai/v2/9x2kmfa8z6483c/run",
       payload,
       {
         headers: {
@@ -104,7 +104,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       await sleep(2000); // wait 2 seconds
 
       const statusResp = await axios.get(
-        `https://api.runpod.ai/v2/x6jka3ci9vkelj/status/${jobId}`,
+        `https://api.runpod.ai/v2/9x2kmfa8z6483c/status/${jobId}`,
         {
           headers: {
             "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
