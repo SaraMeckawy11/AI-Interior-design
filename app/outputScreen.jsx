@@ -20,7 +20,7 @@ import styles from '../assets/styles/output.styles';
 import COLORS from '../constants/colors';
 
 export default function OutputScreen() {
-  const { generatedImage, image, roomType, designStyle, colorTone, createdAt } =
+  const { generatedImage, image, prompt, roomType, designStyle, colorTone, createdAt } =
     useLocalSearchParams();
 
   const router = useRouter();
@@ -181,26 +181,49 @@ export default function OutputScreen() {
         {/* Details */}
         <View style={styles.detailsContainer}>
           <View style={styles.bookDetails}>
-            {roomType && (
-              <Text style={styles.bookTitle}>
-                <Text style={styles.label}>Room Type: </Text>{roomType}
-              </Text>
+
+            {/* CASE 1 — Prompt-based design */}
+            {prompt ? (
+              <>
+                <Text style={styles.bookTitle}>
+                  {prompt}
+                </Text>
+
+                {createdAt && (
+                  <Text style={styles.date}>
+                    Created on {formatPublishDate(createdAt)}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <>
+                {/* CASE 2 — RoomType / Style / ColorTone based design */}
+                {roomType && (
+                  <Text style={styles.bookTitle}>
+                    <Text style={styles.label}>Room Type: </Text>{roomType}
+                  </Text>
+                )}
+
+                {designStyle && (
+                  <Text style={styles.caption}>
+                    <Text style={styles.label}>Design Style: </Text>{designStyle}
+                  </Text>
+                )}
+
+                {colorTone && (
+                  <Text style={styles.caption}>
+                    <Text style={styles.label}>Color Tone: </Text>{colorTone}
+                  </Text>
+                )}
+
+                {createdAt && (
+                  <Text style={styles.date}>
+                    Created on {formatPublishDate(createdAt)}
+                  </Text>
+                )}
+              </>
             )}
-            {designStyle && (
-              <Text style={styles.caption}>
-                <Text style={styles.label}>Design Style: </Text>{designStyle}
-              </Text>
-            )}
-            {colorTone && (
-              <Text style={styles.caption}>
-                <Text style={styles.label}>Color Tone: </Text>{colorTone}
-              </Text>
-            )}
-            {createdAt && (
-              <Text style={styles.date}>
-                Created on {formatPublishDate(createdAt)}
-              </Text>
-            )}
+
           </View>
         </View>
 

@@ -140,9 +140,10 @@ export default function Collection() {
               params: {
                 generatedImage,
                 image: originalImage,
-                roomType: item.roomType,
-                designStyle: item.designStyle,
-                colorTone: item.colorTone,
+                prompt: item.prompt || "",       // send prompt if exists
+                roomType: item.roomType || "",   // send roomType if exists
+                designStyle: item.designStyle || "",
+                colorTone: item.colorTone || "",
                 createdAt: item.createdAt,
               },
             })
@@ -160,18 +161,38 @@ export default function Collection() {
 
           <View style={styles.detailsContainer}>
             <View style={styles.bookDetails}>
-              <Text style={styles.bookTitle}>
-                <Text style={styles.label}>Room Type:</Text> {item.roomType}
-              </Text>
-              <Text style={styles.caption}>
-                <Text style={styles.label}>Design Style:</Text> {item.designStyle}
-              </Text>
-              <Text style={styles.caption}>
-                <Text style={styles.label}>Color Tone:</Text> {item.colorTone}
-              </Text>
-              <Text style={styles.date}>
-                Created on {formatPublishDate(item.createdAt)}
-              </Text>
+              {/*  If prompt exists → show prompt only */}
+              {item.prompt ? (
+                <>
+                  <Text style={styles.bookTitle} numberOfLines={2}>
+                    {item.prompt}
+                  </Text>
+
+                  <Text style={styles.date}>
+                    Created on {formatPublishDate(item.createdAt)}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  {/*  Normal interior generation → Show details */}
+                  <Text style={styles.bookTitle}>
+                    <Text style={styles.label}>Room Type: </Text>{item.roomType}
+                  </Text>
+
+                  <Text style={styles.caption}>
+                    <Text style={styles.label}>Design Style: </Text>{item.designStyle}
+                  </Text>
+
+                  <Text style={styles.caption}>
+                    <Text style={styles.label}>Color Tone: </Text>{item.colorTone}
+                  </Text>
+
+                  <Text style={styles.date}>
+                    Created on {formatPublishDate(item.createdAt)}
+                  </Text>
+                </>
+              )}
+
             </View>
 
             <TouchableOpacity

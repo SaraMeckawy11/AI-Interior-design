@@ -164,62 +164,6 @@ export default function Prompt() {
     fetchUserStatus();
   }, [token]);
 
-  // Automatically show one ad when user opens the app, respecting frequency
-  useEffect(() => {
-    let intervalId;
-    let hasLoadedListener = false;
-    let hasClosedListener = false;
-
-    const showAutoAd = async () => {
-      try {
-        // 🛑 Skip for premium or subscribed users
-        if (isSubscribed || isPremium) {
-          console.log("🚫 Auto ad skipped — user has premium or subscription");
-          return;
-        }
-
-        const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
-        const now = Date.now();
-        const AD_INTERVAL_MINUTES = 15;
-
-        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
-          console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
-          return;
-        }
-
-        console.log('⌛ Loading autoAd...');
-        autoAd.load();
-
-        // ✅ Attach listeners only once
-        if (!hasLoadedListener) {
-          hasLoadedListener = true;
-          autoAd.addAdEventListener(RewardedAdEventType.LOADED, async () => {
-            console.log('✅ Auto ad loaded — showing now');
-            autoAd.show();
-            await AsyncStorage.setItem('lastAutoAdTime', Date.now().toString());
-          });
-        }
-
-        if (!hasClosedListener) {
-          hasClosedListener = true;
-          autoAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-            console.log('👋 Auto ad closed');
-          });
-        }
-      } catch (error) {
-        console.error('❌ Error handling autoAd:', error);
-      }
-    };
-
-    // ✅ Run once and then every minute
-    if (isSubscribed !== null && isPremium !== null) {
-      showAutoAd();
-      intervalId = setInterval(showAutoAd, 4 * 60 * 1000);
-    }
-
-    return () => clearInterval(intervalId);
-  }, [isSubscribed, isPremium]);
-
   // Pick image
   const pickImage = async () => {
     try {
@@ -307,13 +251,22 @@ export default function Prompt() {
 
   // Handle design generation
   const handleSubmit = async () => {
-    if (!roomType || !designStyle || !colorTone || !image) {
+    if (!image) {
       setModalData({
         title: 'Missing Information',
         message: 'Please upload a photo before continuing.',
       });
       setModalVisible(true);
       return;
+    }
+
+    if (!prompt.trim()) {
+    setModalData({
+        title: 'Missing description',
+        message: 'Please enter a description of what you want before generating.',
+    });
+    setModalVisible(true);
+    return;
     }
 
     // Block user if manualDisabled is true
@@ -329,7 +282,7 @@ export default function Prompt() {
 
     // ✅ Access logic for non-premium / non-subscribed users
     if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins < 2) {
-    router.push('/upgrade');
+    router.push('/profile/upgrade');
     return;
     }
 
@@ -345,11 +298,8 @@ export default function Prompt() {
       }
 
       const requestBody = {
-        roomType,
-        designStyle,
-        colorTone,
-        customPrompt: prompt,
-      };
+        prompt: prompt.trim(),
+     };
 
       if (imageDataUrl) {
         requestBody.image = imageDataUrl;
@@ -379,15 +329,13 @@ export default function Prompt() {
         }
 
         router.push({
-          pathname: '/outputScreen',
-          params: {
-            generatedImage: imageUri, 
-            image: image || null, 
-            roomType,
-            designStyle,
-            colorTone,
+        pathname: '/outputScreen',
+        params: {
+            generatedImage: imageUri,
+            image: image || null,
+            prompt: prompt.trim(),
             createdAt: new Date().toISOString(),
-          },
+        },
         });
       } else {
         setModalData({

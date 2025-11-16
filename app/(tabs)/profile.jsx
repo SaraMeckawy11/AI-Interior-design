@@ -63,17 +63,17 @@ export default function Profile() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Help & Legal</Text>
 
-        <TouchableOpacity style={styles.item} onPress={() => router.push('/privacy')}>
+        <TouchableOpacity style={styles.item} onPress={() => router.push('/profile/privacy')}>
           <Ionicons name="lock-closed-outline" size={18} color="#666" style={styles.itemIcon} />
           <Text style={styles.itemText}>Privacy Policy</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.item} onPress={() => router.push('/terms')}>
+        <TouchableOpacity style={styles.item} onPress={() => router.push('/profile/terms')}>
           <Ionicons name="document-text-outline" size={18} color="#666" style={styles.itemIcon} />
           <Text style={styles.itemText}>Terms & Conditions</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.item} onPress={() => router.push('/contact')}>
+        <TouchableOpacity style={styles.item} onPress={() => router.push('/profile/contact')}>
           <Ionicons name="help-circle-outline" size={18} color="#666" style={styles.itemIcon} />
           <Text style={styles.itemText}>Contact Support</Text>
         </TouchableOpacity>

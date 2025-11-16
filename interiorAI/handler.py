@@ -201,17 +201,16 @@ def handler(event):
         negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
 
         # --- Choose which prompt to use ---
-        if custom_prompt and len(custom_prompt.strip()) > 3:
-            prompt = custom_prompt.strip()          # ✔ user prompt only
+        if isinstance(custom_prompt, str):
+            prompt = custom_prompt
         else:
-            prompt = auto_prompt                    # ✔ generated prompt
+            prompt = auto_prompt
 
         # --- Window-aware modification (ALWAYS APPLIED) ---
         if has_window:
             prompt += ", window in place"
         else:
             negative += ", no window"
-
 
         # --- Generate ---
         result = pipe(
