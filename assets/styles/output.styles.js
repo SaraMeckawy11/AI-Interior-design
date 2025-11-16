@@ -150,5 +150,16 @@ export default StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textPrimary,
     textAlign: 'center',
+  },   
+  backButtonContainer: {
+    position: 'absolute',
+    top: verticalScale(18),
+    left: moderateScale(16),
+    zIndex: 999,
   },
+
+  backArrow: {
+    padding: moderateScale(4),  // touch area, but invisible
+  },
+
 });

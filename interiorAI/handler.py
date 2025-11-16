@@ -188,7 +188,11 @@ def handler(event):
         has_window = detect_window(seg_map)
 
         # --- PROMPTS ---
-        prompt = (
+        # --- CUSTOM PROMPT (if provided) ---
+        custom_prompt = body.get("prompt")  # user-sent prompt
+
+        # --- BASE PROMPTS (fallback) ---
+        auto_prompt = (
             f"{design_style} {room_type}, interior design, soft ambient lighting, high detail, "
             f"{color_tone} tones, realistic textures, highly detailed, photorealistic, 8k, "
             "designed by an interior architect"
@@ -196,10 +200,18 @@ def handler(event):
 
         negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
 
+        # --- Choose which prompt to use ---
+        if custom_prompt and len(custom_prompt.strip()) > 3:
+            prompt = custom_prompt.strip()          # ✔ user prompt only
+        else:
+            prompt = auto_prompt                    # ✔ generated prompt
+
+        # --- Window-aware modification (ALWAYS APPLIED) ---
         if has_window:
-            prompt = prompt.replace(room_type, f"{room_type} with window in place")
+            prompt += ", window in place"
         else:
             negative += ", no window"
+
 
         # --- Generate ---
         result = pipe(

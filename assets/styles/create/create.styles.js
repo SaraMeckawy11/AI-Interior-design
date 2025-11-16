@@ -309,7 +309,7 @@ promptCard: {
   borderWidth: 1,
   borderColor: COLORS.border,
   paddingHorizontal: moderateScale(14),
-  paddingVertical: verticalScale(8),
+  paddingVertical: verticalScale(32),
   shadowColor: COLORS.black,
   shadowOffset: { width: 0, height: 1 },
   shadowOpacity: 0.05,
@@ -364,6 +364,16 @@ watchAdText: {
   marginLeft: moderateScale(4),
   fontWeight: '500',
   fontFamily: 'Poppins_500Medium',
+},
+backButtonContainer: {
+  position: 'absolute',
+  top: verticalScale(18),
+  left: moderateScale(16),
+  zIndex: 999,
+},
+
+backArrow: {
+  padding: moderateScale(4),  // touch area, but invisible
 },
 
 });
