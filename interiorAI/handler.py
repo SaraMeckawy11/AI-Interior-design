@@ -170,9 +170,9 @@ def handler(event):
         body = event.get("input", {})
         base64_image = body.get("image")
 
-        room_type = body.get("room_type", "bedroom")
-        design_style = body.get("design_style", "modern")
-        color_tone = body.get("color_tone", "vanilla latte")
+        room_type = body.get("room_type")
+        design_style = body.get("design_style")
+        color_tone = body.get("color_tone")
 
         if not base64_image:
             return {"error": "Missing image"}
@@ -192,17 +192,19 @@ def handler(event):
         custom_prompt = body.get("prompt")  # user-sent prompt
 
         # --- BASE PROMPTS (fallback) ---
-        auto_prompt = (
-            f"{design_style} {room_type}, interior design, soft ambient lighting, high detail, "
-            f"{color_tone} tones, realistic textures, highly detailed, photorealistic, 8k, "
-            "designed by an interior architect"
-        )
+        auto_prompt = None
+        if room_type and design_style and color_tone:
+            auto_prompt = (
+                f"{design_style} {room_type}, interior design, soft ambient lighting, high detail, "
+                f"{color_tone} tones, realistic textures, highly detailed, photorealistic, 8k, "
+                "designed by an interior architect"
+            )
 
         negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
 
         # --- Choose which prompt to use ---
-        if isinstance(custom_prompt, str):
-            prompt = custom_prompt
+        if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
+            prompt = custom_prompt.strip()
         else:
             prompt = auto_prompt
 
