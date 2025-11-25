@@ -28,7 +28,7 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
     'Living Room', 'Bedroom', 'Kitchen', 'Bathroom',
     'Dining Room', 'Office', 'Garage', 'Entryway',
     'Basement', 'Attic', 'Laundry Room', 'Sunroom',
-    'Closet', 'Balcony', 'Hallway'
+    'Closet', 'Hallway'
   ];
 
   const allRoomTypes = [...defaultRoomTypes, ...customRoomTypes];
@@ -58,7 +58,6 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
       case 'entryway': return 'log-in-outline';
       case 'laundry room': return 'shirt-outline';
       case 'closet': return 'cube-outline';
-      case 'balcony': return 'sunny-outline';
       case 'basement': return 'download-outline';
       case 'attic': return 'cloud-upload-outline';
       case 'hallway': return 'walk-outline';

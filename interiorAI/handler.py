@@ -72,10 +72,168 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
 # ---------------------------------------------------------------------------
+# PROMPT TEMPLATES
+# ---------------------------------------------------------------------------
+
+ROOM_PROMPTS = {
+    "living room": (
+        "{design_style} living room interior, warm soft ambient lighting, "
+        "{color_tone} palette, professional interior designer style, "
+        "photorealistic 8k, high detail, natural shadows, "
+        "includes sofa sets, coffee tables, area rugs, wall art, "
+        "TV cabinets, indoor plants, bookshelves, accent lighting, "
+        "cohesive furniture arrangement matching the room layout"
+    ),
+
+    "bedroom": (
+        "{design_style} bedroom interior, cozy soft ambient lighting, "
+        "{color_tone} palette, professional interior designer style, "
+        "photorealistic 8k, high detail fabrics and materials, natural shadows, "
+        "includes beds with layered bedding, bedside tables with lamps, "
+        "wardrobes or built-in storage, textured rugs, decorative wall art, "
+        "balanced and restful room layout"
+    ),
+
+    "kitchen": (
+        "{design_style} kitchen interior, premium materials and fixtures, "
+        "{color_tone} palette with cohesive tones, photorealistic 8k, high detail, "
+        "natural reflections on countertops, includes cooking area, cabinetry, "
+        "kitchen island or breakfast bar, realistic appliances, pendant lighting, "
+        "functional layout with clear workflow"
+    ),
+
+    "bathroom": (
+        "{design_style} bathroom interior, soft indirect lighting, "
+        "{color_tone} tone palette, high detail tiles and stone surfaces, "
+        "photorealistic 8k, natural reflections, includes vanity mirrors, sinks, "
+        "shower areas or bathtubs, storage cabinets, clean minimalist finishes"
+    ),
+
+    "dining room": (
+        "{design_style} dining room interior, elegant warm lighting, "
+        "{color_tone} tones, photorealistic 8k, high detail shadows, "
+        "includes dining table with multiple chairs, sideboard or buffet, wall art, "
+        "textured or wooden flooring, centerpiece lighting, cohesive arrangement"
+    ),
+
+    "office": (
+        "{design_style} home office interior, ergonomic workspace, "
+        "{color_tone} palette, clean contemporary lighting, photorealistic 8k, high detail, "
+        "includes desk, office chair, bookshelves, storage units, task lighting, "
+        "organized functional layout"
+    ),
+
+    "garage": (
+        "{design_style} organized garage interior, {color_tone} palette, "
+        "photorealistic 8k, high detail industrial textures, clean concrete floors, "
+        "includes shelving units, tool storage, vehicle parking space, functional layout"
+    ),
+
+    "entryway": (
+        "{design_style} entryway foyer interior, soft ambient lighting, "
+        "{color_tone} tone palette, photorealistic 8k, high detail decor, "
+        "includes console table, wall mirror, coat storage, indoor plants, welcoming layout"
+    ),
+
+    "basement": (
+        "{design_style} finished basement interior, warm ambient lighting, "
+        "{color_tone} palette, photorealistic 8k, high detail textures, "
+        "includes seating or entertainment area, multipurpose layout, wall decor"
+    ),
+
+    "attic": (
+        "{design_style} attic interior with angled ceilings, warm lighting, "
+        "{color_tone} tones, photorealistic 8k, high detail wood textures, "
+        "includes seating, storage units, rugs, cozy ambient design"
+    ),
+
+    "laundry room": (
+        "{design_style} laundry room interior, bright clean lighting, "
+        "{color_tone} palette, photorealistic 8k, high detail surfaces, "
+        "includes washer and dryer, storage cabinets, shelving, organized layout"
+    ),
+
+    "sunroom": (
+        "{design_style} sunroom interior, abundant natural daylight, "
+        "{color_tone} palette, photorealistic 8k, high detail, "
+        "includes comfortable seating sets, many plants, glass windows, airy fresh atmosphere"
+    ),
+
+    "closet": (
+        "{design_style} walk-in closet interior, soft diffused lighting, "
+        "{color_tone} palette, photorealistic 8k, high detail, "
+        "includes wardrobe shelves, drawers, mirrors, organized storage"
+    ),
+
+    "balcony": (
+        "{design_style} balcony outdoor space, warm ambient lighting, "
+        "{color_tone} tones, photorealistic 8k, high detail textures, "
+        "includes outdoor seating, potted plants, railing, clean aesthetic, cohesive layout"
+    ),
+
+    "hallway": (
+        "{design_style} hallway corridor interior, soft lighting, "
+        "{color_tone} palette, photorealistic 8k, high detail wall textures, "
+        "includes wall art, minimal clean decor, clear pathway layout"
+    ),
+}
+
+EXTERIOR_PROMPTS = {
+    "balcony": (
+        "{design_style} balcony exterior scene, warm ambient lighting, "
+        "{color_tone} palette, photorealistic 8k, high detail, "
+        "includes outdoor seating, potted plants, railing, textured flooring, "
+        "cohesive terrace layout and natural background"
+    ),
+
+    "building": (
+        "{design_style} building exterior architectural visualization, natural daylight, "
+        "{color_tone} palette, photorealistic 8k, high detail facade textures, realistic shadows, "
+        "includes windows, entryway, landscaping elements, professional architectural composition"
+    ),
+
+    "terrace": (
+        "{design_style} terrace outdoor space, soft warm lighting, {color_tone} palette, "
+        "photorealistic 8k, high detail materials, includes seating areas, planters, pergola or canopy, "
+        "cohesive outdoor layout and realistic background"
+    ),
+
+    "garden": (
+        "{design_style} garden landscape, natural daylight, {color_tone} palette, photorealistic 8k, "
+        "high botanical detail, includes planting beds, pathways, seating niches, decorative lighting, "
+        "balanced landscape composition"
+    ),
+
+    "driveway": (
+        "{design_style} driveway exterior scene, natural daylight, {color_tone} palette, "
+        "photorealistic 8k, high detail paving and materials, includes vehicle parking area, landscaping, "
+        "clean structural elements and realistic shadows"
+    ),
+
+    "swimming pool area": (
+        "{design_style} swimming pool outdoor area, natural daylight, {color_tone} palette, "
+        "photorealistic 8k, high detail water reflections, poolside seating, landscaping, "
+        "decking materials, ambient outdoor lighting and cohesive layout"
+    )
+}
+
+# universal hybrid fallback (option C)
+FALLBACK_PROMPT = (
+    "{design_style} {room_type} space, realistic lighting, {color_tone} palette, "
+    "professional design style, photorealistic 8k, high detail textures, natural shadows, "
+    "includes layout-appropriate furniture or structural elements, cohesive arrangement matching the space type"
+)
+
+# Normalize list of exterior keys for lookups
+EXTERIOR_KEYS = {k.lower(): k for k in EXTERIOR_PROMPTS.keys()}
+
+# ---------------------------------------------------------------------------
 # UTILITIES
 # ---------------------------------------------------------------------------
 
 def decode_base64_image(base64_str):
+    if not isinstance(base64_str, str):
+        raise ValueError("Image must be a base64 string")
     if base64_str.startswith("data:image"):
         base64_str = base64_str.split(",")[1]
 
@@ -167,51 +325,75 @@ def detect_window(seg_map):
 # ---------------------------------------------------------------------------
 def handler(event):
     try:
-        body = event.get("input", {})
+        body = event.get("input", {}) or {}
         base64_image = body.get("image")
 
-        room_type = body.get("room_type")
-        design_style = body.get("design_style")
-        color_tone = body.get("color_tone")
+        room_type = (body.get("room_type") or "").strip()
+        design_style = (body.get("design_style") or "").strip()
+        color_tone = (body.get("color_tone") or "").strip()
 
         if not base64_image:
             return {"error": "Missing image"}
 
+        # -------------------------
+        # IMAGE PROCESSING (correct order)
+        # -------------------------
         image_bgr = decode_base64_image(base64_image)
         size_wh = resize_orientation(image_bgr)
 
         depth_img = get_depth_image(image_bgr, size_wh)
-
         seg_map = get_segmentation_map(image_bgr)
         seg_img = get_segmentation_image(seg_map, size_wh)
 
         has_window = detect_window(seg_map)
 
         # --- PROMPTS ---
-        # --- CUSTOM PROMPT (if provided) ---
-        custom_prompt = body.get("prompt")  # user-sent prompt
+        custom_prompt = body.get("custom_prompt")  # user-sent prompt (may be empty)
 
-        # --- BASE PROMPTS (fallback) ---
-        auto_prompt = None
-        if room_type and design_style and color_tone:
-            auto_prompt = (
-                f"{design_style} {room_type}, interior design, soft ambient lighting, high detail, "
-                f"{color_tone} tones, realistic textures, highly detailed, photorealistic, 8k, "
-                "designed by an interior architect"
-            )
+        # Normalize room_type for lookups
+        room_key = (room_type or "").strip().lower()
 
-        negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+        prompt = None
 
-        # --- Choose which prompt to use ---
+        # 1) If user supplied a custom prompt (non-empty) -> use it
         if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
             prompt = custom_prompt.strip()
-        else:
-            prompt = auto_prompt
 
-        # --- Window-aware modification (ALWAYS APPLIED) ---
+        # 2) If no custom prompt, try to pick a detailed template:
+        if prompt is None:
+            # check interior room prompts first
+            if room_key in ROOM_PROMPTS:
+                template = ROOM_PROMPTS[room_key]
+                prompt = template.format(design_style=design_style or "Stylish", color_tone=color_tone or "neutral")
+            # check exterior prompts
+            elif room_key in EXTERIOR_PROMPTS:
+                template = EXTERIOR_PROMPTS[room_key]
+                prompt = template.format(design_style=design_style or "Stylish", color_tone=color_tone or "neutral")
+            else:
+                # fallback hybrid (C)
+                prompt = FALLBACK_PROMPT.format(
+                    design_style=design_style or "Stylish",
+                    room_type=room_type or "interior",
+                    color_tone=color_tone or "neutral"
+                )
+
+        # Make sure prompt is a string
+        if not isinstance(prompt, str) or not prompt.strip():
+            prompt = FALLBACK_PROMPT.format(
+                design_style=design_style or "Stylish",
+                room_type=room_type or "space",
+                color_tone=color_tone or "neutral"
+            )
+
+        # WINDOW-aware modification
         if has_window:
-            prompt += ", window in place"
+            prompt = prompt + ", window in place"
         else:
+            # add to negative prompt instead of prompt
+            pass
+
+        negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+        if not has_window:
             negative += ", no window"
 
         # --- Generate ---

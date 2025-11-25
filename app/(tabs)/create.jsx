@@ -137,22 +137,22 @@ export default function Create() {
   // -----------------------------------
   const cards = [
     {
-      title: "Interior Redesign",
-      description: "Upload a photo and redesign your room with AI.",
+      title: "Redesign Your Room",
+      description: "Upload a photo of your space and instantly generate new interior styles.",
       icon: "color-palette-outline",
       route: "/create/interior",
     },
     {
-      title: "Prompt Generator",
-      description: "Generate designs only from text prompts.",
+      title: "Generate Designs from Text",
+      description: "Describe your dream space and let AI create it from scratch.",
       icon: "create-outline",
       route: "/create/prompt",
     },
     {
-      title: "Floor Plan Builder",
-      description: "Create or redraw a floor plan with AI assistance.",
-      icon: "grid-outline",
-      route: "/create/plan",
+      title: "Outdoor & Exterior Design",
+      description: "Design balconies, gardens, facades, entrances, and more using AI.",
+      icon: "home-outline",
+      route: "/create/exterior",
     },
   ];
 
