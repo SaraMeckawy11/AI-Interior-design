@@ -298,7 +298,10 @@ export default function Prompt() {
       }
 
       const requestBody = {
-        prompt: prompt.trim(),
+        roomType: "Prompt Only",
+        designStyle: "Prompt Only",
+        colorTone: "Prompt Only",
+        customPrompt: prompt.trim(),
      };
 
       if (imageDataUrl) {

@@ -201,6 +201,7 @@ router.get("/", isAuthenticated, async (req, res) => {
       roomType: design.roomType,
       designStyle: design.designStyle,
       colorTone: design.colorTone,
+      customPrompt: design.customPrompt,
       user: design.user,
       createdAt: design.createdAt,
       _id: design._id,

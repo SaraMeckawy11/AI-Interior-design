@@ -17,7 +17,6 @@ import COLORS from "../../constants/colors";
 import Loader from "../../components/Loader";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import NativeCollectionAd from "../../components/collection/NativeCollectionAd";
 
 export default function Collection() {
   const { token } = useAuthStore();
@@ -30,12 +29,13 @@ export default function Collection() {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedDesignId, setSelectedDesignId] = useState(null);
 
   const router = useRouter();
 
-  // ✅ Fetch subscription & premium status
+  // Fetch subscription status
   useEffect(() => {
     const fetchSubscriptionStatus = async () => {
       try {
@@ -48,8 +48,8 @@ export default function Collection() {
           setIsSubscribed(data.user.isSubscribed === true || data.user.isSubscribed === "true");
           setIsPremium(data.user.isPremium === true || data.user.isPremium === "true");
         }
-      } catch (error) {
-        // silently fail, just don't break rendering
+      } catch {
+        //
       } finally {
         setStatusLoaded(true);
       }
@@ -59,7 +59,7 @@ export default function Collection() {
     else setStatusLoaded(true);
   }, [token]);
 
-  // ✅ Fetch designs
+  // Fetch designs
   const fetchDesigns = async (pageNum = 1, refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
@@ -83,7 +83,7 @@ export default function Collection() {
       setHasMore(pageNum < data.totalPages);
       setPage(pageNum);
     } catch {
-      // no console log to keep it clean
+      //
     } finally {
       if (refresh) setRefreshing(false);
       else setLoading(false);
@@ -105,7 +105,7 @@ export default function Collection() {
       );
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Failed to delete design");
+      if (!response.ok) throw new Error(data.message || "Failed to delete");
 
       setDesigns((prev) => prev.filter((d) => d._id !== selectedDesignId));
       setDeleteModalVisible(false);
@@ -123,103 +123,105 @@ export default function Collection() {
     if (hasMore && !loading && !refreshing) fetchDesigns(page + 1);
   };
 
-  // ✅ Only show ads if user status is loaded AND user is not premium/subscribed
-  const showAds = statusLoaded && !isSubscribed ;
+  const showAds = statusLoaded && !isSubscribed;
 
-  const renderItem = ({ item, index }) => {
-    const generatedImage = item.generatedImage || null;
-    const originalImage = item.image || null;
+  // ===========================
+  //   RENDER ITEM
+  // ===========================
+  const renderItem = ({ item }) => {
+    const generatedImage = item.generatedImage;
+    const originalImage = item.image || "https://via.placeholder.com/150";
+
+    // Safely compute full prompt (customPrompt preferred)
+    const fullPrompt = (item.customPrompt || "").trim();
+
+    // Determine if this is a prompt-based design
+    const isPromptDesign = fullPrompt.length > 0 || item.roomType === "Prompt Only";
+
+    // Short preview for list (safe)
+    const shortPrompt = fullPrompt.length > 80 ? fullPrompt.slice(0, 80) + "..." : fullPrompt;
 
     return (
-      <>
-        <TouchableOpacity
-          style={styles.bookCard}
-          onPress={() =>
-            router.push({
-              pathname: "/outputScreen",
-              params: {
-                generatedImage,
-                image: originalImage,
-                prompt: item.prompt || "",       // send prompt if exists
-                roomType: item.roomType || "",   // send roomType if exists
-                designStyle: item.designStyle || "",
-                colorTone: item.colorTone || "",
-                createdAt: item.createdAt,
-              },
-            })
-          }
-        >
-          <View style={styles.bookImageContainer}>
-            <Image
-              source={{
-                uri: generatedImage || originalImage || "https://via.placeholder.com/150",
-              }}
-              style={styles.bookImage}
-              contentFit="cover"
-            />
+      <TouchableOpacity
+        style={styles.bookCard}
+        onPress={() =>
+          router.push({
+            pathname: "/outputScreen",
+            params: {
+              generatedImage: generatedImage || null,
+              image: originalImage,
+              customPrompt: fullPrompt, // send full prompt to output screen
+              roomType: item.roomType || "",
+              designStyle: item.designStyle || "",
+              colorTone: item.colorTone || "",
+              createdAt: item.createdAt,
+              _id: item._id,
+            },
+          })
+        }
+      >
+        <View style={styles.bookImageContainer}>
+          <Image
+            source={{ uri: generatedImage || originalImage }}
+            style={styles.bookImage}
+            contentFit="cover"
+          />
+        </View>
+
+        <View style={styles.detailsContainer}>
+          <View style={styles.bookDetails}>
+            {isPromptDesign ? (
+              <>
+                {/* Title + short preview for prompt-based items */}
+                <Text style={styles.bookTitle} numberOfLines={1}>
+                  Description
+                </Text>
+
+                <Text style={styles.caption} numberOfLines={2}>
+                  {shortPrompt.length > 0 ? shortPrompt : "No description provided"}
+                </Text>
+
+                <Text style={styles.date}>
+                  Created on {formatPublishDate(item.createdAt)}
+                </Text>
+              </>
+            ) : (
+              <>
+                {/* Normal auto design */}
+                <Text style={styles.bookTitle}>
+                  <Text style={styles.label}>Room Type: </Text>
+                  {item.roomType}
+                </Text>
+
+                <Text style={styles.caption}>
+                  <Text style={styles.label}>Design Style: </Text>
+                  {item.designStyle}
+                </Text>
+
+                <Text style={styles.caption}>
+                  <Text style={styles.label}>Color Tone: </Text>
+                  {item.colorTone}
+                </Text>
+
+                <Text style={styles.date}>
+                  Created on {formatPublishDate(item.createdAt)}
+                </Text>
+              </>
+            )}
           </View>
 
-          <View style={styles.detailsContainer}>
-            <View style={styles.bookDetails}>
-              {/*  If prompt exists → show prompt only */}
-              {item.prompt ? (
-                <>
-                  <Text style={styles.bookTitle} numberOfLines={2}>
-                    {item.prompt}
-                  </Text>
-
-                  <Text style={styles.date}>
-                    Created on {formatPublishDate(item.createdAt)}
-                  </Text>
-                </>
-              ) : (
-                <>
-                  {/*  Normal interior generation → Show details */}
-                  <Text style={styles.bookTitle}>
-                    <Text style={styles.label}>Room Type: </Text>{item.roomType}
-                  </Text>
-
-                  <Text style={styles.caption}>
-                    <Text style={styles.label}>Design Style: </Text>{item.designStyle}
-                  </Text>
-
-                  <Text style={styles.caption}>
-                    <Text style={styles.label}>Color Tone: </Text>{item.colorTone}
-                  </Text>
-
-                  <Text style={styles.date}>
-                    Created on {formatPublishDate(item.createdAt)}
-                  </Text>
-                </>
-              )}
-
-            </View>
-
-            <TouchableOpacity
-              style={styles.deleteButton}
-              onPress={() => confirmDelete(item._id)}
-            >
-              <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-
-        {/* ✅ Show native ads only for non-premium/non-subscribed users */}
-        {/* {showAds && ((index + 1) % 4 === 0 || index === 0) && (
-          <View style={{ marginVertical: 10 }}>
-            <NativeCollectionAd />
-          </View>
-        )} */}
-      </>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => confirmDelete(item._id)}
+          >
+            <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
     );
   };
 
-  if (loading && !refreshing && designs.length === 0) return <Loader />;
-
-  const renderFooter = () =>
-    loading && !refreshing ? (
-      <ActivityIndicator style={styles.footerLoader} size="small" color={COLORS.primary} />
-    ) : null;
+  if (loading && designs.length === 0) return <Loader />;
 
   return (
     <View style={styles.container}>
@@ -236,7 +238,6 @@ export default function Collection() {
             refreshing={refreshing}
             onRefresh={() => fetchDesigns(1, true)}
             colors={[COLORS.primary]}
-            tintColor={COLORS.primary}
           />
         }
         ListHeaderComponent={
@@ -244,13 +245,15 @@ export default function Collection() {
             <Text style={styles.title}>LIVINAI</Text>
           </View>
         }
-        ListFooterComponent={renderFooter}
-        ListEmptyComponent={
-          !loading && <Text style={styles.emptyText}>No designs found.</Text>
+        ListFooterComponent={
+          loading && !refreshing ? (
+            <ActivityIndicator style={styles.footerLoader} size="small" color={COLORS.primary} />
+          ) : null
         }
+        ListEmptyComponent={!loading && <Text style={styles.emptyText}>No designs found.</Text>}
       />
 
-      {/* Delete Confirmation Modal */}
+      {/* DELETE MODAL */}
       <Modal
         transparent
         animationType="fade"
@@ -265,6 +268,7 @@ export default function Collection() {
                 <Text style={styles.modalMessage}>
                   Are you sure you want to delete this design?
                 </Text>
+
                 <View style={styles.modalActions}>
                   <TouchableOpacity
                     style={[styles.modalButton, styles.cancelButton]}
@@ -272,13 +276,12 @@ export default function Collection() {
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.modalButton, styles.deleteConfirmButton]}
                     onPress={handleDeleteDesign}
                   >
-                    <Text style={[styles.modalButtonText, { color: COLORS.white }]}>
-                      Delete
-                    </Text>
+                    <Text style={{ color: COLORS.white }}>Delete</Text>
                   </TouchableOpacity>
                 </View>
               </View>
