@@ -248,8 +248,7 @@ def decode_base64_image(base64_str):
 
 def resize_orientation(img):
     h, w = img.shape[:2]
-    return (768, 512) if w > h else (512, 768)
-
+    return (1024, 768) if w > h else (768, 1024)
 
 # ---------------------------------------------------------------------------
 # DEPTH (FP16)
