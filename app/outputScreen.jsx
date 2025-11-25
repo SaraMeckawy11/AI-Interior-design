@@ -20,7 +20,7 @@ import styles from '../assets/styles/output.styles';
 import COLORS from '../constants/colors';
 
 export default function OutputScreen() {
-  const { generatedImage, image, prompt, roomType, designStyle, colorTone, createdAt } =
+  const { generatedImage, image, customPrompt, roomType, designStyle, colorTone, createdAt } =
     useLocalSearchParams();
 
   const router = useRouter();
@@ -183,10 +183,10 @@ export default function OutputScreen() {
           <View style={styles.bookDetails}>
 
             {/* CASE 1 — Prompt-based design */}
-            {prompt ? (
+            {customPrompt ? (
               <>
-                <Text style={styles.bookTitle}>
-                  {prompt}
+                <Text style={styles.caption}>
+                  {customPrompt}
                 </Text>
 
                 {createdAt && (

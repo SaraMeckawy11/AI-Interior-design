@@ -74,11 +74,13 @@ const styles = StyleSheet.create({
   detailsContainer:{
     flex:1,
     flexDirection:'row',
-    justifyContent:'space-between'
+    justifyContent:'space-between',
+    alignItems:'center',
   },
 
   bookDetails: {
     padding: moderateScale(8),
+    flex: 1,
   },
   bookTitle: {
     fontSize: moderateScale(15),

@@ -24,6 +24,9 @@ export default function Collection() {
   const [isPremium, setIsPremium] = useState(false);
   const [statusLoaded, setStatusLoaded] = useState(false);
 
+  const [activeDesigns, setActiveDesigns] = useState(0);
+  const [totalDesigns, setTotalDesigns] = useState(null);
+
   const [designs, setDesigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -35,9 +38,9 @@ export default function Collection() {
 
   const router = useRouter();
 
-  // Fetch subscription status
+  // Fetch subscription + activeDesigns
   useEffect(() => {
-    const fetchSubscriptionStatus = async () => {
+    const fetchStatus = async () => {
       try {
         const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -45,48 +48,42 @@ export default function Collection() {
         const data = await res.json();
 
         if (res.ok && data.user) {
-          setIsSubscribed(data.user.isSubscribed === true || data.user.isSubscribed === "true");
-          setIsPremium(data.user.isPremium === true || data.user.isPremium === "true");
+          setIsSubscribed(data.user.isSubscribed);
+          setIsPremium(data.user.isPremium);
+          setActiveDesigns(data.user.activeDesigns || 0); // DB count
         }
-      } catch {
-        //
-      } finally {
-        setStatusLoaded(true);
-      }
+      } catch {}
+      finally { setStatusLoaded(true); }
     };
 
-    if (token) fetchSubscriptionStatus();
-    else setStatusLoaded(true);
+    if (token) fetchStatus();
   }, [token]);
 
-  // Fetch designs
+  // Fetch paginated designs
   const fetchDesigns = async (pageNum = 1, refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
       else if (pageNum === 1) setLoading(true);
 
-      const response = await fetch(
+      const res = await fetch(
         `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs?page=${pageNum}&limit=5`,
         {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : "",
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: token ? `Bearer ${token}` : "" }
         }
       );
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Failed to fetch designs");
+      const data = await res.json();
+      if (!res.ok) throw new Error();
 
-      const newDesigns = data.designs || data.output || [];
-      setDesigns((prev) => (refresh ? newDesigns : [...prev, ...newDesigns]));
+      const newDesigns = data.output || [];
+      setTotalDesigns(data.totalDesigns || newDesigns.length);  // use DB count
+
+      setDesigns(prev => refresh ? newDesigns : [...prev, ...newDesigns]);
       setHasMore(pageNum < data.totalPages);
       setPage(pageNum);
-    } catch {
-      //
-    } finally {
-      if (refresh) setRefreshing(false);
-      else setLoading(false);
+    } catch {}
+    finally {
+      refresh ? setRefreshing(false) : setLoading(false);
     }
   };
 
@@ -94,28 +91,26 @@ export default function Collection() {
     fetchDesigns();
   }, []);
 
+  // DELETE design
   const handleDeleteDesign = async () => {
     try {
-      const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/${selectedDesignId}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/${selectedDesignId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Failed to delete");
+      setDesigns(prev => prev.filter(d => d._id !== selectedDesignId));
+      setActiveDesigns(prev => Math.max(prev - 1, 0));
+      setTotalDesigns(prev => Math.max(prev - 1, 0));
 
-      setDesigns((prev) => prev.filter((d) => d._id !== selectedDesignId));
       setDeleteModalVisible(false);
     } catch {
       setDeleteModalVisible(false);
     }
   };
 
-  const confirmDelete = (designId) => {
-    setSelectedDesignId(designId);
+  const confirmDelete = id => {
+    setSelectedDesignId(id);
     setDeleteModalVisible(true);
   };
 
@@ -123,23 +118,24 @@ export default function Collection() {
     if (hasMore && !loading && !refreshing) fetchDesigns(page + 1);
   };
 
-  const showAds = statusLoaded && !isSubscribed;
-
-  // ===========================
-  //   RENDER ITEM
-  // ===========================
-  const renderItem = ({ item }) => {
-    const generatedImage = item.generatedImage;
-    const originalImage = item.image || "https://via.placeholder.com/150";
-
-    // Safely compute full prompt (customPrompt preferred)
+  // ===============================
+  // RENDER EACH ITEM
+  // ===============================
+  const renderItem = ({ item, index }) => {
     const fullPrompt = (item.customPrompt || "").trim();
-
-    // Determine if this is a prompt-based design
-    const isPromptDesign = fullPrompt.length > 0 || item.roomType === "Prompt Only";
-
-    // Short preview for list (safe)
+    const isPrompt = fullPrompt || item.roomType === "Prompt Only";
     const shortPrompt = fullPrompt.length > 80 ? fullPrompt.slice(0, 80) + "..." : fullPrompt;
+
+    // USE totalDesigns → fallback → designs.length
+    const total =
+      (typeof totalDesigns === "number" && totalDesigns > 0)
+        ? totalDesigns
+        : (activeDesigns > 0 ? activeDesigns : designs.length);
+
+    let num = total - index;
+    if (num < 1) num = 1;
+
+    const designNumber = num.toString().padStart(2, "0");
 
     return (
       <TouchableOpacity
@@ -148,9 +144,9 @@ export default function Collection() {
           router.push({
             pathname: "/outputScreen",
             params: {
-              generatedImage: generatedImage || null,
-              image: originalImage,
-              customPrompt: fullPrompt, // send full prompt to output screen
+              generatedImage: item.generatedImage || null,
+              image: item.image,
+              customPrompt: fullPrompt,
               roomType: item.roomType || "",
               designStyle: item.designStyle || "",
               colorTone: item.colorTone || "",
@@ -162,7 +158,7 @@ export default function Collection() {
       >
         <View style={styles.bookImageContainer}>
           <Image
-            source={{ uri: generatedImage || originalImage }}
+            source={{ uri: item.generatedImage || item.image }}
             style={styles.bookImage}
             contentFit="cover"
           />
@@ -170,15 +166,14 @@ export default function Collection() {
 
         <View style={styles.detailsContainer}>
           <View style={styles.bookDetails}>
-            {isPromptDesign ? (
+            {isPrompt ? (
               <>
-                {/* Title + short preview for prompt-based items */}
                 <Text style={styles.bookTitle} numberOfLines={1}>
-                  Description
+                  Design description
                 </Text>
 
                 <Text style={styles.caption} numberOfLines={2}>
-                  {shortPrompt.length > 0 ? shortPrompt : "No description provided"}
+                  {shortPrompt || "No description provided"}
                 </Text>
 
                 <Text style={styles.date}>
@@ -187,20 +182,16 @@ export default function Collection() {
               </>
             ) : (
               <>
-                {/* Normal auto design */}
                 <Text style={styles.bookTitle}>
-                  <Text style={styles.label}>Room Type: </Text>
-                  {item.roomType}
+                  <Text style={styles.label}>Room Type: </Text>{item.roomType}
                 </Text>
 
                 <Text style={styles.caption}>
-                  <Text style={styles.label}>Design Style: </Text>
-                  {item.designStyle}
+                  <Text style={styles.label}>Design Style: </Text>{item.designStyle}
                 </Text>
 
                 <Text style={styles.caption}>
-                  <Text style={styles.label}>Color Tone: </Text>
-                  {item.colorTone}
+                  <Text style={styles.label}>Color Tone: </Text>{item.colorTone}
                 </Text>
 
                 <Text style={styles.date}>
@@ -210,12 +201,40 @@ export default function Collection() {
             )}
           </View>
 
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => confirmDelete(item._id)}
+         {/* RIGHT SIDE — number at top right, trash at bottom right */}
+          <View
+            style={{
+              width: 50,
+              justifyContent: "space-between",
+              alignItems: "center",
+              paddingVertical: 4,
+            }}
           >
-            <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
-          </TouchableOpacity>
+            {/* Number at the top */}
+            <Text
+              style={{
+                fontSize: 12,
+                color: COLORS.textSecondary,
+                fontWeight: "600",
+                opacity: 0.7,
+                marginBottom: 6,
+                marginTop: 8,
+              }}
+            >
+              #{designNumber}
+            </Text>
+
+            {/* Spacer pushes trash icon down */}
+            <View style={{ flex: 1 }} />
+
+            {/* Trash icon at the bottom (unchanged style) */}
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => confirmDelete(item._id)}
+            >
+              <Ionicons name="trash-outline" size={20} color={COLORS.primaryDark} />
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -228,7 +247,7 @@ export default function Collection() {
       <FlatList
         data={designs}
         renderItem={renderItem}
-        keyExtractor={(item, index) => `${item._id ?? "key"}-${index}`}
+        keyExtractor={(item, index) => `${item._id}-${index}`}
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
         onEndReached={handleLoadMore}
@@ -245,12 +264,6 @@ export default function Collection() {
             <Text style={styles.title}>LIVINAI</Text>
           </View>
         }
-        ListFooterComponent={
-          loading && !refreshing ? (
-            <ActivityIndicator style={styles.footerLoader} size="small" color={COLORS.primary} />
-          ) : null
-        }
-        ListEmptyComponent={!loading && <Text style={styles.emptyText}>No designs found.</Text>}
       />
 
       {/* DELETE MODAL */}
