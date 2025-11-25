@@ -16,6 +16,8 @@ const afterImages = [
   require('@/assets/images/onboarding/6.jpg'),
   require('@/assets/images/onboarding/7.jpg'),
   require('@/assets/images/onboarding/8.jpg'),
+  require('@/assets/images/onboarding/9.jpg'),
+  require('@/assets/images/onboarding/10.jpg'),
 ];
 
 import COLORS from "@/constants/colors";

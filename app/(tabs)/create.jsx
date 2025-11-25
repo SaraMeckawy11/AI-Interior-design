@@ -1,17 +1,24 @@
 import { View, Text, ScrollView, TouchableOpacity } from "react-native";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import COLORS from "../../constants/colors";
-import { RewardedAd, RewardedInterstitialAd,RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuthStore } from "../../authStore";
 
-// const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
-const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
-const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
-const autoAd = RewardedAd.createForAdRequest(adUnitId);
+// --- Google Mobile Ads (App Open) ---
+import {
+  AppOpenAd,
+  AdEventType,
+  TestIds,
+} from "react-native-google-mobile-ads";
+
+// PRODUCTION APP-OPEN AD UNIT
+const APP_OPEN_AD_UNIT_ID =  __DEV__? TestIds.APP_OPEN :"ca-app-pub-4470538534931449/1696483792";
+
+const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
+  requestNonPersonalizedAdsOnly: false,
+});
 
 export default function Create() {
   const router = useRouter();
@@ -19,93 +26,115 @@ export default function Create() {
   const [isPremium, setIsPremium] = useState(null);
   const { token } = useAuthStore();
 
-  // Fetch user status
-    useEffect(() => {
-      const fetchUserStatus = async () => {
-        if (!token) return;
-  
-        try {
-          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-  
-          if (!res.ok) {
-            console.error('Failed to fetch user status:', res.status);
-            return;
-          }
-  
-          const data = await res.json();
-          const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
-  
-          setIsSubscribed(isSubscribed || false);
-          setIsPremium(isPremium || false);
-        } catch (err) {
-          console.error('Failed to fetch user status:', err);
-        }
-      };
-  
-      fetchUserStatus();
-    }, [token]);
-
-  // Automatically show one ad when user opens the app, respecting frequency
+  // -----------------------------------
+  // FETCH USER STATUS (subscription)
+  // -----------------------------------
   useEffect(() => {
-    let intervalId;
-    let hasLoadedListener = false;
-    let hasClosedListener = false;
+    const fetchUserStatus = async () => {
+      if (!token) return;
 
-    const showAutoAd = async () => {
       try {
-        // 🛑 Skip for premium or subscribed users
-        if (isSubscribed || isPremium) {
-          console.log("🚫 Auto ad skipped — user has premium or subscription");
+        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!res.ok) {
+          console.error("Failed to fetch user status:", res.status);
           return;
         }
 
-        const lastShown = await AsyncStorage.getItem('lastAutoAdTime');
-        const now = Date.now();
-        const AD_INTERVAL_MINUTES = 15;
+        const data = await res.json();
+        const { isSubscribed, isPremium } = data.user || {};
 
-        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
-          console.log(`⏩ Auto ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`);
-          return;
-        }
-
-        console.log('⌛ Loading autoAd...');
-        autoAd.load();
-
-        // ✅ Attach listeners only once
-        if (!hasLoadedListener) {
-          hasLoadedListener = true;
-          autoAd.addAdEventListener(RewardedAdEventType.LOADED, async () => {
-            console.log('✅ Auto ad loaded — showing now');
-            autoAd.show();
-            await AsyncStorage.setItem('lastAutoAdTime', Date.now().toString());
-          });
-        }
-
-        if (!hasClosedListener) {
-          hasClosedListener = true;
-          autoAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-            console.log('👋 Auto ad closed');
-          });
-        }
-      } catch (error) {
-        console.error('❌ Error handling autoAd:', error);
+        setIsSubscribed(isSubscribed || false);
+        setIsPremium(isPremium || false);
+      } catch (err) {
+        console.error("Failed to fetch user status:", err);
       }
     };
 
-    // ✅ Run once and then every minute
-    if (isSubscribed !== null && isPremium !== null) {
-      showAutoAd();
-      intervalId = setInterval(showAutoAd, 5 * 60 * 1000);
-    }
+    fetchUserStatus();
+  }, [token]);
 
-    return () => clearInterval(intervalId);
+  // -----------------------------------
+  // AUTO SHOW APP OPEN AD (policy safe, NO daily limit)
+  // -----------------------------------
+  useEffect(() => {
+    let intervalId;
+
+    if (isSubscribed === null || isPremium === null) return;
+
+    const showAppOpenAd = async () => {
+      try {
+        // Skip premium/subscribed users
+        if (isSubscribed || isPremium) {
+          console.log("🚫 App-open ad skipped — premium user");
+          return;
+        }
+
+        // FREQUENCY CAP: 12 minutes
+        const lastShown = await AsyncStorage.getItem("lastAppOpenAdTime");
+        const now = Date.now();
+        const AD_INTERVAL_MINUTES = 12;
+
+        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
+          console.log(
+            `⏩ App-open ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`
+          );
+          return;
+        }
+
+        console.log("⌛ Loading AppOpenAd...");
+        appOpenAd.load();
+
+        const loadedListener = appOpenAd.addAdEventListener(
+          AdEventType.LOADED,
+          async () => {
+            console.log("✅ App open ad loaded — showing now");
+            appOpenAd.show();
+
+            // Save timestamp for frequency capping
+            await AsyncStorage.setItem("lastAppOpenAdTime", now.toString());
+          }
+        );
+
+        const closedListener = appOpenAd.addAdEventListener(
+          AdEventType.CLOSED,
+          () => {
+            console.log("👋 App-open ad closed");
+          }
+        );
+
+        return () => {
+          loadedListener();
+          closedListener();
+        };
+
+      } catch (err) {
+        console.error("❌ Error showing App Open Ad:", err);
+      }
+    };
+
+    // ===============================
+    // RUN ONCE immediately
+    // AND every 4 minutes afterward
+    // ===============================
+    showAppOpenAd();
+
+    intervalId = setInterval(showAppOpenAd, 4 * 60 * 1000);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+
   }, [isSubscribed, isPremium]);
-  
+
+  // -----------------------------------
+  // Cards UI
+  // -----------------------------------
   const cards = [
     {
       title: "Interior Redesign",
@@ -127,6 +156,9 @@ export default function Create() {
     },
   ];
 
+  // -----------------------------------
+  // RENDER
+  // -----------------------------------
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: COLORS.background }}
