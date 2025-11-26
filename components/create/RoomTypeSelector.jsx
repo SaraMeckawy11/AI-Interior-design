@@ -26,9 +26,8 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
 
   const defaultRoomTypes = [
     'Living Room', 'Bedroom', 'Kitchen', 'Bathroom',
-    'Dining Room', 'Office', 'Garage', 'Entryway',
-    'Basement', 'Attic', 'Laundry Room', 'Sunroom',
-    'Closet', 'Hallway'
+    'Dining Room', 'Closet', 'Office','Laundry Room',
+    'Hallway','Entryway','Basement', 
   ];
 
   const allRoomTypes = [...defaultRoomTypes, ...customRoomTypes];

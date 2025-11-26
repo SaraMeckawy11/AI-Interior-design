@@ -80,7 +80,7 @@ ROOM_PROMPTS = {
         "{design_style} living room interior, warm soft ambient lighting, "
         "{color_tone} palette, professional interior designer style, "
         "photorealistic 8k, high detail, natural shadows, "
-        "includes sofa sets, coffee tables, area rugs, wall art, "
+        "includes sofa sets, coffee tables, area rugs, wall art, curtains, "
         "TV cabinets, indoor plants, bookshelves, accent lighting, "
         "cohesive furniture arrangement matching the room layout"
     ),
