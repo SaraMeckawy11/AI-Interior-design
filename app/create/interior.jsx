@@ -29,6 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RewardedAd, RewardedInterstitialAd,RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CreateBannerAd from "../../components/create/CreateBannerAd";
+import { useFocusEffect } from 'expo-router';
 
 const { width, height } = Dimensions.get("window");
 
@@ -131,38 +132,41 @@ export default function Interior() {
   };
   
   // Fetch user status
-  useEffect(() => {
-    const fetchUserStatus = async () => {
-      if (!token) return;
+  useFocusEffect(
+    useCallback(() => {
+      const fetchUserStatus = async () => {
+        if (!token) return;
 
-      try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
+        try {
+          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
 
-        if (!res.ok) {
-          console.error('Failed to fetch user status:', res.status);
-          return;
+          if (!res.ok) {
+            console.error('Failed to fetch user status:', res.status);
+            return;
+          }
+
+          const data = await res.json();
+          const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
+
+          setIsSubscribed(isSubscribed || false);
+          setFreeDesignsUsed(freeDesignsUsed || 0);
+          setIsPremium(isPremium || false);
+          setIsManualDisabled(manualDisabled || false);
+          setCoins(Number(adCoins || 0));
+        } catch (err) {
+          console.error('Failed to fetch user status:', err);
         }
+      };
 
-        const data = await res.json();
-        const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
-
-        setIsSubscribed(isSubscribed || false);
-        setFreeDesignsUsed(freeDesignsUsed || 0);
-        setIsPremium(isPremium || false);
-        setIsManualDisabled(manualDisabled || false);
-        setCoins(Number(adCoins || 0));
-      } catch (err) {
-        console.error('Failed to fetch user status:', err);
-      }
-    };
-
-    fetchUserStatus();
-  }, [token]);
+      // Refresh user on screen focus
+      fetchUserStatus();
+    }, [token])
+  );
 
   // Pick image
   const pickImage = async () => {

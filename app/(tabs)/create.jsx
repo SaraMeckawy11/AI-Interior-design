@@ -5,6 +5,7 @@ import {
   Animated,
   Pressable,
   Easing,
+  Image,
 } from "react-native";
 import React, { useEffect, useState, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuthStore } from "../../authStore";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+import InteriorImg from "../../assets/images/onboarding/i2.png";
 
 // --- Google Mobile Ads (App Open) ---
 import {
@@ -37,31 +39,25 @@ export default function Create() {
   const { token } = useAuthStore();
 
   // -----------------------------
-  // Cards Data
+  // Cards
   // -----------------------------
   const cards = [
     {
-      title: "Redesign Your Room",
-      description: "Upload a photo and visualize new interiors instantly.",
+      title: "Interior Design",
+      description: "Upload your room and get fresh interior styles instantly.",
       icon: "color-palette-outline",
       route: "/create/interior",
     },
     {
-      title: "Generate Designs from Text",
-      description: "Describe a space and let AI bring it to life.",
-      icon: "create-outline",
-      route: "/create/prompt",
-    },
-    {
-      title: "Outdoor & Exterior Design",
-      description: "Design facades, gardens, balconies and more.",
+      title: "Exterior Makeover",
+      description: "Transform facades, gardens, balconies and outdoor spaces.",
       icon: "home-outline",
       route: "/create/exterior",
     },
   ];
 
   // -----------------------------
-  // Header Fade-In Animation
+  // Header animation
   // -----------------------------
   const headerOpacity = useRef(new Animated.Value(0)).current;
 
@@ -75,7 +71,7 @@ export default function Create() {
   }, []);
 
   // -----------------------------
-  // Card Animations + Parallax
+  // Cards animations
   // -----------------------------
   const scaleAnimations = useRef(cards.map(() => new Animated.Value(1))).current;
   const opacityAnimations = useRef(cards.map(() => new Animated.Value(1))).current;
@@ -120,12 +116,11 @@ export default function Create() {
   };
 
   // -----------------------------
-  // Fetch subscription status
+  // Fetch subscription
   // -----------------------------
   useEffect(() => {
     const fetchUserStatus = async () => {
       if (!token) return;
-
       try {
         const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
           headers: {
@@ -133,15 +128,12 @@ export default function Create() {
             "Content-Type": "application/json",
           },
         });
-
         if (!res.ok) return;
-
         const data = await res.json();
         setIsSubscribed(data.user?.isSubscribed || false);
         setIsPremium(data.user?.isPremium || false);
       } catch {}
     };
-
     fetchUserStatus();
   }, [token]);
 
@@ -157,7 +149,6 @@ export default function Create() {
 
         const lastShown = await AsyncStorage.getItem("lastAppOpenAdTime");
         const now = Date.now();
-
         if (lastShown && now - lastShown < 12 * 60 * 1000) return;
 
         appOpenAd.load();
@@ -178,11 +169,12 @@ export default function Create() {
   }, [isSubscribed, isPremium]);
 
   // -----------------------------
-  // UI RENDER
+  // UI
   // -----------------------------
   return (
     <ScrollView style={{ flex: 1, backgroundColor: COLORS.background }}>
-      {/* ⭐ Premium Safe Header (No Errors) */}
+      
+      {/* ⭐ HEADER */}
       <Animated.View style={{ opacity: headerOpacity }}>
         <LinearGradient
           colors={[COLORS.primary, COLORS.primaryDark]}
@@ -195,7 +187,8 @@ export default function Create() {
             overflow: "hidden",
           }}
         >
-          {/* Soft inner highlight */}
+
+          {/* Soft inner glow */}
           <LinearGradient
             colors={["rgba(255,255,255,0.10)", "transparent"]}
             style={{
@@ -204,19 +197,43 @@ export default function Create() {
               left: 0,
               right: 0,
               height: "100%",
-              borderBottomLeftRadius: 30,
-              borderBottomRightRadius: 30,
             }}
           />
 
+          {/* 📸 Diagonal Interior Image */}
+          <Image
+            source={InteriorImg}
+            resizeMode="contain"
+            style={{
+              position: "absolute",
+              right: -30,
+              top: -5,
+              width: 260,
+              height: 260,
+              opacity: 0.18,
+            }}
+          />
+
+          <View
+            style={{
+              position: "absolute",
+              bottom: 0,
+              right: 0,
+              width: "60%",
+              height: 55,
+              backgroundColor: "rgba(0,0,0,0.06)",
+              opacity: 0.18,
+              borderBottomLeftRadius: 30,
+            }}
+          />
           {/* Brand */}
           <Text
             style={{
               fontSize: 28,
               fontWeight: "800",
               color: "white",
-              letterSpacing: 1.2,
               marginBottom: 6,
+              letterSpacing: 1.2,
             }}
           >
             LIVINAI
@@ -225,11 +242,11 @@ export default function Create() {
           {/* Title */}
           <Text
             style={{
-              fontSize: 32,
+              fontSize: 24,
               fontWeight: "700",
               color: "white",
+              marginBottom: 8,
               letterSpacing: -0.5,
-              marginBottom: 6,
             }}
           >
             Design Your Space
@@ -248,7 +265,7 @@ export default function Create() {
         </LinearGradient>
       </Animated.View>
 
-      {/* CONTENT */}
+      {/* ⭐ CONTENT */}
       <View style={{ padding: 24, paddingTop: 30 }}>
         {cards.map((card, index) => (
           <Pressable
@@ -282,6 +299,7 @@ export default function Create() {
                 shadowOffset: { width: 0, height: 6 },
               }}
             >
+
               {/* Icon */}
               <View
                 style={{
@@ -326,7 +344,7 @@ export default function Create() {
                 name="chevron-forward"
                 size={20}
                 color={COLORS.textSecondary}
-                marginLeft={4}
+                style={{ marginLeft: 4 }}
               />
             </Animated.View>
           </Pressable>

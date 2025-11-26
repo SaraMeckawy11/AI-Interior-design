@@ -130,39 +130,42 @@ export default function Prompt() {
     rewardedAd.load();
   };
   
-  // Fetch user status
-  useEffect(() => {
-    const fetchUserStatus = async () => {
-      if (!token) return;
-
-      try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!res.ok) {
-          console.error('Failed to fetch user status:', res.status);
-          return;
-        }
-
-        const data = await res.json();
-        const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
-
-        setIsSubscribed(isSubscribed || false);
-        setFreeDesignsUsed(freeDesignsUsed || 0);
-        setIsPremium(isPremium || false);
-        setIsManualDisabled(manualDisabled || false);
-        setCoins(Number(adCoins || 0));
-      } catch (err) {
-        console.error('Failed to fetch user status:', err);
-      }
-    };
-
-    fetchUserStatus();
-  }, [token]);
+ // Fetch user status
+   useFocusEffect(
+     useCallback(() => {
+       const fetchUserStatus = async () => {
+         if (!token) return;
+ 
+         try {
+           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+             headers: {
+               Authorization: `Bearer ${token}`,
+               'Content-Type': 'application/json',
+             },
+           });
+ 
+           if (!res.ok) {
+             console.error('Failed to fetch user status:', res.status);
+             return;
+           }
+ 
+           const data = await res.json();
+           const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
+ 
+           setIsSubscribed(isSubscribed || false);
+           setFreeDesignsUsed(freeDesignsUsed || 0);
+           setIsPremium(isPremium || false);
+           setIsManualDisabled(manualDisabled || false);
+           setCoins(Number(adCoins || 0));
+         } catch (err) {
+           console.error('Failed to fetch user status:', err);
+         }
+       };
+ 
+       // Refresh user on screen focus
+       fetchUserStatus();
+     }, [token])
+   );
 
   // Pick image
   const pickImage = async () => {
