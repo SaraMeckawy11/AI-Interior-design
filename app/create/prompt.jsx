@@ -29,6 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RewardedAd, RewardedInterstitialAd,RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CreateBannerAd from "../../components/create/CreateBannerAd";
+import { useFocusEffect } from 'expo-router';
 
 const { width, height } = Dimensions.get("window");
 
@@ -540,7 +541,7 @@ export default function Prompt() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Designing your dream room...</Text>
+            <Text style={styles.loadingText}>Designing your dream space...</Text>
             <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
           </View>
         </View>

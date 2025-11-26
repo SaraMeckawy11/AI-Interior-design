@@ -543,7 +543,7 @@ export default function Interior() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Designing your dream room...</Text>
+            <Text style={styles.loadingText}>Designing your dream space...</Text>
             <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
           </View>
         </View>
