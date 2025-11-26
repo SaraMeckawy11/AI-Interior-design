@@ -1,10 +1,19 @@
-import { View, Text, ScrollView, TouchableOpacity } from "react-native";
-import React, { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  Animated,
+  Pressable,
+  Easing,
+} from "react-native";
+import React, { useEffect, useState, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import COLORS from "../../constants/colors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuthStore } from "../../authStore";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
 
 // --- Google Mobile Ads (App Open) ---
 import {
@@ -13,8 +22,9 @@ import {
   TestIds,
 } from "react-native-google-mobile-ads";
 
-// PRODUCTION APP-OPEN AD UNIT
-const APP_OPEN_AD_UNIT_ID =  __DEV__? TestIds.APP_OPEN :"ca-app-pub-4470538534931449/1696483792";
+const APP_OPEN_AD_UNIT_ID = __DEV__
+  ? TestIds.APP_OPEN
+  : "ca-app-pub-4470538534931449/1696483792";
 
 const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
   requestNonPersonalizedAdsOnly: false,
@@ -26,9 +36,92 @@ export default function Create() {
   const [isPremium, setIsPremium] = useState(null);
   const { token } = useAuthStore();
 
-  // -----------------------------------
-  // FETCH USER STATUS (subscription)
-  // -----------------------------------
+  // -----------------------------
+  // Cards Data
+  // -----------------------------
+  const cards = [
+    {
+      title: "Redesign Your Room",
+      description: "Upload a photo and visualize new interiors instantly.",
+      icon: "color-palette-outline",
+      route: "/create/interior",
+    },
+    {
+      title: "Generate Designs from Text",
+      description: "Describe a space and let AI bring it to life.",
+      icon: "create-outline",
+      route: "/create/prompt",
+    },
+    {
+      title: "Outdoor & Exterior Design",
+      description: "Design facades, gardens, balconies and more.",
+      icon: "home-outline",
+      route: "/create/exterior",
+    },
+  ];
+
+  // -----------------------------
+  // Header Fade-In Animation
+  // -----------------------------
+  const headerOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(headerOpacity, {
+      toValue: 1,
+      duration: 550,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  // -----------------------------
+  // Card Animations + Parallax
+  // -----------------------------
+  const scaleAnimations = useRef(cards.map(() => new Animated.Value(1))).current;
+  const opacityAnimations = useRef(cards.map(() => new Animated.Value(1))).current;
+  const parallaxAnimations = useRef(cards.map(() => new Animated.Value(0))).current;
+
+  const animatePressIn = (index) => {
+    Animated.parallel([
+      Animated.spring(scaleAnimations[index], {
+        toValue: 0.97,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnimations[index], {
+        toValue: 0.87,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(parallaxAnimations[index], {
+        toValue: 6,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const animatePressOut = (index) => {
+    Animated.parallel([
+      Animated.spring(scaleAnimations[index], {
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnimations[index], {
+        toValue: 1,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(parallaxAnimations[index], {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  // -----------------------------
+  // Fetch subscription status
+  // -----------------------------
   useEffect(() => {
     const fetchUserStatus = async () => {
       if (!token) return;
@@ -41,179 +134,204 @@ export default function Create() {
           },
         });
 
-        if (!res.ok) {
-          console.error("Failed to fetch user status:", res.status);
-          return;
-        }
+        if (!res.ok) return;
 
         const data = await res.json();
-        const { isSubscribed, isPremium } = data.user || {};
-
-        setIsSubscribed(isSubscribed || false);
-        setIsPremium(isPremium || false);
-      } catch (err) {
-        console.error("Failed to fetch user status:", err);
-      }
+        setIsSubscribed(data.user?.isSubscribed || false);
+        setIsPremium(data.user?.isPremium || false);
+      } catch {}
     };
 
     fetchUserStatus();
   }, [token]);
 
-  // -----------------------------------
-  // AUTO SHOW APP OPEN AD (policy safe, NO daily limit)
-  // -----------------------------------
+  // -----------------------------
+  // Auto app-open ads
+  // -----------------------------
   useEffect(() => {
-    let intervalId;
-
     if (isSubscribed === null || isPremium === null) return;
 
-    const showAppOpenAd = async () => {
+    const showAd = async () => {
       try {
-        // Skip premium/subscribed users
-        if (isSubscribed || isPremium) {
-          console.log("🚫 App-open ad skipped — premium user");
-          return;
-        }
+        if (isSubscribed || isPremium) return;
 
-        // FREQUENCY CAP: 12 minutes
         const lastShown = await AsyncStorage.getItem("lastAppOpenAdTime");
         const now = Date.now();
-        const AD_INTERVAL_MINUTES = 12;
 
-        if (lastShown && now - parseInt(lastShown) < AD_INTERVAL_MINUTES * 60 * 1000) {
-          console.log(
-            `⏩ App-open ad skipped — shown less than ${AD_INTERVAL_MINUTES} mins ago`
-          );
-          return;
-        }
+        if (lastShown && now - lastShown < 12 * 60 * 1000) return;
 
-        console.log("⌛ Loading AppOpenAd...");
         appOpenAd.load();
 
-        const loadedListener = appOpenAd.addAdEventListener(
+        const loaded = appOpenAd.addAdEventListener(
           AdEventType.LOADED,
           async () => {
-            console.log("✅ App open ad loaded — showing now");
             appOpenAd.show();
-
-            // Save timestamp for frequency capping
             await AsyncStorage.setItem("lastAppOpenAdTime", now.toString());
           }
         );
 
-        const closedListener = appOpenAd.addAdEventListener(
-          AdEventType.CLOSED,
-          () => {
-            console.log("👋 App-open ad closed");
-          }
-        );
-
-        return () => {
-          loadedListener();
-          closedListener();
-        };
-
-      } catch (err) {
-        console.error("❌ Error showing App Open Ad:", err);
-      }
+        return () => loaded();
+      } catch {}
     };
 
-    // ===============================
-    // RUN ONCE immediately
-    // AND every 4 minutes afterward
-    // ===============================
-    showAppOpenAd();
-
-    intervalId = setInterval(showAppOpenAd, 4 * 60 * 1000);
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-
+    showAd();
   }, [isSubscribed, isPremium]);
 
-  // -----------------------------------
-  // Cards UI
-  // -----------------------------------
-  const cards = [
-    {
-      title: "Redesign Your Room",
-      description: "Upload a photo of your space and instantly generate new interior styles.",
-      icon: "color-palette-outline",
-      route: "/create/interior",
-    },
-    {
-      title: "Generate Designs from Text",
-      description: "Describe your dream space and let AI create it from scratch.",
-      icon: "create-outline",
-      route: "/create/prompt",
-    },
-    {
-      title: "Outdoor & Exterior Design",
-      description: "Design balconies, gardens, facades, entrances, and more using AI.",
-      icon: "home-outline",
-      route: "/create/exterior",
-    },
-  ];
-
-  // -----------------------------------
-  // RENDER
-  // -----------------------------------
+  // -----------------------------
+  // UI RENDER
+  // -----------------------------
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: COLORS.background }}
-      contentContainerStyle={{ padding: 20 }}
-    >
-      <Text style={{ fontSize: 30, fontWeight: "700", marginBottom: 20 }}>
-        Create Designs
-      </Text>
-
-      {cards.map((card, index) => (
-        <TouchableOpacity
-          key={index}
+    <ScrollView style={{ flex: 1, backgroundColor: COLORS.background }}>
+      {/* ⭐ Premium Safe Header (No Errors) */}
+      <Animated.View style={{ opacity: headerOpacity }}>
+        <LinearGradient
+          colors={[COLORS.primary, COLORS.primaryDark]}
           style={{
-            backgroundColor: COLORS.white,
-            padding: 20,
-            borderRadius: 18,
-            marginBottom: 16,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-            elevation: 2,
+            paddingTop: 60,
+            paddingBottom: 40,
+            paddingHorizontal: 24,
+            borderBottomLeftRadius: 30,
+            borderBottomRightRadius: 30,
+            overflow: "hidden",
           }}
-          activeOpacity={0.85}
-          onPress={() => router.push(card.route)}
         >
-          <View style={{ width: "85%" }}>
-            <Ionicons name={card.icon} size={32} color={COLORS.primary} />
-            <Text
-              style={{
-                fontSize: 18,
-                fontWeight: "600",
-                marginTop: 10,
-                color: COLORS.textPrimary,
-              }}
-            >
-              {card.title}
-            </Text>
-            <Text
-              style={{
-                fontSize: 14,
-                color: COLORS.textSecondary,
-                marginTop: 4,
-              }}
-            >
-              {card.description}
-            </Text>
-          </View>
-
-          <Ionicons
-            name="chevron-forward"
-            size={24}
-            color={COLORS.textSecondary}
+          {/* Soft inner highlight */}
+          <LinearGradient
+            colors={["rgba(255,255,255,0.10)", "transparent"]}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "100%",
+              borderBottomLeftRadius: 30,
+              borderBottomRightRadius: 30,
+            }}
           />
-        </TouchableOpacity>
-      ))}
+
+          {/* Brand */}
+          <Text
+            style={{
+              fontSize: 28,
+              fontWeight: "800",
+              color: "white",
+              letterSpacing: 1.2,
+              marginBottom: 6,
+            }}
+          >
+            LIVINAI
+          </Text>
+
+          {/* Title */}
+          <Text
+            style={{
+              fontSize: 32,
+              fontWeight: "700",
+              color: "white",
+              letterSpacing: -0.5,
+              marginBottom: 6,
+            }}
+          >
+            Design Your Space
+          </Text>
+
+          {/* Subtitle */}
+          <Text
+            style={{
+              fontSize: 16,
+              color: "#f0f0f0",
+              opacity: 0.95,
+            }}
+          >
+            Start your design journey
+          </Text>
+        </LinearGradient>
+      </Animated.View>
+
+      {/* CONTENT */}
+      <View style={{ padding: 24, paddingTop: 30 }}>
+        {cards.map((card, index) => (
+          <Pressable
+            key={index}
+            onPressIn={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              animatePressIn(index);
+            }}
+            onPressOut={() => animatePressOut(index)}
+            onPress={() => router.push(card.route)}
+          >
+            <Animated.View
+              style={{
+                transform: [
+                  { scale: scaleAnimations[index] },
+                  { translateY: parallaxAnimations[index] },
+                ],
+                opacity: opacityAnimations[index],
+                backgroundColor: "rgba(255,255,255,0.28)",
+                borderRadius: 20,
+                padding: 20,
+                marginBottom: 24,
+                height: 150,
+                flexDirection: "row",
+                alignItems: "center",
+                borderWidth: 1.2,
+                borderColor: "rgba(255,255,255,0.40)",
+                shadowColor: "#000",
+                shadowOpacity: 0.14,
+                shadowRadius: 16,
+                shadowOffset: { width: 0, height: 6 },
+              }}
+            >
+              {/* Icon */}
+              <View
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 18,
+                  backgroundColor: "rgba(255,255,255,0.32)",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  marginRight: 18,
+                }}
+              >
+                <Ionicons name={card.icon} size={30} color={COLORS.primary} />
+              </View>
+
+              {/* Text */}
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 18.5,
+                    fontWeight: "600",
+                    color: COLORS.textPrimary,
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  {card.title}
+                </Text>
+
+                <Text
+                  style={{
+                    fontSize: 14,
+                    marginTop: 6,
+                    color: COLORS.textSecondary,
+                    lineHeight: 20,
+                  }}
+                >
+                  {card.description}
+                </Text>
+              </View>
+
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color={COLORS.textSecondary}
+                marginLeft={4}
+              />
+            </Animated.View>
+          </Pressable>
+        ))}
+      </View>
     </ScrollView>
   );
 }

@@ -31,6 +31,7 @@ const ExtTypeSelector = ({ roomType, setRoomType }) => {
     "Garden",
     "Driveway",
     "Swimming Pool Area",
+    "Garage",
   ];
 
   const allRoomTypes = [...defaultRoomTypes, ...customRoomTypes];
@@ -57,6 +58,7 @@ const ExtTypeSelector = ({ roomType, setRoomType }) => {
       case 'driveway': return 'car-outline';
       case 'swimming pool area': return 'water-outline';
       case 'building': return 'business-outline';
+      case 'garage': return 'car-outline';
       default: return 'home-outline';
     }
   };
