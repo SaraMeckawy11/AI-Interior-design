@@ -123,12 +123,6 @@ ROOM_PROMPTS = {
         "organized functional layout"
     ),
 
-    "garage": (
-        "{design_style} organized garage interior, {color_tone} palette, "
-        "photorealistic 8k, high detail industrial textures, clean concrete floors, "
-        "includes shelving units, tool storage, vehicle parking space, functional layout"
-    ),
-
     "entryway": (
         "{design_style} entryway foyer interior, soft ambient lighting, "
         "{color_tone} tone palette, photorealistic 8k, high detail decor, "
@@ -214,7 +208,14 @@ EXTERIOR_PROMPTS = {
         "{design_style} swimming pool outdoor area, natural daylight, {color_tone} palette, "
         "photorealistic 8k, high detail water reflections, poolside seating, landscaping, "
         "decking materials, ambient outdoor lighting and cohesive layout"
-    )
+    ),
+
+    "garage": (
+        "{design_style} organized garage exterior, {color_tone} palette, "
+        "photorealistic 8k, high detail industrial textures, clean concrete floors, "
+        "includes shelving units, tool storage, vehicle parking space, functional layout"
+    ),
+
 }
 
 # universal hybrid fallback (option C)
