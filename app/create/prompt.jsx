@@ -340,7 +340,7 @@ export default function Prompt() {
         params: {
             generatedImage: imageUri,
             image: image || null,
-            prompt: prompt.trim(),
+            customPrompt: prompt.trim(),
             createdAt: new Date().toISOString(),
         },
         });

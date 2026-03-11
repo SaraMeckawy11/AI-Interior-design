@@ -375,6 +375,92 @@ backButtonContainer: {
 backArrow: {
   padding: moderateScale(4),  // touch area, but invisible
 },
+// OR Separator
+orSeparatorContainer: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginVertical: verticalScale(20),
+},
+orLine: {
+  flex: 1,
+  height: 1,
+  backgroundColor: "#e3e3e3",
+},
+orText: {
+  marginHorizontal: 10,
+  color: COLORS.textSecondary,
+  fontSize: moderateScale(13),
+  fontWeight: "500",
+},
+
+// Toggle Card
+customToggleCard: {
+  backgroundColor: COLORS.white,
+  padding: moderateScale(16),
+  borderRadius: moderateScale(16),
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  flexDirection: "row",
+  alignItems: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.03,
+  shadowOffset: { width: 0, height: 1 },
+  shadowRadius: 2,
+  elevation: 1,
+},
+
+customToggleCardActive: {
+  backgroundColor:COLORS.white, // PURE WHITE – looks clean
+  borderColor: COLORS.primaryDark, // thin clean line
+  shadowColor: COLORS.primaryDark,
+  shadowOpacity: 0.15,
+  shadowOffset: { width: 0, height: 3 },
+  shadowRadius: 8,
+  elevation: 3,
+},
+
+customToggleTitle: {
+  fontSize: moderateScale(15),
+  fontWeight: "600",
+  color: COLORS.textPrimary,
+},
+customToggleSubtitle: {
+  color: COLORS.textSecondary,
+  fontSize: moderateScale(12),
+  marginTop: 3,
+},
+
+// Animated Expand Wrapper
+customAnimatedWrapper: {
+  overflow: "hidden",
+  width: "100%",
+},
+
+// Inside Expanded
+customPromptWrapper: {
+  backgroundColor:COLORS.white,
+  borderRadius: moderateScale(16),
+  borderWidth: 1,
+  borderColor: "#ddd",
+  padding: moderateScale(16),
+  height: "100%",
+},
+customPromptLabel: {
+  fontSize: moderateScale(13),
+  color: COLORS.textSecondary,
+  marginBottom: 6,
+  fontWeight: "500",
+},
+customPromptInput: {
+  fontSize: moderateScale(14),
+  color: COLORS.textPrimary,
+  backgroundColor: "transparent",
+  borderRadius: moderateScale(12),
+  borderWidth: 0,
+  borderColor: "#ddd",
+  padding: moderateScale(12),
+  height: "100%",
+},
 
 });
 

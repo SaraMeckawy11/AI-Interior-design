@@ -11,9 +11,11 @@ import {
   ActivityIndicator,
   Modal,
   TouchableWithoutFeedback,
-  Dimensions
+  Dimensions,
+  Animated, 
+  Easing
 } from 'react-native';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import styles from '../../assets/styles/create/create.styles';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,6 +68,23 @@ export default function Interior() {
   const [adMessage, setAdMessage] = useState('');
   const [isAdLoaded, setIsAdLoaded] = useState(false);
   const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
+  const [useCustomPrompt, setUseCustomPrompt] = useState(false);
+
+  const animatedHeight = useRef(new Animated.Value(0)).current;
+
+  const toggleCustomPrompt = () => {
+    const toValue = useCustomPrompt ? 0 : 1;
+
+    setUseCustomPrompt(!useCustomPrompt);
+
+    Animated.timing(animatedHeight, {
+      toValue,
+      duration: 280,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false,
+    }).start();
+  };
+
   
   // Setup rewarded ad logic
   useEffect(() => {
@@ -334,6 +353,7 @@ export default function Interior() {
             roomType,
             designStyle,
             colorTone,
+            customPrompt: prompt.trim(),
             createdAt: new Date().toISOString(),
           },
         });
@@ -456,6 +476,70 @@ export default function Interior() {
                 />
               </View>
             </View> */}
+           {/* OR Separator */}
+            {/* <View style={styles.orSeparatorContainer}>
+              <View style={styles.orLine} />
+              <Text style={styles.orText}>OR</Text>
+              <View style={styles.orLine} />
+            </View> */}
+
+            {/* Toggle Card */}
+            {/* <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={toggleCustomPrompt}
+              style={[
+                styles.customToggleCard,
+                useCustomPrompt && styles.customToggleCardActive
+              ]}
+            >
+              <Ionicons
+                name={useCustomPrompt ? "checkbox-outline" : "square-outline"}
+                size={22}
+                color={useCustomPrompt ? COLORS.primaryDark : COLORS.textSecondary}
+                style={{ marginRight: 14 }}
+              />
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.customToggleTitle}>Write My Own Vision</Text>
+                <Text style={styles.customToggleSubtitle}>
+                  Describe the design exactly how you imagine it
+                </Text>
+              </View>
+            </TouchableOpacity> */}
+
+            {/* Smooth Expandable Area */}
+            {/* <Animated.View
+              style={[
+                styles.customAnimatedWrapper,
+                {
+                  height: animatedHeight.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 240], // height of expanded area
+                  }),
+                  opacity: animatedHeight,
+                  marginTop: animatedHeight.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 12],
+                  }),
+                },
+              ]}
+            >
+              {useCustomPrompt && (
+                <View style={styles.customPromptWrapper}>
+                  <Text style={styles.customPromptLabel}>Your Vision</Text>
+
+                  <TextInput
+                    style={styles.customPromptInput}
+                    placeholder="Example: modern living room, interior design, warm soft ambient lighting, vanilla latte palette, professional interior designer style, photorealistic 8k, high detail, natural shadows, includes sofa set, coffee table, area rug, wall art, TV cabinet, plants, bookshelf, accent lighting, cohesive furniture arrangement matching room layout"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={prompt}
+                    onChangeText={setPrompt}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                </View>
+              )}
+            </Animated.View> */}
 
             {/* Submit Button */}
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
