@@ -1,10 +1,9 @@
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.1.2
-torchvision==0.16.2
+torch
+torchvision
 opencv-python
 diffusers[torch]
 transformers
 accelerate
-runpod==1.6.2
+runpod
 Pillow
 numpy
