@@ -15,12 +15,14 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ## 🛠 Tech Stack
 
 ### Mobile Frontend
+
 - **Framework:** React Native with Expo (File-based routing using `expo-router`)
 - **State Management:** Zustand (`authStore.js`)
 - **Monetization:** `react-native-purchases` (RevenueCat), `react-native-google-mobile-ads` (AdMob)
 - **UI & Styling:** Custom CSS-in-JS pattern
 
 ### Backend Services
+
 - **Main API (Node.js):** Handles authentication, subscription syncing, coin balance updates, and saving generated designs to collections.
 - **AI Processing (Python):** Python-based microservices (`Interior/app.py`, `interiorAI/handler.py`) handle image diffusion model pipelines to process image generation requests.
 
@@ -36,6 +38,7 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ## 🏁 Getting Started
 
 ### Prerequisites
+
 - Node.js (v18+)
 - Expo CLI
 - Python (If running the backend AI services locally)
@@ -44,12 +47,14 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ### Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone <repository-url>
    cd Livinai
    ```
 
 2. **Install frontend dependencies:**
+
    ```bash
    npm install
    ```
@@ -65,4 +70,3 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ## 📝 License
 
 This project is proprietary and confidential. Ensure you have the proper credentials to run the backend and ad services.
-

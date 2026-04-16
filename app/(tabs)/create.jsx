@@ -54,6 +54,12 @@ export default function Create() {
       icon: "home-outline",
       route: "/create/exterior",
     },
+    {
+      title: "Floor Plan",
+      description: "Create and visualize detailed floor plans for your spaces.",
+      icon: "grid-outline",
+      route: "/create/plan",
+    },
   ];
 
   // -----------------------------
