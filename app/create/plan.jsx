@@ -631,7 +631,10 @@ export default function PlanEditor() {
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // PROMPT BUILDING  (kept ≤ 77 CLIP tokens for SD 1.5 compatibility)
+  // PROMPT BUILDING
+  // Matches handler ROOM_PROMPTS style so the RunPod worker can use it
+  // verbatim (custom_prompt overrides templates). Kept concise to fit
+  // SD 1.5 CLIP 77-token window.
   // ═══════════════════════════════════════════════════════════════
   const buildPrompt = () => {
     const style = DEFAULT_DESIGN_STYLE.toLowerCase();
@@ -639,9 +642,10 @@ export default function PlanEditor() {
 
     if (mode === "quick") {
       return (
-        `${style} ${roomType.toLowerCase()} interior from architectural floor plan, ` +
-        `${tone} palette, preserve exact walls and layout, ` +
-        `realistic 3D furnished room, photorealistic 8k, high detail, natural lighting`
+        `${style} ${roomType.toLowerCase()} interior converted from architectural floor plan, ` +
+        `preserve exact walls doors and layout, warm soft ambient lighting, ` +
+        `${tone} palette, professional interior designer style, ` +
+        `photorealistic 8k, high detail, natural shadows, realistic furniture arrangement`
       );
     }
 
@@ -652,9 +656,10 @@ export default function PlanEditor() {
     const roomList = uniqueRooms.length > 0 ? uniqueRooms.join(", ") : "rooms";
 
     return (
-      `${style} furnished interior with ${roomList} from architectural floor plan, ` +
-      `${tone} palette, preserve all walls partitions and layout, ` +
-      `realistic 3D cutaway, photorealistic 8k, high detail, natural lighting`
+      `${style} apartment interior with ${roomList} converted from architectural floor plan, ` +
+      `preserve all walls partitions doors and layout, realistic 3D cutaway view, ` +
+      `${tone} palette, professional interior designer style, ` +
+      `photorealistic 8k, high detail, natural shadows, cohesive furniture arrangement`
     );
   };
 
