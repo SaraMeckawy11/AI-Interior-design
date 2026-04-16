@@ -93,6 +93,7 @@ const OUTLINE_COLORS = [
 
 const MAX_CANVAS_WIDTH = width - moderateScale(48);
 const MAX_CANVAS_HEIGHT = height * 0.45;
+const OUTLINE_POINT_LIMIT = 24;
 
 // ---------------------------------------------------------------------------
 // SMOOTH PATH FROM TOUCH POINTS
@@ -349,6 +350,8 @@ export default function PlanEditor() {
       pathData,
       color: OUTLINE_COLORS[colorIdx],
       roomType: null,
+      vertices: vertices.map((v) => ({ x: v.x, y: v.y })),
+      segmentCurvatures: [...segmentCurvatures],
     };
     
     setPaths((prev) => {
@@ -631,15 +634,70 @@ export default function PlanEditor() {
   // ═══════════════════════════════════════════════════════════════
   // PROMPT BUILDING
   // ═══════════════════════════════════════════════════════════════
+  const buildOutlineConstraintText = () => {
+    if (mode !== "guided" || paths.length === 0) return "";
+
+    const outlineLines = paths
+      .map((p, idx) => {
+        if (!Array.isArray(p.vertices) || p.vertices.length < 3) return null;
+
+        const sampledVertices = p.vertices.slice(0, OUTLINE_POINT_LIMIT);
+        const normalizedPoints = sampledVertices.map((v) => {
+          const nx = canvasSize.width > 0 ? v.x / canvasSize.width : 0;
+          const ny = canvasSize.height > 0 ? v.y / canvasSize.height : 0;
+          return `(${nx.toFixed(3)},${ny.toFixed(3)})`;
+        });
+
+        const curvedSegments = Array.isArray(p.segmentCurvatures)
+          ? p.segmentCurvatures
+              .map((c, segIdx) => (Math.abs(c) > 0.12 ? segIdx + 1 : null))
+              .filter((segIdx) => segIdx != null)
+          : [];
+
+        const roomLabel = p.roomType ? p.roomType.toLowerCase() : `room ${idx + 1}`;
+        const curveLabel =
+          curvedSegments.length > 0
+            ? `; curved edges near segments [${curvedSegments.join(", ")}]`
+            : "";
+
+        return `${idx + 1}) ${roomLabel}: polygon ${normalizedPoints.join(" ")}${curveLabel}`;
+      })
+      .filter(Boolean);
+
+    if (outlineLines.length === 0) return "";
+
+    return (
+      `Use these room outlines as strict boundary masks in normalized plan coordinates ` +
+      `(origin top-left, x right, y down, range 0..1): ${outlineLines.join(" | ")}. ` +
+      `Respect shared edges between adjacent rooms so internal wall lines remain aligned across neighboring polygons. ` +
+      `Preserve each outlined room's relative area and aspect ratio as closely as possible.`
+    );
+  };
+
   const buildPrompt = () => {
     const style = DEFAULT_DESIGN_STYLE.toLowerCase();
     const tone = DEFAULT_COLOR_TONE.toLowerCase();
+    const geometryLock =
+      `Hard geometry constraints: preserve the exact apartment footprint and all room boundaries from the plan. ` +
+      `Do not move, bend, add, remove, merge, or split walls. Keep every doorway and opening position aligned with the input plan. ` +
+      `Keep room adjacency and circulation exactly the same.`;
+    const innerGeometryLock =
+      `Inner-geometry constraints: preserve all internal partitions and linework from the floor plan including corridor widths, ` +
+      `niches, shafts, columns, stairs, fixed wet-area cores, and wall offsets. ` +
+      `Maintain relative wall lengths and room proportions; do not square-off irregular rooms or simplify angled/curved interior walls.`;
+    const layoutPriority =
+      `Priority order: plan geometry accuracy first, then room function placement, then aesthetics. ` +
+      `If any style choice conflicts with geometry, keep geometry unchanged.`;
+    const renderTarget =
+      `Output a realistic 3D furnished conversion (dollhouse/cutaway look) that stays spatially faithful to the 2D plan. ` +
+      `Apply style only to materials, lighting, and furniture, not to geometry.`;
 
     if (mode === "quick") {
       return (
-        `2D floor plan to 3D furnished ${roomType.toLowerCase()} interior, ` +
-        `${style} style, ${tone} color palette, ` +
-        `convert architectural floor plan to realistic 3D room visualization with furniture`
+        `Convert this 2D apartment floor plan into a realistic 3D furnished ${roomType.toLowerCase()} interior. ` +
+        `${geometryLock} ${innerGeometryLock} ${layoutPriority} ${renderTarget} ` +
+        `Design direction: ${style} style, ${tone} color palette. ` +
+        `Do not crop out plan areas or hallucinate extra rooms.`
       );
     }
 
@@ -650,16 +708,21 @@ export default function PlanEditor() {
 
     if (uniqueRooms.length === 0) {
       return (
-        `2D floor plan to 3D furnished interior, ${style} style, ${tone} color palette, ` +
-        `convert architectural floor plan to realistic 3D room visualization with furniture`
+        `Convert this 2D apartment floor plan into a realistic 3D furnished interior. ` +
+        `${geometryLock} ${innerGeometryLock} ${layoutPriority} ${renderTarget} ` +
+        `${buildOutlineConstraintText()} ` +
+        `Design direction: ${style} style, ${tone} color palette. ` +
+        `Ensure furniture stays inside each room boundary.`
       );
     }
 
     const roomList = uniqueRooms.join(", ");
     return (
-      `2D floor plan to 3D furnished interior with ${roomList}, ` +
-      `${style} style, ${tone} color palette, ` +
-      `convert architectural floor plan to realistic 3D room visualization with furniture`
+      `Convert this 2D apartment floor plan into a realistic 3D furnished interior with ${roomList}. ` +
+      `${geometryLock} ${innerGeometryLock} ${layoutPriority} ${renderTarget} ` +
+      `${buildOutlineConstraintText()} ` +
+      `Design direction: ${style} style, ${tone} color palette. ` +
+      `Keep each labeled room function within its assigned outline and avoid cross-boundary furniture placement.`
     );
   };
 
