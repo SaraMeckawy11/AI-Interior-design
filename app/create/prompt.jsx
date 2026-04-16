@@ -382,10 +382,9 @@ export default function Prompt() {
 
       <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
         <View>
-          <View style={styles.header}>
+          <View style={styles.titleHeader}>
             <Text style={styles.title}>LIVINAI</Text>
 
-            {/* Coins Balance */}
             {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
               <View style={styles.coinsContainer}>
                 <Text style={styles.coinsText}>{coins} Coins</Text>
@@ -495,45 +494,46 @@ export default function Prompt() {
         animationType="slide"
         onRequestClose={() => setShowImageSourceModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>Upload Photo</Text>
-                <Text style={styles.modalSubtitle}>Choose an option</Text>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <SafeAreaView edges={['bottom']} style={styles.modalSheetSafe}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Upload Photo</Text>
+              <Text style={styles.modalSubtitle}>Choose an option</Text>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    takePhoto();
-                  }}
-                >
-                  <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Take Photo</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  takePhoto();
+                }}
+              >
+                <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Take Photo</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    pickImage();
-                  }}
-                >
-                  <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Choose from Gallery</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  pickImage();
+                }}
+              >
+                <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Choose from Gallery</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalCancelButton]}
-                  onPress={() => setShowImageSourceModal(false)}
-                >
-                  <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowImageSourceModal(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Fullscreen Loading Modal */}

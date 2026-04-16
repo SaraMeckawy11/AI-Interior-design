@@ -4,35 +4,36 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from "react";
 import {
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from "react-native";
 import {
-  RewardedAd,
-  RewardedAdEventType,
+    RewardedAd,
+    RewardedAdEventType,
 } from "react-native-google-mobile-ads";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Path, Circle } from "react-native-svg";
-import styles from "../../assets/styles/create/plan.styles";
+import Svg, { Circle, Path } from "react-native-svg";
+import styles from "../../assets/styles/create/create.styles";
 import { useAuthStore } from "../../authStore";
+import RoomTypeSelector from "../../components/create/RoomTypeSelector";
 import COLORS from "../../constants/colors";
 
 const { width, height } = Dimensions.get("window");
@@ -44,20 +45,21 @@ const moderateScale = (size, factor = 0.5) =>
 const adUnitId = "ca-app-pub-4470538534931449/2411201644";
 const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 
+/** Space options on plan — narrower list than the global selector */
+const PLAN_EXCLUDED_ROOM_TYPES = [
+  "Kids Room",
+  "Laundry Room",
+  "Hallway",
+  "Entryway",
+  "Basement",
+  "Closet",
+];
+
 // ---------------------------------------------------------------------------
 // CONSTANTS
 // ---------------------------------------------------------------------------
-const ROOM_TYPES = [
-  { key: "Living Room", icon: "tv-outline" },
-  { key: "Bedroom", icon: "bed-outline" },
-  { key: "Kitchen", icon: "restaurant-outline" },
-  { key: "Bathroom", icon: "water-outline" },
-  { key: "Dining Room", icon: "cafe-outline" },
-  { key: "Office", icon: "desktop-outline" },
-  { key: "Kids Room", icon: "happy-outline" },
-  { key: "Studio", icon: "easel-outline" },
-  { key: "Full Apartment", icon: "home-outline" },
-];
+const DEFAULT_DESIGN_STYLE = "Modern";
+const DEFAULT_COLOR_TONE = "Neutral";
 
 const GUIDED_ROOM_TYPES = [
   { key: "Living Room", icon: "tv-outline" },
@@ -72,32 +74,6 @@ const GUIDED_ROOM_TYPES = [
   { key: "Laundry Room", icon: "shirt-outline" },
   { key: "Entryway", icon: "log-in-outline" },
   { key: "Basement", icon: "download-outline" },
-];
-
-const DESIGN_STYLES = [
-  "Modern",
-  "Minimalist",
-  "Scandinavian",
-  "Industrial",
-  "Bohemian",
-  "Mid-Century",
-  "Contemporary",
-  "Rustic",
-  "Traditional",
-  "Art Deco",
-  "Japanese",
-  "Coastal",
-];
-
-const COLOR_TONES = [
-  "Neutral",
-  "Warm",
-  "Cool",
-  "Earthy",
-  "Pastel",
-  "Bold",
-  "Monochrome",
-  "Natural",
 ];
 
 const OUTLINE_COLORS = [
@@ -202,8 +178,6 @@ export default function PlanEditor() {
 
   // ── Quick mode selections ──
   const [roomType, setRoomType] = useState("Living Room");
-  const [designStyle, setDesignStyle] = useState("Modern");
-  const [colorTone, setColorTone] = useState("Neutral");
 
   // ── Guided mode drawing ──
   const [paths, setPaths] = useState([]);
@@ -658,8 +632,8 @@ export default function PlanEditor() {
   // PROMPT BUILDING
   // ═══════════════════════════════════════════════════════════════
   const buildPrompt = () => {
-    const style = designStyle.toLowerCase();
-    const tone = colorTone.toLowerCase();
+    const style = DEFAULT_DESIGN_STYLE.toLowerCase();
+    const tone = DEFAULT_COLOR_TONE.toLowerCase();
 
     if (mode === "quick") {
       return (
@@ -669,7 +643,6 @@ export default function PlanEditor() {
       );
     }
 
-    // Guided mode
     const roomNames = paths
       .filter((p) => p.roomType)
       .map((p) => p.roomType.toLowerCase());
@@ -705,6 +678,10 @@ export default function PlanEditor() {
       );
       return;
     }
+    if (mode === "quick" && !roomType) {
+      showModal("Missing Space", "Please select a space option.");
+      return;
+    }
     if (isManualDisabled) {
       showModal(
         "Access Denied",
@@ -734,8 +711,8 @@ export default function PlanEditor() {
 
       const requestBody = {
         roomType: mode === "quick" ? roomType : "Floor Plan",
-        designStyle,
-        colorTone,
+        designStyle: DEFAULT_DESIGN_STYLE,
+        colorTone: DEFAULT_COLOR_TONE,
         customPrompt,
         image: imageDataUrl,
       };
@@ -772,8 +749,8 @@ export default function PlanEditor() {
             generatedImage: imageUri,
             image: image || null,
             roomType: mode === "quick" ? roomType : "Floor Plan",
-            designStyle,
-            colorTone,
+            designStyle: DEFAULT_DESIGN_STYLE,
+            colorTone: DEFAULT_COLOR_TONE,
             createdAt: new Date().toISOString(),
           },
         });
@@ -814,25 +791,25 @@ export default function PlanEditor() {
 
       <ScrollView
         contentContainerStyle={styles.container}
-        style={styles.scrollView}
+        style={styles.scrollViewStyle}
         scrollEnabled={scrollEnabled}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ── Header ── */}
-        <View style={styles.header}>
+        <View>
+        <View style={styles.titleHeader}>
           <Text style={styles.title}>LIVINAI</Text>
-          <Text style={styles.subtitle}>Floor Plan to 3D</Text>
+          <Text style={styles.planHeaderTagline}>Floor plan → 3D</Text>
           {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
-            <View style={styles.coinsRow}>
+            <View style={styles.coinsContainer}>
               <Text style={styles.coinsText}>{coins} Coins</Text>
             </View>
           )}
         </View>
 
-        {/* ── Mode Toggle ── */}
-        <View style={styles.modeToggleContainer}>
+        {/* Quick / Guided toggle — hidden; flow stays on Quick (see mode state). */}
+        {/* <View style={styles.planModeToggleContainer}>
           <TouchableOpacity
-            style={[styles.modeTab, mode === "quick" && styles.modeTabActive]}
+            style={[styles.planModeTab, mode === "quick" && styles.planModeTabActive]}
             onPress={() => switchMode("quick")}
             activeOpacity={0.7}
           >
@@ -844,16 +821,15 @@ export default function PlanEditor() {
             />
             <Text
               style={[
-                styles.modeTabText,
-                mode === "quick" && styles.modeTabTextActive,
+                styles.planModeTabText,
+                mode === "quick" && styles.planModeTabTextActive,
               ]}
             >
               Quick
             </Text>
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[styles.modeTab, mode === "guided" && styles.modeTabActive]}
+            style={[styles.planModeTab, mode === "guided" && styles.planModeTabActive]}
             onPress={() => switchMode("guided")}
             activeOpacity={0.7}
           >
@@ -865,174 +841,87 @@ export default function PlanEditor() {
             />
             <Text
               style={[
-                styles.modeTabText,
-                mode === "guided" && styles.modeTabTextActive,
+                styles.planModeTabText,
+                mode === "guided" && styles.planModeTabTextActive,
               ]}
             >
               Guided
             </Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
 
-        {/* ── Upload Section ── */}
-        <View style={styles.section}>
-          <View style={styles.labelRow}>
-            <Text style={styles.label}>Upload Floor Plan</Text>
-            {!isSubscribed && (
-              <TouchableOpacity
-                onPress={handleWatchAd}
-                activeOpacity={0.8}
-                style={styles.watchAdBtn}
-              >
-                <Ionicons name="play-circle-outline" size={14} color="#fff" />
-                <Text style={styles.watchAdText}>Watch Ad</Text>
-              </TouchableOpacity>
-            )}
+        <View style={styles.form}>
+          <View style={styles.formGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Upload floor plan</Text>
+              {!isSubscribed && (
+                <TouchableOpacity
+                  onPress={handleWatchAd}
+                  activeOpacity={0.8}
+                  style={styles.watchAdButton}
+                >
+                  <Ionicons name="play-circle-outline" size={14} color="#fff" />
+                  <Text style={styles.watchAdText}>Watch Ad</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.imagePickerPlan,
+                !image && styles.imagePickerEmpty,
+                image && styles.imagePickerSelected,
+              ]}
+              onPress={() => setShowImageSourceModal(true)}
+              activeOpacity={0.9}
+            >
+              {image ? (
+                <>
+                  <Image
+                    source={{ uri: image }}
+                    style={[styles.previewImageModern, styles.previewImagePlan]}
+                  />
+                  <TouchableOpacity
+                    style={styles.removeButtonModern}
+                    onPress={removeImage}
+                    hitSlop={10}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={28}
+                      color={COLORS.error}
+                    />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <View style={styles.placeholderContainerPlan}>
+                  <View style={styles.uploadIconBadge}>
+                    <Ionicons
+                      name="map-outline"
+                      size={moderateScale(28)}
+                      color={COLORS.primaryDark}
+                    />
+                  </View>
+                  <Text style={styles.uploadTitle}>Upload your floor plan</Text>
+                  <Text style={styles.uploadCaption}>
+                    JPG or PNG · camera or gallery
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={[styles.imagePicker, image && styles.imagePickerActive]}
-            onPress={() => setShowImageSourceModal(true)}
-            activeOpacity={0.9}
-          >
-            {image ? (
-              <>
-                <Image source={{ uri: image }} style={styles.previewImage} />
-                <TouchableOpacity
-                  style={styles.removeBtn}
-                  onPress={removeImage}
-                  hitSlop={10}
-                >
-                  <Ionicons
-                    name="close-circle"
-                    size={28}
-                    color={COLORS.error}
-                  />
-                </TouchableOpacity>
-              </>
-            ) : (
-              <View style={styles.placeholderBox}>
-                <View style={styles.iconCircle}>
-                  <Ionicons
-                    name="map-outline"
-                    size={30}
-                    color={COLORS.primaryDark}
-                  />
-                </View>
-                <Text style={styles.placeholderTitle}>
-                  Upload your floor plan
-                </Text>
-                <Text style={styles.placeholderSub}>
-                  Tap to take a photo or choose from gallery
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* ══════════════════════════════════════════════════════ */}
-        {/* QUICK MODE CONTENT */}
-        {/* ══════════════════════════════════════════════════════ */}
         {mode === "quick" && (
-          <>
-            {/* Room Type Grid */}
-            <View style={styles.section}>
-              <Text style={styles.label}>What space is this?</Text>
-              <View style={styles.roomGrid}>
-                {ROOM_TYPES.map((rt) => {
-                  const active = roomType === rt.key;
-                  return (
-                    <TouchableOpacity
-                      key={rt.key}
-                      style={[styles.roomChip, active && styles.roomChipActive]}
-                      onPress={() => setRoomType(rt.key)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons
-                        name={rt.icon}
-                        size={18}
-                        color={
-                          active ? COLORS.primaryDark : COLORS.textSecondary
-                        }
-                        style={{ marginRight: 6 }}
-                      />
-                      <Text
-                        style={[
-                          styles.roomChipText,
-                          active && styles.roomChipTextActive,
-                        ]}
-                      >
-                        {rt.key}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Design Style */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Design Style</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.chipScroll}
-              >
-                {DESIGN_STYLES.map((style) => (
-                  <TouchableOpacity
-                    key={style}
-                    style={[
-                      styles.chip,
-                      designStyle === style && styles.chipActive,
-                    ]}
-                    onPress={() => setDesignStyle(style)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        designStyle === style && styles.chipTextActive,
-                      ]}
-                    >
-                      {style}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* Color Tone */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Color Tone</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.chipScroll}
-              >
-                {COLOR_TONES.map((tone) => (
-                  <TouchableOpacity
-                    key={tone}
-                    style={[
-                      styles.chip,
-                      colorTone === tone && styles.chipActive,
-                    ]}
-                    onPress={() => setColorTone(tone)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        colorTone === tone && styles.chipTextActive,
-                      ]}
-                    >
-                      {tone}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </>
+          <RoomTypeSelector
+            label="Space options"
+            roomType={roomType}
+            setRoomType={setRoomType}
+            showAllOptions
+            excludeRoomTypes={PLAN_EXCLUDED_ROOM_TYPES}
+          />
         )}
+
+        {/* Design style & color tone use fixed defaults on this screen (see DEFAULT_* constants). */}
 
         {/* ══════════════════════════════════════════════════════ */}
         {/* GUIDED MODE CONTENT */}
@@ -1041,17 +930,17 @@ export default function PlanEditor() {
           <>
             {/* Drawing Canvas */}
             {image && imageDims && (
-              <View style={styles.section}>
+              <View style={styles.formGroup}>
                 <View style={styles.labelRow}>
                   <Text style={styles.label}>Draw Room Outlines</Text>
-                  <View style={styles.canvasToolbar}>
-                    <View style={styles.drawToolPill}>
+                  <View style={styles.planCanvasToolbar}>
+                    <View style={styles.planDrawToolPill}>
                       <Ionicons name="create-outline" size={18} color={COLORS.primaryDark} />
-                      <Text style={styles.drawToolPillText}>Draw & Curve</Text>
+                      <Text style={styles.planDrawToolPillText}>Draw & Curve</Text>
                     </View>
 
                     <TouchableOpacity
-                      style={styles.toolBtn}
+                      style={styles.planToolBtn}
                       onPress={handleUndo}
                       disabled={paths.length === 0 && vertices.length === 0}
                     >
@@ -1068,7 +957,7 @@ export default function PlanEditor() {
 
                     {vertices.length > 2 && (
                       <TouchableOpacity
-                        style={styles.toolBtn}
+                        style={styles.planToolBtn}
                         onPress={closeShape}
                       >
                         <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.primaryDark} />
@@ -1076,7 +965,7 @@ export default function PlanEditor() {
                     )}
 
                     <TouchableOpacity
-                      style={styles.toolBtn}
+                      style={styles.planToolBtn}
                       onPress={handleClearAll}
                       disabled={paths.length === 0 && vertices.length === 0}
                     >
@@ -1091,17 +980,17 @@ export default function PlanEditor() {
                   </View>
                 </View>
 
-                <View style={styles.canvasHintContainer}>
+                <View style={styles.planCanvasHintContainer}>
                   <Ionicons name="information-circle-outline" size={16} color={COLORS.textSecondary} />
-                  <Text style={styles.canvasHint}>
+                  <Text style={styles.planCanvasHint}>
                     Tap to add points. Tap the first point to close. Drag a segment midpoint to curve.
                   </Text>
                 </View>
 
                 <View
                   style={[
-                    styles.canvasContainer,
-                    vertices.length > 0 && styles.canvasContainerActive,
+                    styles.planCanvasContainer,
+                    vertices.length > 0 && styles.planCanvasContainerActive,
                     { width: canvasSize.width, height: canvasSize.height },
                   ]}
                   onTouchStart={handleCanvasTap}
@@ -1198,18 +1087,18 @@ export default function PlanEditor() {
 
             {/* Rooms list */}
             {paths.length > 0 && (
-              <View style={styles.section}>
+              <View style={styles.formGroup}>
                 <Text style={styles.label}>Rooms Identified</Text>
                 {paths.map((p, i) => (
                   <TouchableOpacity
                     key={`room-${i}`}
-                    style={styles.roomItem}
+                    style={styles.planRoomItem}
                     onPress={() => openRoomAssignForPath(i)}
                     activeOpacity={0.7}
                   >
-                    <View style={[styles.roomItemAccent, { backgroundColor: p.color }]} />
-                    <View style={[styles.roomDot, { backgroundColor: p.color }]} />
-                    <Text style={styles.roomItemText}>
+                    <View style={[styles.planRoomItemAccent, { backgroundColor: p.color }]} />
+                    <View style={[styles.planRoomDot, { backgroundColor: p.color }]} />
+                    <Text style={styles.planRoomItemText}>
                       {p.roomType || "Tap to assign room type"}
                     </Text>
                     {!p.roomType && (
@@ -1220,7 +1109,7 @@ export default function PlanEditor() {
                       />
                     )}
                     <TouchableOpacity
-                      style={styles.roomItemDelete}
+                      style={styles.planRoomItemDelete}
                       onPress={() => removePath(i)}
                       hitSlop={8}
                     >
@@ -1235,74 +1124,20 @@ export default function PlanEditor() {
               </View>
             )}
 
-            {/* Design Style */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Design Style</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.chipScroll}
-              >
-                {DESIGN_STYLES.map((style) => (
-                  <TouchableOpacity
-                    key={style}
-                    style={[styles.chip, designStyle === style && styles.chipActive]}
-                    onPress={() => setDesignStyle(style)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        designStyle === style && styles.chipTextActive,
-                      ]}
-                    >
-                      {style}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* Color Tone */}
-            <View style={styles.section}>
-              <Text style={styles.label}>Color Tone</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.chipScroll}
-              >
-                {COLOR_TONES.map((tone) => (
-                  <TouchableOpacity
-                    key={tone}
-                    style={[styles.chip, colorTone === tone && styles.chipActive]}
-                    onPress={() => setColorTone(tone)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        colorTone === tone && styles.chipTextActive,
-                      ]}
-                    >
-                      {tone}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
           </>
         )}
 
-        {/* ── Generate Button ── */}
         <TouchableOpacity
-          style={styles.btnWrapper}
+          style={styles.buttonWrapper}
           onPress={handleSubmit}
           disabled={loading}
         >
           {loading ? (
             <LinearGradient
               colors={[COLORS.primary, COLORS.primary]}
-              style={styles.btnGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.buttonGradient}
             >
               <ActivityIndicator color={COLORS.white} />
             </LinearGradient>
@@ -1311,20 +1146,23 @@ export default function PlanEditor() {
               colors={[COLORS.primaryDark, COLORS.primary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.btnGradient}
+              style={styles.buttonGradient}
             >
               <Ionicons
-                name="sparkles-outline"
+                name="cloud-upload-outline"
                 size={20}
                 color={COLORS.white}
-                style={{ marginRight: 8 }}
+                style={styles.buttonIcon}
               />
-              <Text style={styles.btnText}>Generate 3D Design</Text>
+              <Text style={styles.buttonText}>Generate</Text>
             </LinearGradient>
           )}
         </TouchableOpacity>
 
+        </View>
+
         <View style={{ height: verticalScale(40) }} />
+        </View>
       </ScrollView>
 
       {/* ═══════════════════════════════════════════════════════ */}
@@ -1336,61 +1174,65 @@ export default function PlanEditor() {
         animationType="slide"
         onRequestClose={() => setShowImageSourceModal(false)}
       >
-        <TouchableWithoutFeedback
-          onPress={() => setShowImageSourceModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalSheet}>
-                <Text style={styles.modalTitle}>Upload Floor Plan</Text>
-                <Text style={styles.modalSubtitle}>Choose an option</Text>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback
+            onPress={() => setShowImageSourceModal(false)}
+          >
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <SafeAreaView edges={['bottom']} style={styles.modalSheetSafe}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Upload floor plan</Text>
+              <Text style={styles.modalSubtitle}>Choose an option</Text>
 
-                <TouchableOpacity
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    takePhoto();
-                  }}
-                >
-                  <Ionicons
-                    name="camera-outline"
-                    size={20}
-                    color="#fff"
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.modalBtnText}>Take Photo</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  takePhoto();
+                }}
+              >
+                <Ionicons
+                  name="camera-outline"
+                  size={20}
+                  color={COLORS.white}
+                  style={styles.modalIcon}
+                />
+                <Text style={styles.modalButtonText}>Take Photo</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    pickImage();
-                  }}
-                >
-                  <Ionicons
-                    name="images-outline"
-                    size={20}
-                    color="#fff"
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.modalBtnText}>Choose from Gallery</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  pickImage();
+                }}
+              >
+                <Ionicons
+                  name="images-outline"
+                  size={20}
+                  color={COLORS.white}
+                  style={styles.modalIcon}
+                />
+                <Text style={styles.modalButtonText}>Choose from Gallery</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.modalBtn, styles.modalCancelBtn]}
-                  onPress={() => setShowImageSourceModal(false)}
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowImageSourceModal(false)}
+              >
+                <Text
+                  style={[
+                    styles.modalButtonText,
+                    { color: COLORS.textSecondary },
+                  ]}
                 >
-                  <Text
-                    style={[styles.modalBtnText, { color: COLORS.textSecondary }]}
-                  >
-                    Cancel
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </View>
       </Modal>
 
       {/* ═══════════════════════════════════════════════════════ */}
@@ -1415,15 +1257,15 @@ export default function PlanEditor() {
         >
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.roomAssignSheet}>
-                <Text style={styles.modalTitle}>Assign Room Type</Text>
+              <View style={styles.planRoomAssignSheet}>
+                <Text style={styles.modalTitle}>Assign room type</Text>
                 <Text style={styles.modalSubtitle}>What room is this outline?</Text>
 
-                <View style={styles.roomAssignGrid}>
+                <View style={styles.planRoomAssignGrid}>
                   {GUIDED_ROOM_TYPES.map((rt) => (
                     <TouchableOpacity
                       key={rt.key}
-                      style={styles.roomAssignChip}
+                      style={styles.planRoomAssignChip}
                       onPress={() => assignRoom(rt.key)}
                       activeOpacity={0.7}
                     >
@@ -1433,13 +1275,12 @@ export default function PlanEditor() {
                         color={COLORS.primaryDark}
                         style={{ marginRight: 6 }}
                       />
-                      <Text style={styles.roomAssignChipText}>{rt.key}</Text>
+                      <Text style={styles.planRoomAssignChipText}>{rt.key}</Text>
                     </TouchableOpacity>
                   ))}
 
-                  {/* Custom / Add option */}
                   <TouchableOpacity
-                    style={[styles.roomAssignChip, styles.roomAssignChipAdd]}
+                    style={[styles.planRoomAssignChip, styles.planRoomAssignChipAdd]}
                     onPress={() => setShowCustomInput(true)}
                     activeOpacity={0.7}
                   >
@@ -1449,14 +1290,14 @@ export default function PlanEditor() {
                       color={COLORS.primaryDark}
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={styles.roomAssignChipText}>Custom</Text>
+                    <Text style={styles.planRoomAssignChipText}>Custom</Text>
                   </TouchableOpacity>
                 </View>
 
                 {showCustomInput && (
-                  <View style={styles.customInputRow}>
+                  <View style={styles.planCustomInputRow}>
                     <TextInput
-                      style={styles.customInput}
+                      style={styles.planCustomInput}
                       placeholder="Enter room type..."
                       placeholderTextColor={COLORS.placeholderText}
                       value={customRoomInput}
@@ -1464,18 +1305,18 @@ export default function PlanEditor() {
                       autoFocus
                     />
                     <TouchableOpacity
-                      style={styles.customAddBtn}
+                      style={styles.planCustomAddBtn}
                       onPress={handleCustomRoomAdd}
                     >
-                      <Text style={styles.customAddBtnText}>Add</Text>
+                      <Text style={styles.planCustomAddBtnText}>Add</Text>
                     </TouchableOpacity>
                   </View>
                 )}
 
                 <TouchableOpacity
                   style={[
-                    styles.modalBtn,
-                    styles.modalCancelBtn,
+                    styles.modalButton,
+                    styles.modalCancelButton,
                     { marginTop: verticalScale(6) },
                   ]}
                   onPress={() => {
@@ -1485,7 +1326,10 @@ export default function PlanEditor() {
                   }}
                 >
                   <Text
-                    style={[styles.modalBtnText, { color: COLORS.textSecondary }]}
+                    style={[
+                      styles.modalButtonText,
+                      { color: COLORS.textSecondary },
+                    ]}
                   >
                     Skip
                   </Text>
@@ -1501,11 +1345,12 @@ export default function PlanEditor() {
       {/* ═══════════════════════════════════════════════════════ */}
       <Modal transparent animationType="fade" visible={loading}>
         <View style={styles.loadingOverlay}>
-          <View style={styles.loadingBox}>
+          <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingTitle}>Converting your plan...</Text>
-            <Text style={styles.loadingSub}>Generating a 3D furnished view</Text>
-            <Text style={styles.loadingSub}>This may take up to 30 seconds</Text>
+            <Text style={styles.loadingText}>Converting your plan…</Text>
+            <Text style={styles.loadingSubtext}>
+              This may take up to 30 seconds
+            </Text>
           </View>
         </View>
       </Modal>
@@ -1520,16 +1365,16 @@ export default function PlanEditor() {
         onRequestClose={() => setModalVisible(false)}
       >
         <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
-          <View style={styles.infoOverlay}>
+          <View style={styles.modalMissingOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.infoBox}>
+              <View style={styles.modalMissingContainer}>
                 <Text style={styles.modalTitle}>{modalData.title}</Text>
                 <Text style={styles.modalSubtitle}>{modalData.message}</Text>
                 <TouchableOpacity
-                  style={[styles.modalBtn, { marginTop: 8 }]}
+                  style={[styles.modalMissingButton, styles.modalConfirmButton]}
                   onPress={() => setModalVisible(false)}
                 >
-                  <Text style={styles.modalBtnText}>OK</Text>
+                  <Text style={styles.modalButtonText}>OK</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>

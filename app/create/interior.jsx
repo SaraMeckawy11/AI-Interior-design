@@ -33,6 +33,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import CreateBannerAd from "../../components/create/CreateBannerAd";
 import { useFocusEffect } from 'expo-router';
 
+const INTERIOR_EXCLUDED_ROOM_TYPES = ['Full Apartment'];
+
 const { width, height } = Dimensions.get("window");
 
 // Scaling functions
@@ -395,10 +397,9 @@ export default function Interior() {
 
       <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
         <View>
-          <View style={styles.header}>
+          <View style={styles.titleHeader}>
             <Text style={styles.title}>LIVINAI</Text>
 
-            {/* Coins Balance */}
             {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
               <View style={styles.coinsContainer}>
                 <Text style={styles.coinsText}>{coins} Coins</Text>
@@ -424,13 +425,17 @@ export default function Interior() {
                 )}
               </View>
               <TouchableOpacity
-                style={[styles.imagePickerModern, image && styles.imagePickerSelected]}
+                style={[
+                  styles.imagePickerPlan,
+                  !image && styles.imagePickerEmpty,
+                  image && styles.imagePickerSelected,
+                ]}
                 onPress={() => setShowImageSourceModal(true)}
                 activeOpacity={0.9}
               >
                 {image ? (
                   <>
-                    <Image source={{ uri: image }} style={styles.previewImageModern} />
+                    <Image source={{ uri: image }} style={[styles.previewImageModern, styles.previewImagePlan]} />
                     <TouchableOpacity
                       style={styles.removeButtonModern}
                       onPress={() => setImage(null)}
@@ -440,16 +445,23 @@ export default function Interior() {
                     </TouchableOpacity>
                   </>
                 ) : (
-                  <View style={styles.placeholderContainerModern}>
-                    <Ionicons name="cloud-upload-outline" size={moderateScale(38)} color={COLORS.textSecondary} />
-                    <Text style={styles.placeholderTextModern}>Tap to upload an image</Text>
+                  <View style={styles.placeholderContainerPlan}>
+                    <View style={styles.uploadIconBadge}>
+                      <Ionicons name="cloud-upload-outline" size={moderateScale(28)} color={COLORS.primaryDark} />
+                    </View>
+                    <Text style={styles.uploadTitle}>Upload your photo</Text>
+                    <Text style={styles.uploadCaption}>JPG or PNG · camera or gallery</Text>
                   </View>
                 )}
               </TouchableOpacity>
             </View>
 
             {/* Room Type */}
-            <RoomTypeSelector roomType={roomType} setRoomType={setRoomType} />
+            <RoomTypeSelector
+              roomType={roomType}
+              setRoomType={setRoomType}
+              excludeRoomTypes={INTERIOR_EXCLUDED_ROOM_TYPES}
+            />
 
             {/* Design Style */}
             <DesignStyleSelector designStyle={designStyle} setDesignStyle={setDesignStyle} />
@@ -581,45 +593,46 @@ export default function Interior() {
         animationType="slide"
         onRequestClose={() => setShowImageSourceModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>Upload Photo</Text>
-                <Text style={styles.modalSubtitle}>Choose an option</Text>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <SafeAreaView edges={['bottom']} style={styles.modalSheetSafe}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Upload Photo</Text>
+              <Text style={styles.modalSubtitle}>Choose an option</Text>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    takePhoto();
-                  }}
-                >
-                  <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Take Photo</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  takePhoto();
+                }}
+              >
+                <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Take Photo</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    pickImage();
-                  }}
-                >
-                  <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Choose from Gallery</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  pickImage();
+                }}
+              >
+                <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Choose from Gallery</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalCancelButton]}
-                  onPress={() => setShowImageSourceModal(false)}
-                >
-                  <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowImageSourceModal(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Fullscreen Loading Modal */}

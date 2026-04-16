@@ -6,14 +6,25 @@ import {
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import styles from '../../assets/styles/create/room.styles';
 import { Ionicons } from '@expo/vector-icons';
+import COLORS from '../../constants/colors';
 
 const MAX_VISIBLE_ICONS = 4;
 const MAX_CUSTOM_ROOMS = 1;
 
-const RoomTypeSelector = ({ roomType, setRoomType }) => {
+/** Stable default to avoid new [] each render (effect deps). */
+const NO_EXCLUDED_ROOMS = [];
+
+const RoomTypeSelector = ({
+  roomType,
+  setRoomType,
+  label = 'Room type',
+  excludeRoomTypes = NO_EXCLUDED_ROOMS,
+  /** When true, every option is shown and the See All control is hidden (e.g. plan “Space options”). */
+  showAllOptions = false,
+}) => {
   const [showAllRooms, setShowAllRooms] = useState(false);
   const [customRoomTypes, setCustomRoomTypes] = useState([]);
   const [manualRoomInput, setManualRoomInput] = useState('');
@@ -24,15 +35,39 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [roomToDelete, setRoomToDelete] = useState(null);
 
-  const defaultRoomTypes = [
-    'Living Room', 'Bedroom', 'Kitchen', 'Bathroom',
-    'Dining Room', 'Closet', 'Office','Laundry Room',
-    'Hallway','Entryway','Basement', 
-  ];
+  const defaultRoomTypes = useMemo(
+    () =>
+      [
+        'Full Apartment',
+        'Living Room',
+        'Bedroom',
+        'Kitchen',
+        'Bathroom',
+        'Dining Room',
+        'Closet',
+        'Office',
+        'Kids Room',
+        'Laundry Room',
+        'Hallway',
+        'Entryway',
+        'Basement',
+      ].filter((t) => !excludeRoomTypes.includes(t)),
+    [excludeRoomTypes],
+  );
 
   const allRoomTypes = [...defaultRoomTypes, ...customRoomTypes];
 
+  useEffect(() => {
+    if (!roomType || !excludeRoomTypes.includes(roomType)) return;
+    const next = defaultRoomTypes[0] || 'Living Room';
+    if (next !== roomType) setRoomType(next);
+  }, [roomType, excludeRoomTypes, defaultRoomTypes, setRoomType]);
+
+  const expanded = showAllOptions || showAllRooms;
+
   const getVisibleRoomTypes = () => {
+    if (showAllOptions) return allRoomTypes;
+
     const base = allRoomTypes.slice(0, MAX_VISIBLE_ICONS);
 
     if (!showAllRooms && roomType && !base.includes(roomType)) {
@@ -47,12 +82,15 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
 
   const getRoomIcon = (type) => {
     switch (type.toLowerCase()) {
+      case 'full apartment': return 'home-outline';
+      case 'whole apartment': return 'home-outline';
       case 'living room': return 'tv-outline';
       case 'bedroom': return 'bed-outline';
       case 'kitchen': return 'restaurant-outline';
       case 'bathroom': return 'water-outline';
       case 'dining room': return 'pizza-outline';
       case 'office': return 'laptop-outline';
+      case 'kids room': return 'happy-outline';
       case 'garage': return 'car-outline';
       case 'entryway': return 'log-in-outline';
       case 'laundry room': return 'shirt-outline';
@@ -87,7 +125,7 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
     setRoomType(trimmed);
     setManualRoomInput('');
     setShowInputField(false);
-    setShowAllRooms(true);
+    if (!showAllOptions) setShowAllRooms(true);
   };
 
   const handleDeleteRoom = (room) => {
@@ -104,18 +142,21 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
 
   return (
     <View style={styles.formGroup}>
-      <View style={styles.labelRow}>
-        <Text style={styles.label}>Room type</Text>
-        <TouchableOpacity onPress={() => setShowAllRooms(!showAllRooms)}>
-          <Text style={styles.seeAllText}>
-            {showAllRooms ? 'Show Less' : 'See All'}
-          </Text>
-        </TouchableOpacity>
+      <View style={[styles.labelRow, showAllOptions && styles.labelRowSingle]}>
+        <Text style={styles.label}>{label}</Text>
+        {!showAllOptions && (
+          <TouchableOpacity onPress={() => setShowAllRooms(!showAllRooms)}>
+            <Text style={styles.seeAllText}>
+              {showAllRooms ? 'Show Less' : 'See All'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      <View style={styles.iconGrid}>
+      <View style={[styles.iconGrid, showAllOptions && styles.iconGridExpanded]}>
         {visibleRoomTypes.map((type) => {
           const isCustom = customRoomTypes.includes(type);
+          const selected = roomType === type;
           return (
             <TouchableOpacity
               key={type}
@@ -126,13 +167,20 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
               <View
                 style={[
                   styles.iconCircle,
-                  roomType === type && styles.iconCircleSelected,
-                  isCustom && styles.customRoomBackground
+                  selected && styles.iconCircleSelected,
+                  isCustom && styles.customRoomBackground,
                 ]}
               >
-                <Ionicons name={getRoomIcon(type)} size={18} color="gray" />
+                <Ionicons
+                  name={getRoomIcon(type)}
+                  size={18}
+                  color={selected ? COLORS.primaryDark : COLORS.textSecondary}
+                />
               </View>
               <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.78}
                 style={[
                   styles.iconLabel,
                   roomType === type && styles.iconLabelSelected,
@@ -144,20 +192,20 @@ const RoomTypeSelector = ({ roomType, setRoomType }) => {
           );
         })}
 
-        {showAllRooms && customRoomTypes.length < MAX_CUSTOM_ROOMS && (
+        {expanded && customRoomTypes.length < MAX_CUSTOM_ROOMS && (
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => setShowInputField(!showInputField)}
           >
             <View style={styles.iconCircle}>
-              <Ionicons name="add-outline" size={24} color="gray" />
+              <Ionicons name="add-outline" size={24} color={COLORS.textSecondary} />
             </View>
             <Text style={styles.iconLabel}>Add</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {showAllRooms && showInputField && (
+      {expanded && showInputField && (
         <View style={styles.manualCard}>
           <TextInput
             style={styles.manualInput}
