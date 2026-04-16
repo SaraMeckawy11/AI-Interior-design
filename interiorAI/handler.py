@@ -348,49 +348,50 @@ def handler(event):
         has_window = detect_window(seg_map)
 
         # --- PROMPTS ---
-        custom_prompt = body.get("custom_prompt")  # user-sent prompt (may be empty)
+        raw_custom = body.get("custom_prompt")
+        custom_prompt = ""
+        if raw_custom and isinstance(raw_custom, str):
+            custom_prompt = raw_custom.strip()[:500]
 
-        # Normalize room_type for lookups
         room_key = (room_type or "").strip().lower()
+
+        QUALITY_SUFFIX = (
+            ", photorealistic 8k, high detail textures, natural shadows, "
+            "professional interior photography, realistic lighting"
+        )
 
         prompt = None
 
-        # 1) If user supplied a custom prompt (non-empty) -> use it
-        if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
-            prompt = custom_prompt.strip()
+        if custom_prompt:
+            prompt = custom_prompt + QUALITY_SUFFIX
+        elif room_key in ROOM_PROMPTS:
+            template = ROOM_PROMPTS[room_key]
+            prompt = template.format(
+                design_style=design_style or "Stylish",
+                color_tone=color_tone or "neutral",
+            )
+        elif room_key in EXTERIOR_PROMPTS:
+            template = EXTERIOR_PROMPTS[room_key]
+            prompt = template.format(
+                design_style=design_style or "Stylish",
+                color_tone=color_tone or "neutral",
+            )
+        else:
+            prompt = FALLBACK_PROMPT.format(
+                design_style=design_style or "Stylish",
+                room_type=room_type or "interior",
+                color_tone=color_tone or "neutral",
+            )
 
-        # 2) If no custom prompt, try to pick a detailed template:
-        if prompt is None:
-            # check interior room prompts first
-            if room_key in ROOM_PROMPTS:
-                template = ROOM_PROMPTS[room_key]
-                prompt = template.format(design_style=design_style or "Stylish", color_tone=color_tone or "neutral")
-            # check exterior prompts
-            elif room_key in EXTERIOR_PROMPTS:
-                template = EXTERIOR_PROMPTS[room_key]
-                prompt = template.format(design_style=design_style or "Stylish", color_tone=color_tone or "neutral")
-            else:
-                # fallback hybrid (C)
-                prompt = FALLBACK_PROMPT.format(
-                    design_style=design_style or "Stylish",
-                    room_type=room_type or "interior",
-                    color_tone=color_tone or "neutral"
-                )
-
-        # Make sure prompt is a string
         if not isinstance(prompt, str) or not prompt.strip():
             prompt = FALLBACK_PROMPT.format(
                 design_style=design_style or "Stylish",
                 room_type=room_type or "space",
-                color_tone=color_tone or "neutral"
+                color_tone=color_tone or "neutral",
             )
 
-        # WINDOW-aware modification
         if has_window:
             prompt = prompt + ", window in place"
-        else:
-            # add to negative prompt instead of prompt
-            pass
 
         negative = (
             "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective, "
@@ -404,34 +405,36 @@ def handler(event):
         if not has_window:
             negative += ", window, windowpane, curtains"
 
-        # Detect if input is a floor plan (custom_prompt contains plan keywords)
-        is_floor_plan = custom_prompt and any(
-            kw in (custom_prompt or "").lower()
+        is_floor_plan = bool(custom_prompt) and any(
+            kw in custom_prompt.lower()
             for kw in ["floor plan", "architectural", "converted from"]
         )
 
-        # Floor plans need higher ControlNet strength and more steps for wall fidelity
         if is_floor_plan:
-            cn_scale = [0.65, 0.2]
-            steps = 36
-            guidance = 8.5
+            cn_scale = [0.55, 0.15]
+            steps = 30
+            guidance = 8.0
         else:
             cn_scale = [0.5, 0.1]
             steps = 30
             guidance = 7.5
 
-        # --- Generate ---
-        result = pipe(
-            prompt=prompt,
-            image=[depth_img, seg_img],
-            num_inference_steps=steps,
-            guidance_scale=guidance,
-            controlnet_conditioning_scale=cn_scale,
-            negative_prompt=negative,
-            generator=torch.manual_seed(42)
-        )
+        # --- Generate (with VRAM safety) ---
+        with torch.inference_mode():
+            result = pipe(
+                prompt=prompt,
+                image=[depth_img, seg_img],
+                num_inference_steps=steps,
+                guidance_scale=guidance,
+                controlnet_conditioning_scale=cn_scale,
+                negative_prompt=negative,
+                generator=torch.manual_seed(42),
+            )
 
         out = result.images[0]
+
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
         buf = io.BytesIO()
         out.save(buf, format="PNG")
@@ -442,10 +445,12 @@ def handler(event):
             "generatedImage": img_str,
             "prompt": prompt,
             "negative_prompt": negative,
-            "has_window": has_window
+            "has_window": has_window,
         }
 
     except Exception as e:
+        if device == "cuda":
+            torch.cuda.empty_cache()
         return {"error": str(e)}
 
 
