@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
+import COLORS from "../../constants/colors";
 
 // const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : "ca-app-pub-4470538534931449/9120930286"; // real unit ID
   const AD_UNIT_ID = "ca-app-pub-4470538534931449/9120930286"; // real unit ID
@@ -28,16 +29,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginVertical: 12,
     backgroundColor: "#fff",
-    borderRadius: 10,
-    paddingVertical: 8,
-    elevation: 2,
+    borderRadius: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    elevation: 3,
     shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
   },
   label: {
     fontSize: 12,
-    color: "#777",
-    marginBottom: 4,
+    color: COLORS.primaryDark,
+    marginBottom: 8,
+    fontWeight: "700",
+    backgroundColor: "rgba(127,160,136,0.10)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
 });

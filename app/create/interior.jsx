@@ -11,9 +11,11 @@ import {
   ActivityIndicator,
   Modal,
   TouchableWithoutFeedback,
-  Dimensions
+  Dimensions,
+  Animated, 
+  Easing
 } from 'react-native';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import styles from '../../assets/styles/create/create.styles';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +31,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RewardedAd, RewardedInterstitialAd,RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CreateBannerAd from "../../components/create/CreateBannerAd";
+import { useFocusEffect } from 'expo-router';
+
+const INTERIOR_EXCLUDED_ROOM_TYPES = ['Full Apartment'];
 
 const { width, height } = Dimensions.get("window");
 
@@ -65,6 +70,23 @@ export default function Interior() {
   const [adMessage, setAdMessage] = useState('');
   const [isAdLoaded, setIsAdLoaded] = useState(false);
   const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
+  const [useCustomPrompt, setUseCustomPrompt] = useState(false);
+
+  const animatedHeight = useRef(new Animated.Value(0)).current;
+
+  const toggleCustomPrompt = () => {
+    const toValue = useCustomPrompt ? 0 : 1;
+
+    setUseCustomPrompt(!useCustomPrompt);
+
+    Animated.timing(animatedHeight, {
+      toValue,
+      duration: 280,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false,
+    }).start();
+  };
+
   
   // Setup rewarded ad logic
   useEffect(() => {
@@ -131,38 +153,41 @@ export default function Interior() {
   };
   
   // Fetch user status
-  useEffect(() => {
-    const fetchUserStatus = async () => {
-      if (!token) return;
+  useFocusEffect(
+    useCallback(() => {
+      const fetchUserStatus = async () => {
+        if (!token) return;
 
-      try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
+        try {
+          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
 
-        if (!res.ok) {
-          console.error('Failed to fetch user status:', res.status);
-          return;
+          if (!res.ok) {
+            console.error('Failed to fetch user status:', res.status);
+            return;
+          }
+
+          const data = await res.json();
+          const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
+
+          setIsSubscribed(isSubscribed || false);
+          setFreeDesignsUsed(freeDesignsUsed || 0);
+          setIsPremium(isPremium || false);
+          setIsManualDisabled(manualDisabled || false);
+          setCoins(Number(adCoins || 0));
+        } catch (err) {
+          console.error('Failed to fetch user status:', err);
         }
+      };
 
-        const data = await res.json();
-        const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
-
-        setIsSubscribed(isSubscribed || false);
-        setFreeDesignsUsed(freeDesignsUsed || 0);
-        setIsPremium(isPremium || false);
-        setIsManualDisabled(manualDisabled || false);
-        setCoins(Number(adCoins || 0));
-      } catch (err) {
-        console.error('Failed to fetch user status:', err);
-      }
-    };
-
-    fetchUserStatus();
-  }, [token]);
+      // Refresh user on screen focus
+      fetchUserStatus();
+    }, [token])
+  );
 
   // Pick image
   const pickImage = async () => {
@@ -330,6 +355,7 @@ export default function Interior() {
             roomType,
             designStyle,
             colorTone,
+            customPrompt: prompt.trim(),
             createdAt: new Date().toISOString(),
           },
         });
@@ -371,10 +397,9 @@ export default function Interior() {
 
       <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
         <View>
-          <View style={styles.header}>
+          <View style={styles.titleHeader}>
             <Text style={styles.title}>LIVINAI</Text>
 
-            {/* Coins Balance */}
             {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
               <View style={styles.coinsContainer}>
                 <Text style={styles.coinsText}>{coins} Coins</Text>
@@ -400,13 +425,17 @@ export default function Interior() {
                 )}
               </View>
               <TouchableOpacity
-                style={[styles.imagePickerModern, image && styles.imagePickerSelected]}
+                style={[
+                  styles.imagePickerPlan,
+                  !image && styles.imagePickerEmpty,
+                  image && styles.imagePickerSelected,
+                ]}
                 onPress={() => setShowImageSourceModal(true)}
                 activeOpacity={0.9}
               >
                 {image ? (
                   <>
-                    <Image source={{ uri: image }} style={styles.previewImageModern} />
+                    <Image source={{ uri: image }} style={[styles.previewImageModern, styles.previewImagePlan]} />
                     <TouchableOpacity
                       style={styles.removeButtonModern}
                       onPress={() => setImage(null)}
@@ -416,16 +445,23 @@ export default function Interior() {
                     </TouchableOpacity>
                   </>
                 ) : (
-                  <View style={styles.placeholderContainerModern}>
-                    <Ionicons name="cloud-upload-outline" size={moderateScale(38)} color={COLORS.textSecondary} />
-                    <Text style={styles.placeholderTextModern}>Tap to upload an image</Text>
+                  <View style={styles.placeholderContainerPlan}>
+                    <View style={styles.uploadIconBadge}>
+                      <Ionicons name="cloud-upload-outline" size={moderateScale(28)} color={COLORS.primaryDark} />
+                    </View>
+                    <Text style={styles.uploadTitle}>Upload your photo</Text>
+                    <Text style={styles.uploadCaption}>JPG or PNG · camera or gallery</Text>
                   </View>
                 )}
               </TouchableOpacity>
             </View>
 
             {/* Room Type */}
-            <RoomTypeSelector roomType={roomType} setRoomType={setRoomType} />
+            <RoomTypeSelector
+              roomType={roomType}
+              setRoomType={setRoomType}
+              excludeRoomTypes={INTERIOR_EXCLUDED_ROOM_TYPES}
+            />
 
             {/* Design Style */}
             <DesignStyleSelector designStyle={designStyle} setDesignStyle={setDesignStyle} />
@@ -452,6 +488,70 @@ export default function Interior() {
                 />
               </View>
             </View> */}
+           {/* OR Separator */}
+            {/* <View style={styles.orSeparatorContainer}>
+              <View style={styles.orLine} />
+              <Text style={styles.orText}>OR</Text>
+              <View style={styles.orLine} />
+            </View> */}
+
+            {/* Toggle Card */}
+            {/* <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={toggleCustomPrompt}
+              style={[
+                styles.customToggleCard,
+                useCustomPrompt && styles.customToggleCardActive
+              ]}
+            >
+              <Ionicons
+                name={useCustomPrompt ? "checkbox-outline" : "square-outline"}
+                size={22}
+                color={useCustomPrompt ? COLORS.primaryDark : COLORS.textSecondary}
+                style={{ marginRight: 14 }}
+              />
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.customToggleTitle}>Write My Own Vision</Text>
+                <Text style={styles.customToggleSubtitle}>
+                  Describe the design exactly how you imagine it
+                </Text>
+              </View>
+            </TouchableOpacity> */}
+
+            {/* Smooth Expandable Area */}
+            {/* <Animated.View
+              style={[
+                styles.customAnimatedWrapper,
+                {
+                  height: animatedHeight.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 240], // height of expanded area
+                  }),
+                  opacity: animatedHeight,
+                  marginTop: animatedHeight.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 12],
+                  }),
+                },
+              ]}
+            >
+              {useCustomPrompt && (
+                <View style={styles.customPromptWrapper}>
+                  <Text style={styles.customPromptLabel}>Your Vision</Text>
+
+                  <TextInput
+                    style={styles.customPromptInput}
+                    placeholder="Example: modern living room, interior design, warm soft ambient lighting, vanilla latte palette, professional interior designer style, photorealistic 8k, high detail, natural shadows, includes sofa set, coffee table, area rug, wall art, TV cabinet, plants, bookshelf, accent lighting, cohesive furniture arrangement matching room layout"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={prompt}
+                    onChangeText={setPrompt}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                </View>
+              )}
+            </Animated.View> */}
 
             {/* Submit Button */}
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
@@ -493,45 +593,46 @@ export default function Interior() {
         animationType="slide"
         onRequestClose={() => setShowImageSourceModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>Upload Photo</Text>
-                <Text style={styles.modalSubtitle}>Choose an option</Text>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <SafeAreaView edges={['bottom']} style={styles.modalSheetSafe}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Upload Photo</Text>
+              <Text style={styles.modalSubtitle}>Choose an option</Text>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    takePhoto();
-                  }}
-                >
-                  <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Take Photo</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  takePhoto();
+                }}
+              >
+                <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Take Photo</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    pickImage();
-                  }}
-                >
-                  <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Choose from Gallery</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  pickImage();
+                }}
+              >
+                <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Choose from Gallery</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalCancelButton]}
-                  onPress={() => setShowImageSourceModal(false)}
-                >
-                  <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowImageSourceModal(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Fullscreen Loading Modal */}
@@ -539,7 +640,7 @@ export default function Interior() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Designing your dream room...</Text>
+            <Text style={styles.loadingText}>Designing your dream space...</Text>
             <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
           </View>
         </View>

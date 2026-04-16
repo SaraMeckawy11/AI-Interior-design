@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
   },
   iconLabelSelected: {
     fontWeight: "bold",
-    color: COLORS.secondary,
+    color: COLORS.primaryDark,
   },
 
   colorSwatch: {
@@ -74,12 +74,16 @@ const styles = StyleSheet.create({
     height: moderateScale(35),
     borderRadius: moderateScale(20),
     borderWidth: moderateScale(1),
-    borderColor: "#ccc",
+    borderColor: COLORS.border,
     marginBottom: 4,
   },
   colorToneSelected: {
     borderWidth: 2,
-    borderColor: COLORS.secondary,
+    borderColor: COLORS.primaryDark,
+    shadowColor: COLORS.primaryDark,
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 3,
   },
 
   addSwatch: {
@@ -90,7 +94,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: moderateScale(1),
-    borderColor: "#D1D5DB",
+    borderColor: COLORS.border,
     marginBottom: 4,
   },
 
@@ -220,6 +224,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 8,
     backgroundColor: COLORS.primaryDark,
+    shadowColor: COLORS.primaryDark,
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
   },
 
   deleteText: {
@@ -229,6 +237,25 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: COLORS.textSecondary,
     fontWeight: "500",
+  },
+
+  doneButton: {
+    marginTop: verticalScale(12),
+    alignSelf: "center",
+    backgroundColor: COLORS.primaryDark,
+    borderRadius: moderateScale(16),
+    paddingVertical: verticalScale(10),
+    paddingHorizontal: moderateScale(24),
+    shadowColor: COLORS.primaryDark,
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+
+  doneButtonText: {
+    color: COLORS.white,
+    fontWeight: "600",
+    fontSize: moderateScale(14),
   },
 
 });

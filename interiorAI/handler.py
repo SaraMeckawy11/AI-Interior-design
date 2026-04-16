@@ -392,17 +392,41 @@ def handler(event):
             # add to negative prompt instead of prompt
             pass
 
-        negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+        negative = (
+            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective, "
+            "changing room structure, moving walls, deformed architecture, warped walls, "
+            "merged rooms, collapsed walls, wrong room proportions, broken geometry, "
+            "cartoon, painting, sketch, unrealistic, oversaturated, "
+            "empty room, unfurnished, bare walls, missing furniture, sparse furniture, "
+            "text, watermark, signature, logo, frame border, "
+            "bad anatomy, extra limbs, disfigured, poorly drawn"
+        )
         if not has_window:
-            negative += ", no window"
+            negative += ", window, windowpane, curtains"
+
+        # Detect if input is a floor plan (custom_prompt contains plan keywords)
+        is_floor_plan = custom_prompt and any(
+            kw in (custom_prompt or "").lower()
+            for kw in ["floor plan", "architectural", "converted from"]
+        )
+
+        # Floor plans need higher ControlNet strength and more steps for wall fidelity
+        if is_floor_plan:
+            cn_scale = [0.65, 0.2]
+            steps = 36
+            guidance = 8.5
+        else:
+            cn_scale = [0.5, 0.1]
+            steps = 30
+            guidance = 7.5
 
         # --- Generate ---
         result = pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
-            num_inference_steps=30,
-            guidance_scale=7.5,
-            controlnet_conditioning_scale=[0.5, 0.1],
+            num_inference_steps=steps,
+            guidance_scale=guidance,
+            controlnet_conditioning_scale=cn_scale,
             negative_prompt=negative,
             generator=torch.manual_seed(42)
         )

@@ -20,6 +20,9 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(6),
     paddingHorizontal: moderateScale(2),
   },
+  labelRowSingle: {
+    justifyContent: 'flex-start',
+  },
   label: {
     fontSize: moderateScale(13),
     fontWeight: '500',
@@ -31,46 +34,67 @@ const styles = StyleSheet.create({
   },
 
   iconGrid: {
-    flex:1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-evenly',
-    gap:moderateScale(2),
-    margin:8,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    gap: moderateScale(6),
+    marginHorizontal: moderateScale(0),
+    marginTop: verticalScale(4),
+    marginBottom: verticalScale(4),
+  },
+  iconGridExpanded: {
+    justifyContent: 'flex-start',
+    gap: moderateScale(6),
   },
 
   iconButton: {
     alignItems: 'center',
-    width: moderateScale(72),
+    width: moderateScale(78),
   },
 
 iconCircle: {
   width: moderateScale(60),
   height: moderateScale(30),
   borderRadius: moderateScale(15),
-  backgroundColor:COLORS.roomCard,
+  backgroundColor: "#fff",
   justifyContent: 'center',
   alignItems: 'center',
   borderWidth: moderateScale(2),
-  borderColor: 'transparent',
+  borderColor: "rgba(0,0,0,0.06)",
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.04,
+  shadowRadius: 8,
+  elevation: 1,
 },
 
 iconCircleSelected: {
-  borderColor: COLORS.secondary, // Only border highlights
+  borderColor: COLORS.primaryDark,
+  backgroundColor: "rgba(127,160,136,0.18)",
+  shadowColor: COLORS.primaryDark,
+  shadowOpacity: 0.25,
+  shadowRadius: 14,
+  elevation: 3,
 },
 
 iconLabel: {
-  fontSize:  moderateScale(11.5),
+  fontSize: moderateScale(11),
   color: COLORS.textPrimary,
-  marginTop: verticalScale(6),
+  marginTop: verticalScale(4),
   textAlign: 'center',
-  width:moderateScale(70),
-  marginBottom:verticalScale(6)
+  width: moderateScale(76),
+  marginBottom: verticalScale(4),
 },
 iconLabelSelected: {
   fontWeight: 'bold',
-  color: COLORS.secondary,
+  color: COLORS.primaryDark,
+},
+
+// Applied for custom-added items (keeps the selected ring style when selected)
+customRoomBackground: {
+  backgroundColor: "rgba(127,160,136,0.10)",
+  // no border changes here to avoid overriding the selected state
 },
 
 manualInput: {

@@ -51,7 +51,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     margin: moderateScale(2),
     borderWidth:1,
-    borderColor: COLORS.border  
+    borderColor: "rgba(0,0,0,0.06)",
+    backgroundColor: "rgba(127,160,136,0.06)"
   },
   iconImageWrapper: {
     width: moderateScale(92),
@@ -62,10 +63,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: moderateScale(2),
     //marginTop:8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 1,
   },
   iconImageSelected: {
     borderWidth: moderateScale(2),
-    borderColor: COLORS.secondary,
+    borderColor: COLORS.primaryDark,
+    backgroundColor: "rgba(127,160,136,0.14)",
+    shadowColor: COLORS.primaryDark,
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 3,
   },
   iconImage: {
     width: moderateScale(92),
@@ -81,7 +95,7 @@ const styles = StyleSheet.create({
   },
   iconLabelSelected: {
     fontWeight: 'bold',
-    color: COLORS.secondary,
+    color: COLORS.primaryDark,
   },
   
   manualCard: {
@@ -120,7 +134,7 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(16),
   },
   customStyleBackground: {
-    backgroundColor: COLORS.roomCard, // Light blue custom style background
+    backgroundColor: "rgba(127,160,136,0.08)", // subtle custom hint
   },
   overlay: {
     flex: 1,

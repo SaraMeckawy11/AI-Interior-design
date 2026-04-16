@@ -1,50 +1,72 @@
-# Welcome to your Expo app 👋
+# Livinai - AI Interior & Exterior Design App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Livinai is an innovative AI-powered mobile application designed to transform and reimagine interior and exterior spaces. Users can upload photos of their rooms or buildings, select from various design styles, and generate stunning new AI renditions of their spaces.
 
-## Get started
+## 🚀 Features
 
-1. Install dependencies
+- **AI Room Generation:** Redesign interiors (bedrooms, living rooms, kitchens, etc.) and exteriors with different architectural styles (modern, minimalist, industrial, etc.).
+- **Smart Image Processing:** Advanced AI models seamlessly apply requested color tones and styles to the user's provided baseline images.
+- **Virtual Coins System:** A flexible monetization system where users consume virtual coins to generate designs.
+- **Rewarded Content:** Integration with Google AdMob allows free users to earn coins by watching rewarded video ads.
+- **Premium Upgrades:** In-app purchases via RevenueCat allow users to subscribe or purchase coin bundles.
+- **User Collections:** View and manage a personal gallery of all previously generated designs.
+- **Authentication:** Secure user accounts and progress syncing.
+
+## 🛠 Tech Stack
+
+### Mobile Frontend
+
+- **Framework:** React Native with Expo (File-based routing using `expo-router`)
+- **State Management:** Zustand (`authStore.js`)
+- **Monetization:** `react-native-purchases` (RevenueCat), `react-native-google-mobile-ads` (AdMob)
+- **UI & Styling:** Custom CSS-in-JS pattern
+
+### Backend Services
+
+- **Main API (Node.js):** Handles authentication, subscription syncing, coin balance updates, and saving generated designs to collections.
+- **AI Processing (Python):** Python-based microservices (`Interior/app.py`, `interiorAI/handler.py`) handle image diffusion model pipelines to process image generation requests.
+
+## 📦 Project Structure
+
+- `app/`: Expo Router application screens (Tabs, Onboarding, Authentication, Profile, Create).
+- `assets/`: Fonts, static images, SVG icons, and stylesheets.
+- `backend/`: Node.js Express server handling core app business logic.
+- `components/`: Reusable UI components (Auth modals, Image selectors, Loaders).
+- `context/`: React Context providers (e.g., Theme setting).
+- `Interior/` & `interiorAI/`: Python Dockerized services wrapping the AI image generation capabilities.
+
+## 🏁 Getting Started
+
+### Prerequisites
+
+- Node.js (v18+)
+- Expo CLI
+- Python (If running the backend AI services locally)
+- A connected physical device or iOS Simulator / Android Emulator.
+
+### Installation
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone <repository-url>
+   cd Livinai
+   ```
+
+2. **Install frontend dependencies:**
 
    ```bash
    npm install
    ```
 
-2. Start the app
+3. **Set up environment variables:**
+   Create a `.env` file in the root based on your credentials (`EXPO_PUBLIC_SERVER_URI`, AdMob IDs, RevenueCat API Key).
 
+4. **Start the Expo development server:**
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+## 📝 License
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+This project is proprietary and confidential. Ensure you have the proper credentials to run the backend and ad services.

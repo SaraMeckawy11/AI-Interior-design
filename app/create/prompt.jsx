@@ -29,6 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RewardedAd, RewardedInterstitialAd,RewardedAdEventType, TestIds } from 'react-native-google-mobile-ads';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CreateBannerAd from "../../components/create/CreateBannerAd";
+import { useFocusEffect } from 'expo-router';
 
 const { width, height } = Dimensions.get("window");
 
@@ -130,39 +131,42 @@ export default function Prompt() {
     rewardedAd.load();
   };
   
-  // Fetch user status
-  useEffect(() => {
-    const fetchUserStatus = async () => {
-      if (!token) return;
-
-      try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!res.ok) {
-          console.error('Failed to fetch user status:', res.status);
-          return;
-        }
-
-        const data = await res.json();
-        const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
-
-        setIsSubscribed(isSubscribed || false);
-        setFreeDesignsUsed(freeDesignsUsed || 0);
-        setIsPremium(isPremium || false);
-        setIsManualDisabled(manualDisabled || false);
-        setCoins(Number(adCoins || 0));
-      } catch (err) {
-        console.error('Failed to fetch user status:', err);
-      }
-    };
-
-    fetchUserStatus();
-  }, [token]);
+ // Fetch user status
+   useFocusEffect(
+     useCallback(() => {
+       const fetchUserStatus = async () => {
+         if (!token) return;
+ 
+         try {
+           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+             headers: {
+               Authorization: `Bearer ${token}`,
+               'Content-Type': 'application/json',
+             },
+           });
+ 
+           if (!res.ok) {
+             console.error('Failed to fetch user status:', res.status);
+             return;
+           }
+ 
+           const data = await res.json();
+           const { isSubscribed, freeDesignsUsed, isPremium, manualDisabled, adCoins } = data.user || {};
+ 
+           setIsSubscribed(isSubscribed || false);
+           setFreeDesignsUsed(freeDesignsUsed || 0);
+           setIsPremium(isPremium || false);
+           setIsManualDisabled(manualDisabled || false);
+           setCoins(Number(adCoins || 0));
+         } catch (err) {
+           console.error('Failed to fetch user status:', err);
+         }
+       };
+ 
+       // Refresh user on screen focus
+       fetchUserStatus();
+     }, [token])
+   );
 
   // Pick image
   const pickImage = async () => {
@@ -336,7 +340,7 @@ export default function Prompt() {
         params: {
             generatedImage: imageUri,
             image: image || null,
-            prompt: prompt.trim(),
+            customPrompt: prompt.trim(),
             createdAt: new Date().toISOString(),
         },
         });
@@ -378,10 +382,9 @@ export default function Prompt() {
 
       <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
         <View>
-          <View style={styles.header}>
+          <View style={styles.titleHeader}>
             <Text style={styles.title}>LIVINAI</Text>
 
-            {/* Coins Balance */}
             {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
               <View style={styles.coinsContainer}>
                 <Text style={styles.coinsText}>{coins} Coins</Text>
@@ -491,45 +494,46 @@ export default function Prompt() {
         animationType="slide"
         onRequestClose={() => setShowImageSourceModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>Upload Photo</Text>
-                <Text style={styles.modalSubtitle}>Choose an option</Text>
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={() => setShowImageSourceModal(false)}>
+            <View style={styles.modalBackdrop} />
+          </TouchableWithoutFeedback>
+          <SafeAreaView edges={['bottom']} style={styles.modalSheetSafe}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Upload Photo</Text>
+              <Text style={styles.modalSubtitle}>Choose an option</Text>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    takePhoto();
-                  }}
-                >
-                  <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Take Photo</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  takePhoto();
+                }}
+              >
+                <Ionicons name="camera-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Take Photo</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={() => {
-                    setShowImageSourceModal(false);
-                    pickImage();
-                  }}
-                >
-                  <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
-                  <Text style={styles.modalButtonText}>Choose from Gallery</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowImageSourceModal(false);
+                  pickImage();
+                }}
+              >
+                <Ionicons name="images-outline" size={20} color={COLORS.white} style={styles.modalIcon} />
+                <Text style={styles.modalButtonText}>Choose from Gallery</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalCancelButton]}
-                  onPress={() => setShowImageSourceModal(false)}
-                >
-                  <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowImageSourceModal(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: COLORS.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </View>
       </Modal>
 
       {/* Fullscreen Loading Modal */}
@@ -537,7 +541,7 @@ export default function Prompt() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Designing your dream room...</Text>
+            <Text style={styles.loadingText}>Designing your dream space...</Text>
             <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
           </View>
         </View>
