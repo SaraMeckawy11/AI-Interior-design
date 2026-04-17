@@ -2,7 +2,7 @@
 # Includes torch, torchvision, torchaudio, xformers, and a full CUDA dev stack.
 # Switching from python:3.9-slim eliminates the multi-GB torch pip install that
 # was inflating cold-start by slowing down the entire init sequence.
-FROM runpod/pytorch:2.2.2-py3.10-cuda12.1.1-devel-ubuntu22.04
+FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
 
 # System dependencies for OpenCV
 RUN apt-get update && apt-get install -y \
