@@ -226,7 +226,7 @@ WINDOW_KEYWORDS = ["window", "windowpane"]
 
 @app.cls(
     image=image,
-    gpu="T4",  # 16 GB, cheapest suitable GPU (~$0.59/hr). Upgrade to "A10G" for ~2x speed.
+    gpu="L40S",  # 48 GB, ~$1.33/hr flex, ~6s/image -> ~$0.0022/image (cheapest per-image).
     volumes={"/cache": hf_cache_vol},
     secrets=[api_key_secret],
     scaledown_window=60,        # keep container warm 60s after last request

@@ -6,7 +6,7 @@ pipeline, hosted on [Modal](https://modal.com).
 - **Modal workspace**: `sara123meckawy`
 - **App name**: `livinai-interior`
 - **Entry file**: [`app.py`](./app.py)
-- **Default GPU**: `T4` (16 GB, ~$0.59/hr flex, ~$0.40/hr active)
+- **Default GPU**: `L40S` (48 GB, ~$1.33/hr flex) — ~6 s/image, ~$0.0022/image
 - **Cold start**: ~5 s after first warm (weights live on a persistent Modal Volume)
 
 ---
@@ -144,9 +144,10 @@ Edit the `@app.cls(...)` decorator in `app.py`:
 
 | Goal | Setting |
 |---|---|
-| Cheapest (pay only when used) | `min_containers=0`, `gpu="T4"` |
-| Zero cold-start | `min_containers=1` (~$430/mo pinned T4) |
-| Faster generation (~2×) | `gpu="A10G"` (~$1.10/hr flex) |
+| Cheapest (pay only when used) | `min_containers=0`, `gpu="T4"` (~$0.59/hr, ~20s/image) |
+| Balanced (current default) | `min_containers=0`, `gpu="A10G"` (~$1.10/hr, ~10s/image) |
+| Zero cold-start | `min_containers=1` |
+| Fastest cheap tier | `gpu="L40S"` (~$1.33/hr, ~6s/image) |
 | Higher concurrency | `max_containers=6` (or more) |
 | Keep containers alive longer between requests | `scaledown_window=300` |
 
