@@ -1,4 +1,12 @@
 # runpod_server_match_local_fp16.py
+import os
+# Force HuggingFace into fully-offline mode before any HF imports.
+# Eliminates HTTP version-check calls on every from_pretrained(), saving
+# 30-60 s of network latency that was adding to worker initialisation time.
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
 import runpod
 import base64
 import io
@@ -15,6 +23,12 @@ from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProc
 device = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16
 
+# Enable cuDNN auto-tuner: finds the fastest convolution algorithms for the
+# fixed input sizes we use. One-time cost at first inference, speeds up all
+# subsequent requests significantly.
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+
 # ---------------------------------------------------------------------------
 # CACHE
 # ---------------------------------------------------------------------------
@@ -23,6 +37,7 @@ CACHE_DIR = "/home/user/.cache/huggingface"
 # ---------------------------------------------------------------------------
 # LOAD MODELS — ALL FP16
 # ---------------------------------------------------------------------------
+print("[INIT] Loading models...")
 
 # ---- Depth FP16 ----
 dpt_processor = DPTImageProcessor.from_pretrained(
@@ -70,6 +85,39 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 ).to(device)
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+
+# ---- Memory & attention optimizations ----
+# xformers: memory-efficient attention — reduces VRAM usage and speeds up
+# attention computation. Falls back silently if not available.
+try:
+    pipe.enable_xformers_memory_efficient_attention()
+    print("[INIT] xformers memory-efficient attention enabled")
+except Exception:
+    print("[INIT] xformers not available, using default attention")
+
+# VAE slicing: processes the VAE decode in slices to reduce peak VRAM.
+pipe.enable_vae_slicing()
+
+# ---------------------------------------------------------------------------
+# WARMUP — compile CUDA kernels before the worker registers as idle.
+# Without this, the FIRST real request pays the CUDA JIT cost (~30-60 s).
+# With this, kernels are compiled during init so the worker is truly ready.
+# Uses the actual output resolution so kernel shapes match real requests.
+# ---------------------------------------------------------------------------
+print("[INIT] Running CUDA warmup inference...")
+_dummy_img = Image.fromarray(np.zeros((768, 1024, 3), dtype=np.uint8))
+with torch.no_grad():
+    pipe(
+        prompt="warmup",
+        image=[_dummy_img, _dummy_img],
+        num_inference_steps=1,
+        height=768,
+        width=1024,
+        guidance_scale=1.0,
+    )
+del _dummy_img
+torch.cuda.empty_cache()
+print("[INIT] Warmup complete — worker is ready")
 
 # ---------------------------------------------------------------------------
 # PROMPT TEMPLATES
