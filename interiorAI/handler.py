@@ -1,4 +1,3 @@
-# runpod_server_match_local_fp16.py
 import runpod
 import base64
 import io
@@ -9,98 +8,54 @@ from PIL import Image
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
 from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProcessor, UperNetForSemanticSegmentation
 
-# ---------------------------------------------------------------------------
-# DEVICE / FP16
-# ---------------------------------------------------------------------------
-device = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16
+# --- Device setup ---
+use_cuda = torch.cuda.is_available()
+dtype = torch.float16 if use_cuda else torch.float32
+device = "cuda" if use_cuda else "cpu"
 
-# Enable cuDNN auto-tuner: finds the fastest convolution algorithms for the
-# fixed input sizes we use. One-time cost at first inference, speeds up all
-# subsequent requests significantly.
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-
-# ---------------------------------------------------------------------------
-# CACHE
-# ---------------------------------------------------------------------------
 CACHE_DIR = "/home/user/.cache/huggingface"
 
-# ---------------------------------------------------------------------------
-# LOAD MODELS — ALL FP16
-# ---------------------------------------------------------------------------
-print("[INIT] Loading models...")
-
-# ---- Depth FP16 ----
+# --- Load models once (cold start) ---
 dpt_processor = DPTImageProcessor.from_pretrained(
     "Intel/dpt-large",
-    cache_dir=CACHE_DIR
+    cache_dir=CACHE_DIR,
 )
 dpt_model = DPTForDepthEstimation.from_pretrained(
     "Intel/dpt-large",
-    torch_dtype=DTYPE,
-    cache_dir=CACHE_DIR
+    torch_dtype=dtype,
+    cache_dir=CACHE_DIR,
 ).to(device)
-dpt_model.eval()
 
-# ---- Segmentation FP16 ----
 seg_processor = AutoImageProcessor.from_pretrained(
     "openmmlab/upernet-convnext-small",
-    cache_dir=CACHE_DIR
+    cache_dir=CACHE_DIR,
 )
 seg_model = UperNetForSemanticSegmentation.from_pretrained(
     "openmmlab/upernet-convnext-small",
-    torch_dtype=DTYPE,
-    cache_dir=CACHE_DIR
+    torch_dtype=dtype,
+    cache_dir=CACHE_DIR,
 ).to(device)
-seg_model.eval()
 
-# ---- ControlNets FP16 ----
 depth_controlnet = ControlNetModel.from_pretrained(
     "lllyasviel/sd-controlnet-depth",
-    torch_dtype=DTYPE,
-    cache_dir=CACHE_DIR
+    torch_dtype=dtype,
+    cache_dir=CACHE_DIR,
 )
 seg_controlnet = ControlNetModel.from_pretrained(
     "lllyasviel/control_v11p_sd15_seg",
-    torch_dtype=DTYPE,
-    cache_dir=CACHE_DIR
+    torch_dtype=dtype,
+    cache_dir=CACHE_DIR,
 )
 
-# ---- Stable Diffusion Pipeline FP16 ----
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
     "Lykon/dreamshaper-8",
     controlnet=[depth_controlnet, seg_controlnet],
-    torch_dtype=DTYPE,
+    torch_dtype=dtype,
     safety_checker=None,
-    cache_dir=CACHE_DIR
+    cache_dir=CACHE_DIR,
 ).to(device)
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-
-# VAE slicing: reduces peak VRAM during decode.
-pipe.enable_vae_slicing()
-
-# ---------------------------------------------------------------------------
-# WARMUP — compile CUDA kernels before the worker registers as idle.
-# Without this, the FIRST real request pays the CUDA JIT cost (~30-60 s).
-# With this, kernels are compiled during init so the worker is truly ready.
-# Uses the actual output resolution so kernel shapes match real requests.
-# ---------------------------------------------------------------------------
-print("[INIT] Running CUDA warmup inference...")
-_dummy_img = Image.fromarray(np.zeros((768, 1024, 3), dtype=np.uint8))
-with torch.no_grad():
-    pipe(
-        prompt="warmup",
-        image=[_dummy_img, _dummy_img],
-        num_inference_steps=1,
-        height=768,
-        width=1024,
-        guidance_scale=1.0,
-    )
-del _dummy_img
-torch.cuda.empty_cache()
-print("[INIT] Warmup complete — worker is ready")
 
 # ---------------------------------------------------------------------------
 # PROMPT TEMPLATES
@@ -292,7 +247,7 @@ def get_depth_image(image_bgr, size_wh):
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
 
     inputs = dpt_processor(images=Image.fromarray(rgb), return_tensors="pt").to(device)
-    inputs = {k: v.to(dtype=DTYPE) for k, v in inputs.items()}
+    inputs = {k: v.to(dtype=dtype) for k, v in inputs.items()}
 
     with torch.no_grad():
         depth = dpt_model(**inputs).predicted_depth
@@ -320,7 +275,7 @@ def get_segmentation_map(image_bgr):
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
 
     inputs = seg_processor(images=Image.fromarray(rgb), return_tensors="pt").to(device)
-    inputs = {k: v.to(dtype=DTYPE) for k, v in inputs.items()}
+    inputs = {k: v.to(dtype=dtype) for k, v in inputs.items()}
 
     with torch.no_grad():
         outputs = seg_model(**inputs)
