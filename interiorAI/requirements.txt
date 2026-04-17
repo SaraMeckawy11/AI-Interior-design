@@ -3,6 +3,6 @@ opencv-python
 diffusers[torch]
 transformers
 accelerate
-runpod
+runpod==1.6.2
 Pillow
 numpy
