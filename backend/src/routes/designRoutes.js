@@ -14,9 +14,6 @@ async function getImageBase64FromUrl(url) {
   return buffer.toString("base64");
 }
 
-// Helper to sleep
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 router.post("/", isAuthenticated, async (req, res) => {
   try {
     const { roomType, designStyle, colorTone, customPrompt, image } = req.body;
@@ -68,67 +65,52 @@ router.post("/", isAuthenticated, async (req, res) => {
     const imageBase64 = image.startsWith("data:image") ? image.split(",")[1] : image;
     console.log("Prepared base64 for AI API, length:", imageBase64.length);
 
-    // Submit job to RunPod
+    // Submit job to Modal (synchronous - no polling needed)
     const payload = {
-      input: {
-        image: imageBase64,
-        room_type: roomType,
-        design_style: designStyle,
-        color_tone: colorTone,
-        custom_prompt: customPrompt || "",
-      },
+      image: imageBase64,
+      room_type: roomType,
+      design_style: designStyle,
+      color_tone: colorTone,
+      custom_prompt: customPrompt || "",
     };
 
-    console.log("Submitting job to RunPod:", { payload });
+    console.log("Submitting job to Modal endpoint");
 
-    const jobResponse = await axios.post(
-      "https://api.runpod.ai/v2/9x2kmfa8z6483c/run",
-      payload,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
-        },
-      }
-    );
-
-    const jobId = jobResponse.data.id;
-    console.log("RunPod job submitted:", jobId, "initial status:", jobResponse.data.status);
-
-    // Poll RunPod job until completed
     let generatedImageBase64 = null;
-    const maxRetries = 30;
-    let retries = 0;
-
-    while (retries < maxRetries) {
-      await sleep(2000); // wait 2 seconds
-
-      const statusResp = await axios.get(
-        `https://api.runpod.ai/v2/9x2kmfa8z6483c/status/${jobId}`,
+    try {
+      const modalResp = await axios.post(
+        process.env.MODAL_ENDPOINT_URL,
+        payload,
         {
           headers: {
-            "Authorization": `Bearer ${process.env.RUNPOD_API_KEY}`,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.MODAL_API_KEY}`,
           },
+          timeout: 180_000, // 3 min — covers worst-case cold start + inference
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
         }
       );
 
-      console.log(`Polling RunPod [attempt ${retries + 1}]:`, statusResp.data.status);
-
-      if (statusResp.data.status === "COMPLETED") {
-        generatedImageBase64 = statusResp.data.output.generatedImage;
-        break;
-      } else if (statusResp.data.status === "FAILED") {
-        console.error("RunPod job failed:", statusResp.data);
-        return res.status(500).json({ message: "RunPod job failed" });
-      }
-
-      retries++;
+      generatedImageBase64 = modalResp.data?.generatedImage || null;
+      console.log(
+        "Modal job completed:",
+        "prompt=", modalResp.data?.prompt?.slice(0, 80),
+        "has_window=", modalResp.data?.has_window,
+        "imageLen=", generatedImageBase64?.length
+      );
+    } catch (err) {
+      console.error(
+        "Modal request failed:",
+        err.response?.status,
+        err.response?.data || err.message
+      );
+      return res.status(502).json({ message: "AI service failed. Please try again." });
     }
 
     if (!generatedImageBase64) {
-      console.warn("RunPod job did not complete in time, returning original image only");
-    } else {
-      console.log("Received generated image base64 length:", generatedImageBase64.length);
+      console.warn("Modal did not return a generated image");
+      return res.status(502).json({ message: "AI service returned no image" });
     }
 
     // Upload AI-generated image to Cloudinary

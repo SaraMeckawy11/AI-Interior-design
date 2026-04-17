@@ -632,9 +632,8 @@ export default function PlanEditor() {
 
   // ═══════════════════════════════════════════════════════════════
   // PROMPT BUILDING
-  // Matches handler ROOM_PROMPTS style so the RunPod worker can use it
-  // verbatim (custom_prompt overrides templates). Kept concise to fit
-  // SD 1.5 CLIP 77-token window.
+  // Simple, compact prompt (CLIP-friendly) that also nudges the generator
+  // to preserve the apartment's inner walls and room partitions.
   // ═══════════════════════════════════════════════════════════════
   const buildPrompt = () => {
     const style = DEFAULT_DESIGN_STYLE.toLowerCase();
@@ -642,24 +641,37 @@ export default function PlanEditor() {
 
     if (mode === "quick") {
       return (
-        `${style} ${roomType.toLowerCase()} interior converted from architectural floor plan, ` +
-        `preserve exact walls doors and layout, warm soft ambient lighting, ` +
-        `${tone} palette, professional interior designer style, ` +
-        `photorealistic 8k, high detail, natural shadows, realistic furniture arrangement`
+        `2D floor plan to 3D furnished ${roomType.toLowerCase()} interior, ` +
+        `strictly respect all inner walls and room partitions from the plan, ` +
+        `${style} style, ${tone} color palette, ` +
+        `convert architectural floor plan to realistic 3D room visualization with furniture, ` +
+        `preserve interior wall layout and room boundaries`
       );
     }
 
+    // Guided mode
     const roomNames = paths
       .filter((p) => p.roomType)
       .map((p) => p.roomType.toLowerCase());
     const uniqueRooms = [...new Set(roomNames)];
-    const roomList = uniqueRooms.length > 0 ? uniqueRooms.join(", ") : "rooms";
 
+    if (uniqueRooms.length === 0) {
+      return (
+        `2D floor plan to 3D furnished interior, ` +
+        `strictly respect all inner walls and room partitions from the plan, ` +
+        `${style} style, ${tone} color palette, ` +
+        `convert architectural floor plan to realistic 3D visualization with furniture, ` +
+        `preserve interior wall layout`
+      );
+    }
+
+    const roomList = uniqueRooms.join(", ");
     return (
-      `${style} apartment interior with ${roomList} converted from architectural floor plan, ` +
-      `preserve all walls partitions doors and layout, realistic 3D cutaway view, ` +
-      `${tone} palette, professional interior designer style, ` +
-      `photorealistic 8k, high detail, natural shadows, cohesive furniture arrangement`
+      `2D floor plan to 3D furnished interior with ${roomList}, ` +
+      `strictly respect all inner walls and room partitions separating each room, ` +
+      `${style} style, ${tone} color palette, ` +
+      `convert architectural floor plan to realistic 3D visualization with furniture, ` +
+      `preserve the exact interior wall layout and room boundaries as drawn`
     );
   };
 

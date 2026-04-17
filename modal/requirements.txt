@@ -1,0 +1,4 @@
+# Local dev-only requirements (for running `modal deploy` / `modal run`).
+# The GPU container installs its own pinned versions inside app.py.
+modal>=1.0.0
+fastapi[standard]>=0.115.0

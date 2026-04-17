@@ -1,7 +1,6 @@
 import runpod
 import base64
 import io
-import time
 import torch
 import cv2
 import numpy as np
@@ -13,13 +12,6 @@ from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProc
 use_cuda = torch.cuda.is_available()
 dtype = torch.float16 if use_cuda else torch.float32
 device = "cuda" if use_cuda else "cpu"
-
-# Lock cuDNN so kernels chosen during warmup are reused on real requests.
-# (benchmark=True would re-autotune on every new shape, defeating the warmup.)
-if use_cuda:
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
 
 CACHE_DIR = "/home/user/.cache/huggingface"
 
@@ -64,86 +56,6 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 ).to(device)
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-pipe.set_progress_bar_config(disable=True)
-
-# Try to enable memory-efficient attention. Falls through silently if not
-# available (newer diffusers default to PyTorch SDPA which is already fast).
-try:
-    pipe.enable_xformers_memory_efficient_attention()
-    print("[warmup] xformers memory-efficient attention enabled")
-except Exception:
-    pass
-
-
-# ---------------------------------------------------------------------------
-# WARMUP
-# ---------------------------------------------------------------------------
-# RunPod FlashBoot snapshots the worker AFTER handler.py finishes importing.
-# If we don't run every model end-to-end here, the very first real request has
-# to JIT-compile CUDA kernels (cuBLAS / cuDNN / SDPA / attention) -- 60-90s on
-# a dual-ControlNet SD1.5 pipeline. The client times out at ~60s and the job
-# comes back as failed even though the worker was "ready".
-#
-# Running one tiny forward pass per model here forces all of that compilation
-# at init time. The compiled kernels are then captured in the FlashBoot
-# snapshot, so every subsequent cold start restores a fully warm worker in ~2s.
-def _warmup():
-    if not use_cuda:
-        print("[warmup] CPU mode, skipping GPU warmup")
-        return
-
-    print("[warmup] Starting GPU warmup (this only runs at init / snapshot time)...")
-    t0 = time.time()
-
-    try:
-        # Dummy RGB image matching the smaller orientation we actually serve.
-        dummy_bgr = np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
-        dummy_rgb = cv2.cvtColor(dummy_bgr, cv2.COLOR_BGR2RGB)
-        dummy_pil = Image.fromarray(dummy_rgb)
-
-        # 1) DPT depth -- compiles depth transformer kernels
-        with torch.no_grad():
-            inputs = dpt_processor(images=dummy_pil, return_tensors="pt").to(device)
-            inputs = {k: v.to(dtype=dtype) for k, v in inputs.items()}
-            _ = dpt_model(**inputs).predicted_depth
-        print(f"[warmup] depth ok ({time.time() - t0:.1f}s)")
-
-        # 2) UperNet segmentation -- compiles ConvNeXt + UperNet kernels
-        with torch.no_grad():
-            inputs = seg_processor(images=dummy_pil, return_tensors="pt").to(device)
-            inputs = {k: v.to(dtype=dtype) for k, v in inputs.items()}
-            _ = seg_model(**inputs)
-        print(f"[warmup] segmentation ok ({time.time() - t0:.1f}s)")
-
-        # 3) Full SD + dual ControlNet pipeline -- compiles the UNet, VAE,
-        #    text encoder, and both ControlNet forward passes. We run both
-        #    orientations we actually serve (768x1024 and 1024x768) so the
-        #    autotuned kernels cover real traffic shapes.
-        for (w, h) in [(768, 1024), (1024, 768)]:
-            ctrl_img = Image.new("RGB", (w, h), (128, 128, 128))
-            with torch.inference_mode():
-                _ = pipe(
-                    prompt="a room",
-                    image=[ctrl_img, ctrl_img],
-                    num_inference_steps=2,
-                    guidance_scale=7.5,
-                    controlnet_conditioning_scale=[0.5, 0.1],
-                    negative_prompt="blurry",
-                    generator=torch.manual_seed(0),
-                ).images[0]
-            print(f"[warmup] pipeline {w}x{h} ok ({time.time() - t0:.1f}s)")
-
-        if use_cuda:
-            torch.cuda.synchronize()
-
-        print(f"[warmup] DONE in {time.time() - t0:.1f}s -- worker is production-ready")
-    except Exception as e:
-        # Never block the worker from starting because of warmup. A cold first
-        # request will just pay the compile cost, which is the pre-fix behavior.
-        print(f"[warmup] FAILED: {e!r} -- continuing without warmup")
-
-
-_warmup()
 
 # ---------------------------------------------------------------------------
 # PROMPT TEMPLATES
