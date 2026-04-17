@@ -1,12 +1,4 @@
 # runpod_server_match_local_fp16.py
-import os
-# Force HuggingFace into fully-offline mode before any HF imports.
-# Eliminates HTTP version-check calls on every from_pretrained(), saving
-# 30-60 s of network latency that was adding to worker initialisation time.
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_DATASETS_OFFLINE"] = "1"
-
 import runpod
 import base64
 import io

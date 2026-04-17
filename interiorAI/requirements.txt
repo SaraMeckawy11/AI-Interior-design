@@ -1,17 +1,8 @@
-# Pin torch to 2.2.2+cu121 — required by modern transformers (≥4.50) which call
-# torch.utils._pytree.register_pytree_node (added in torch 2.2).
-# torchvision 0.17.2 is the matching release.
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.2.2+cu121
-torchvision==0.17.2+cu121
-
-# Pin NumPy <2 — current torch/transformers wheels are compiled against NumPy 1.x
-# and crash at import time on NumPy 2.x ("_ARRAY_API not found").
-numpy<2
-
+torch
 opencv-python
 diffusers[torch]
 transformers
 accelerate
 runpod
 Pillow
+numpy
