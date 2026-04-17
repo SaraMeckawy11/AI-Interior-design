@@ -1,10 +1,14 @@
-# torch, torchvision, xformers are pre-installed in the runpod/pytorch base image.
-# Only install the ML/serving stack that the base image does not provide.
+# Pin torch to the exact same wheel used by the working interio project.
+# Installing via the PyTorch CUDA index avoids pip pulling a mismatched
+# cpu-only or wrong-CUDA wheel and guarantees xformers compatibility.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2+cu121
+torchvision==0.16.2+cu121
+
 opencv-python
-diffusers
+diffusers[torch]
 transformers
 accelerate
-xformers
 runpod
 Pillow
 numpy

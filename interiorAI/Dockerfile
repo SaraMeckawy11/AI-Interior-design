@@ -1,8 +1,7 @@
-# ── Base image: RunPod-official PyTorch 2.2.2 + CUDA 12.1 ─────────────────────
-# Includes torch, torchvision, torchaudio, xformers, and a full CUDA dev stack.
-# Switching from python:3.9-slim eliminates the multi-GB torch pip install that
-# was inflating cold-start by slowing down the entire init sequence.
-FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+# Base image — identical to the working interio project.
+# python:3.9-slim gives a clean, consistent base; we install torch ourselves
+# with an explicit CUDA wheel so there are zero version conflicts.
+FROM python:3.9-slim
 
 # System dependencies for OpenCV
 RUN apt-get update && apt-get install -y \
@@ -18,15 +17,15 @@ WORKDIR /app
 
 # -------------------------------------------------------------------
 # Install Python dependencies
-# torch / torchvision / xformers are already in the base image;
-# we install only the ML/serving stack on top.
+# torch is pinned to 2.1.2+cu121 (same wheel the working interio
+# project uses) to guarantee a consistent environment.
 # -------------------------------------------------------------------
 COPY --chown=user requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # -------------------------------------------------------------------
 # Pre-download ALL HuggingFace model weights into the image layer.
-# Running during build means zero network I/O at container startup.
+# Zero network I/O at container startup.
 # -------------------------------------------------------------------
 RUN python -c "\
 from transformers import DPTImageProcessor, DPTForDepthEstimation, \
@@ -53,15 +52,22 @@ print('All models pre-downloaded.')"
 
 # -------------------------------------------------------------------
 # Lock HuggingFace into fully offline mode AFTER the download step.
-# This eliminates every HTTP round-trip during container startup
-# (version checks, metadata fetches) which previously added 30-60 s
-# across 5 model calls.
+# Eliminates every HTTP round-trip on container startup (version
+# checks, metadata fetches) — previously added 30-60 s across 5 calls.
 # -------------------------------------------------------------------
 ENV HF_HUB_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 ENV HF_DATASETS_OFFLINE=1
 
-# Copy application code (last layer — changes here don't bust model cache)
+# -------------------------------------------------------------------
+# Pin runpod to 1.6.2 as a trailing layer so the heavy pip+preload
+# layers above stay as cache hits on rebuilds.
+# runpod >=1.7 calls asyncio.Event() in JobScaler.__init__ which
+# crashes on Python 3.9: "no current event loop in thread MainThread"
+# -------------------------------------------------------------------
+RUN pip install --no-cache-dir --force-reinstall --no-deps runpod==1.6.2
+
+# Copy application code (last — changes here don't bust model cache)
 COPY --chown=user . .
 
 CMD ["python", "handler.py"]

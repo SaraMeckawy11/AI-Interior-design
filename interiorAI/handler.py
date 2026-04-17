@@ -86,16 +86,7 @@ pipe = StableDiffusionControlNetPipeline.from_pretrained(
 
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
-# ---- Memory & attention optimizations ----
-# xformers: memory-efficient attention — reduces VRAM usage and speeds up
-# attention computation. Falls back silently if not available.
-try:
-    pipe.enable_xformers_memory_efficient_attention()
-    print("[INIT] xformers memory-efficient attention enabled")
-except Exception:
-    print("[INIT] xformers not available, using default attention")
-
-# VAE slicing: processes the VAE decode in slices to reduce peak VRAM.
+# VAE slicing: reduces peak VRAM during decode.
 pipe.enable_vae_slicing()
 
 # ---------------------------------------------------------------------------
