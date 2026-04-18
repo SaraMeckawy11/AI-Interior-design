@@ -1086,9 +1086,18 @@ export default function PlanEditor() {
   // GUIDED MODE HANDLERS
   // ═══════════════════════════════════════════════════════════════
   const handleUndo = () => {
+    // Cancel any in-progress curve edit first.
     if (curveEditSegmentIndex != null) {
       setCurveEditSegmentIndex(null);
       setPreviewPoint(null);
+      return;
+    }
+    // In Door mode, undo pops the LAST drawn door so the user can reverse a
+    // misplaced opening without leaving the tool. Falls through to room
+    // undo if there are no doors yet.
+    if (tool === "door" && doors.length > 0) {
+      setDoors((prev) => prev.slice(0, -1));
+      setDoorPreview(null);
       return;
     }
     if (vertices.length > 0) {
@@ -1101,6 +1110,10 @@ export default function PlanEditor() {
         pathsRef.current = updated;
         return updated;
       });
+    } else if (doors.length > 0) {
+      // Room mode but nothing room-related left; still pop any stray doors.
+      setDoors((prev) => prev.slice(0, -1));
+      setDoorPreview(null);
     }
   };
 
@@ -1444,48 +1457,65 @@ export default function PlanEditor() {
           )}
         </View>
 
-        {/* Quick / Guided toggle */}
-        <View style={styles.planModeToggleContainer}>
-          <TouchableOpacity
-            style={[styles.planModeTab, mode === "quick" && styles.planModeTabActive]}
-            onPress={() => switchMode("quick")}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="flash-outline"
-              size={16}
-              color={mode === "quick" ? "#fff" : COLORS.textSecondary}
-              style={{ marginRight: 6 }}
-            />
-            <Text
-              style={[
-                styles.planModeTabText,
-                mode === "quick" && styles.planModeTabTextActive,
-              ]}
-            >
-              Quick
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.planModeTab, mode === "guided" && styles.planModeTabActive]}
-            onPress={() => switchMode("guided")}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="create-outline"
-              size={16}
-              color={mode === "guided" ? "#fff" : COLORS.textSecondary}
-              style={{ marginRight: 6 }}
-            />
-            <Text
-              style={[
-                styles.planModeTabText,
-                mode === "guided" && styles.planModeTabTextActive,
-              ]}
-            >
-              Guided
-            </Text>
-          </TouchableOpacity>
+        {/* Quick / Guided segmented control */}
+        <View
+          style={styles.planModeToggleContainer}
+          accessibilityRole="tablist"
+        >
+          {[
+            {
+              id: "quick",
+              icon: "flash",
+              label: "Quick",
+              subtitle: "One room",
+            },
+            {
+              id: "guided",
+              icon: "grid",
+              label: "Guided",
+              subtitle: "Floor plan",
+            },
+          ].map((opt) => {
+            const active = mode === opt.id;
+            return (
+              <TouchableOpacity
+                key={opt.id}
+                style={[
+                  styles.planModeTab,
+                  active && styles.planModeTabActive,
+                ]}
+                onPress={() => switchMode(opt.id)}
+                activeOpacity={0.85}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+              >
+                <View style={styles.planModeTabIconWrap}>
+                  <Ionicons
+                    name={active ? opt.icon : `${opt.icon}-outline`}
+                    size={16}
+                    color={active ? "#fff" : COLORS.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.planModeTabText,
+                      active && styles.planModeTabTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.planModeTabSubtext,
+                    active && styles.planModeTabSubtextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {opt.subtitle}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* ── Step indicator ── */}
@@ -1643,25 +1673,29 @@ export default function PlanEditor() {
                     {tool === "door" ? "Place Door Openings" : "Draw Room Outlines"}
                   </Text>
                   <View style={styles.planCanvasToolbar}>
-                    <TouchableOpacity
-                      style={styles.planToolBtn}
-                      onPress={handleUndo}
-                      disabled={
-                        tool === "room" &&
+                    {(() => {
+                      const nothingToUndo =
                         paths.length === 0 &&
-                        vertices.length === 0
-                      }
-                    >
-                      <Ionicons
-                        name="arrow-undo-outline"
-                        size={18}
-                        color={
-                          paths.length === 0 && vertices.length === 0
-                            ? COLORS.disabled
-                            : COLORS.primaryDark
-                        }
-                      />
-                    </TouchableOpacity>
+                        vertices.length === 0 &&
+                        doors.length === 0;
+                      return (
+                        <TouchableOpacity
+                          style={styles.planToolBtn}
+                          onPress={handleUndo}
+                          disabled={nothingToUndo}
+                        >
+                          <Ionicons
+                            name="arrow-undo-outline"
+                            size={18}
+                            color={
+                              nothingToUndo
+                                ? COLORS.disabled
+                                : COLORS.primaryDark
+                            }
+                          />
+                        </TouchableOpacity>
+                      );
+                    })()}
 
                     {tool === "room" && vertices.length > 2 && (
                       <TouchableOpacity
@@ -1696,66 +1730,110 @@ export default function PlanEditor() {
                   </View>
                 </View>
 
-                {/* Room / Door tool toggle — segmented control */}
-                <View style={styles.planToolToggleRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.planToolToggleBtn,
-                      tool === "room" && styles.planToolToggleBtnActive,
-                    ]}
-                    onPress={() => {
-                      setTool("room");
-                      setDoorPreview(null);
-                    }}
-                  >
-                    <Ionicons
-                      name="square-outline"
-                      size={16}
-                      color={tool === "room" ? "#fff" : COLORS.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.planToolToggleBtnText,
-                        tool === "room" && styles.planToolToggleBtnTextActive,
-                      ]}
-                    >
-                      Rooms
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.planToolToggleBtn,
-                      tool === "door" && styles.planToolToggleBtnActive,
-                      paths.length === 0 && styles.planToolToggleBtnDisabled,
-                    ]}
-                    disabled={paths.length === 0}
-                    onPress={() => {
-                      setTool("door");
-                      setPreviewPoint(null);
-                      setLiveTouch(null);
-                    }}
-                  >
-                    <Ionicons
-                      name="log-in-outline"
-                      size={16}
-                      color={
+                {/* Rooms / Doors segmented control */}
+                <View
+                  style={styles.planToolToggleRow}
+                  accessibilityRole="tablist"
+                >
+                  {[
+                    {
+                      id: "room",
+                      icon: "scan",
+                      label: "Rooms",
+                      subtitle:
+                        paths.length > 0
+                          ? `${paths.length} drawn`
+                          : "Tap to add",
+                      disabled: false,
+                      badge: null,
+                    },
+                    {
+                      id: "door",
+                      icon: "log-in",
+                      label: "Doors",
+                      subtitle:
                         paths.length === 0
-                          ? COLORS.disabled
-                          : tool === "door"
-                            ? "#fff"
-                            : COLORS.textSecondary
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.planToolToggleBtnText,
-                        tool === "door" && styles.planToolToggleBtnTextActive,
-                        paths.length === 0 && { color: COLORS.disabled },
-                      ]}
-                    >
-                      Doors {doors.length > 0 ? `(${doors.length})` : ""}
-                    </Text>
-                  </TouchableOpacity>
+                          ? "Draw a room first"
+                          : "Tap a wall",
+                      disabled: paths.length === 0,
+                      badge: doors.length > 0 ? doors.length : null,
+                    },
+                  ].map((opt) => {
+                    const active = tool === opt.id;
+                    return (
+                      <TouchableOpacity
+                        key={opt.id}
+                        style={[
+                          styles.planToolToggleBtn,
+                          active && styles.planToolToggleBtnActive,
+                          opt.disabled && styles.planToolToggleBtnDisabled,
+                        ]}
+                        disabled={opt.disabled}
+                        activeOpacity={0.85}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                        onPress={() => {
+                          setTool(opt.id);
+                          if (opt.id === "room") {
+                            setDoorPreview(null);
+                          } else {
+                            setPreviewPoint(null);
+                            setLiveTouch(null);
+                          }
+                        }}
+                      >
+                        <View style={styles.planToolToggleBtnRow}>
+                          <Ionicons
+                            name={active ? opt.icon : `${opt.icon}-outline`}
+                            size={15}
+                            color={
+                              opt.disabled
+                                ? COLORS.disabled
+                                : active
+                                  ? "#fff"
+                                  : COLORS.textSecondary
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.planToolToggleBtnText,
+                              active && styles.planToolToggleBtnTextActive,
+                              opt.disabled && { color: COLORS.disabled },
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                          {opt.badge != null && (
+                            <View
+                              style={[
+                                styles.planToolBadge,
+                                active && styles.planToolBadgeActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.planToolBadgeText,
+                                  active && styles.planToolBadgeTextActive,
+                                ]}
+                              >
+                                {opt.badge}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.planToolToggleBtnSubtext,
+                            active && styles.planToolToggleBtnSubtextActive,
+                            opt.disabled && { color: COLORS.disabled },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {opt.subtitle}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
                 <View style={styles.planCanvasHintContainer}>
