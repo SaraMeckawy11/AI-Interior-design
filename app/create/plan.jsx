@@ -33,6 +33,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, {
     Circle,
+    Line as SvgLine,
     Path,
     Text as SvgText,
 } from "react-native-svg";
@@ -100,11 +101,27 @@ const MAX_CANVAS_WIDTH = width - moderateScale(48);
 const MAX_CANVAS_HEIGHT = height * 0.45;
 
 // Drawing thresholds (in canvas pixels)
-const SNAP_RADIUS = 26;            // tap-to-close radius around first vertex
-const VERTEX_TAP_RADIUS = 16;      // considered "on" an existing vertex
+const SNAP_RADIUS = 28;            // tap-to-close radius around first vertex
+const COMPLETED_VERTEX_SNAP_RADIUS = 18; // snap onto a vertex of a FINISHED room (shared corners)
+const VERTEX_GRAB_RADIUS = 12;     // must be nearly ON an in-progress vertex to grab it for dragging
 const SEGMENT_HANDLE_RADIUS = 26;  // grab radius for segment mid-handles
 const TAP_MOVE_THRESHOLD = 8;      // movement below this = tap, not drag
 const TAP_MAX_DURATION_MS = 600;   // above this = treat as drag
+const EDGE_SNAP_RADIUS = 12;       // snap onto a FINISHED room's edge (shared walls)
+const ORTHO_SNAP_DEG = 6;          // snap to exact 0°/90° within this tolerance
+
+// Project a point onto a line segment, returning both the nearest point on
+// the segment and the perpendicular distance. Used by edge-snap.
+function projectPointOnSegment(px, py, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const lenSq = abx * abx + aby * aby;
+  if (lenSq < 1) return { dist: Infinity, pt: { x: a.x, y: a.y } };
+  const t = Math.max(0, Math.min(1, ((px - a.x) * abx + (py - a.y) * aby) / lenSq));
+  const x = a.x + t * abx;
+  const y = a.y + t * aby;
+  return { dist: Math.hypot(x - px, y - py), pt: { x, y } };
+}
 
 // Map a (0..1, 0..1) centroid to a 3x3 grid position label.
 function gridPositionLabel(nx, ny) {
@@ -248,11 +265,14 @@ export default function PlanEditor() {
     startY: 0,
     startedAt: 0,
     moved: false,
-    intent: "idle", // 'idle' | 'tap' | 'curve'
+    // 'idle' | 'tap' | 'curve' | 'maybe-drag-vertex' | 'drag-vertex'
+    intent: "idle",
     curveSegIndex: null,
+    draggedVertexIndex: null,
   });
   const [liveTouch, setLiveTouch] = useState(null); // crosshair while finger is down
   const [nearFirstVertex, setNearFirstVertex] = useState(false);
+  const canvasSizeRef = useRef({ width: 0, height: 0 });
 
   useEffect(() => {
     pathsRef.current = paths;
@@ -267,6 +287,7 @@ export default function PlanEditor() {
     modeRef.current = mode;
   }, [mode]);
 
+
   // ── Canvas display size ──
   const canvasSize = useMemo(() => {
     if (!imageDims)
@@ -280,6 +301,10 @@ export default function PlanEditor() {
     }
     return { width: Math.round(w), height: Math.round(h) };
   }, [imageDims]);
+
+  useEffect(() => {
+    canvasSizeRef.current = canvasSize;
+  }, [canvasSize]);
 
   // ── Next outline color ──
   const nextColor = OUTLINE_COLORS[paths.length % OUTLINE_COLORS.length];
@@ -306,6 +331,125 @@ export default function PlanEditor() {
     const signedDist = (touchX - mx) * nx + (touchY - my) * ny;
     const curvature = signedDist / (len * 0.25);
     return Math.max(-1, Math.min(1, curvature));
+  };
+
+  // Adjust a raw touch point into a precise commit point. SNAPPING PHILOSOPHY:
+  //   - Vertices of COMPLETED rooms snap (so corners can be shared).
+  //   - Edges of COMPLETED rooms snap (so walls can be shared).
+  //   - The FIRST vertex of the in-progress shape snaps (so you can close it).
+  //   - ALL OTHER vertices of the current shape DO NOT snap — points you just
+  //     placed will never pull new points onto themselves. This is what
+  //     prevents the "points forced on top of each other" behavior.
+  //   - Ortho snap aligns to the last-placed neighbor axis (unchanged).
+  // Returns { x, y, snapType, snapTarget } used for visual feedback.
+  const adjustDrawPoint = (rawX, rawY, excludeVertexIndex = null) => {
+    const canvas = canvasSizeRef.current;
+
+    // Clamp to canvas bounds. No offset — the vertex goes exactly where the
+    // finger is so taps feel immediate and direct.
+    let x = Math.max(0, Math.min(canvas.width || rawX, rawX));
+    let y = Math.max(0, Math.min(canvas.height || rawY, rawY));
+
+    let snapType = null;
+    let snapTarget = null;
+    const cv = verticesRef.current;
+    const isDragging = excludeVertexIndex != null;
+
+    // Step 1a: snap to vertices of COMPLETED rooms (shared corners).
+    let bestVertDist = COMPLETED_VERTEX_SNAP_RADIUS;
+    let bestVert = null;
+    for (const p of pathsRef.current) {
+      for (const v of p.vertices || []) {
+        const d = Math.hypot(v.x - x, v.y - y);
+        if (d < bestVertDist) {
+          bestVertDist = d;
+          bestVert = v;
+        }
+      }
+    }
+
+    // Step 1b: the FIRST vertex of the in-progress shape — only to enable
+    // closing. When dragging vertex 0 itself, skip it.
+    if (cv.length > 0 && excludeVertexIndex !== 0) {
+      const first = cv[0];
+      const d = Math.hypot(first.x - x, first.y - y);
+      // Only active when we already have enough vertices to close a polygon.
+      if (cv.length > 2 && d < SNAP_RADIUS && d < bestVertDist) {
+        bestVertDist = d;
+        bestVert = first;
+      }
+    }
+
+    if (bestVert) {
+      x = bestVert.x;
+      y = bestVert.y;
+      snapType = "vertex";
+      snapTarget = { x: bestVert.x, y: bestVert.y };
+    }
+
+    // Step 2: edge snap — only on COMPLETED rooms. We deliberately skip
+    // in-progress edges so the next point never gets pulled onto a wall you
+    // just drew.
+    if (!snapType) {
+      let bestEdgeDist = EDGE_SNAP_RADIUS;
+      let bestEdgePt = null;
+      for (const p of pathsRef.current) {
+        const verts = p.vertices || [];
+        if (verts.length < 2) continue;
+        for (let i = 0; i < verts.length; i++) {
+          const a = verts[i];
+          const b = verts[(i + 1) % verts.length];
+          const proj = projectPointOnSegment(x, y, a, b);
+          if (proj.dist < bestEdgeDist) {
+            bestEdgeDist = proj.dist;
+            bestEdgePt = proj.pt;
+          }
+        }
+      }
+      if (bestEdgePt) {
+        x = bestEdgePt.x;
+        y = bestEdgePt.y;
+        snapType = "edge";
+        snapTarget = { x: bestEdgePt.x, y: bestEdgePt.y };
+      }
+    }
+
+    // Step 3: orthogonal snap — within ORTHO_SNAP_DEG of horizontal or
+    // vertical from the anchor vertex → snap to exact axis. Most floor
+    // plans are rectilinear so this dramatically improves perceived accuracy.
+    if (!snapType) {
+      // Anchor: when placing, it's the last vertex; when dragging, it's the
+      // previous neighbor in the in-progress shape.
+      let anchor = null;
+      if (isDragging) {
+        if (excludeVertexIndex > 0) anchor = cv[excludeVertexIndex - 1];
+      } else if (cv.length > 0) {
+        anchor = cv[cv.length - 1];
+      }
+      if (anchor) {
+        const dx = x - anchor.x;
+        const dy = y - anchor.y;
+        if (Math.hypot(dx, dy) > 10) {
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+          const deltaHoriz = Math.min(
+            Math.abs(angle),
+            Math.abs(Math.abs(angle) - 180)
+          );
+          const deltaVert = Math.abs(Math.abs(angle) - 90);
+          if (deltaHoriz < ORTHO_SNAP_DEG) {
+            y = anchor.y;
+            snapType = "ortho";
+            snapTarget = { axis: "h", fromX: anchor.x, fromY: anchor.y };
+          } else if (deltaVert < ORTHO_SNAP_DEG) {
+            x = anchor.x;
+            snapType = "ortho";
+            snapTarget = { axis: "v", fromX: anchor.x, fromY: anchor.y };
+          }
+        }
+      }
+    }
+
+    return { x, y, snapType, snapTarget };
   };
 
   const closeShape = () => {
@@ -350,10 +494,23 @@ export default function PlanEditor() {
           const { locationX: x, locationY: y } = evt.nativeEvent;
           const verts = verticesRef.current;
 
-          // Detect curve-handle grab
           let intent = "tap";
           let curveSegIndex = null;
-          if (verts.length >= 2) {
+          let draggedVertexIndex = null;
+
+          // Priority 1: grab an existing in-progress vertex. Requires a
+          // DIRECT tap (small radius) so users can place new points close to
+          // existing ones without the gesture being hijacked as a drag.
+          for (let i = 0; i < verts.length; i++) {
+            if (Math.hypot(verts[i].x - x, verts[i].y - y) < VERTEX_GRAB_RADIUS) {
+              draggedVertexIndex = i;
+              intent = "maybe-drag-vertex";
+              break;
+            }
+          }
+
+          // Priority 2: grab a curve handle — only if no vertex was grabbed.
+          if (intent === "tap" && verts.length >= 2) {
             let nearestIdx = null;
             let nearestDist = Infinity;
             for (let i = 0; i < verts.length - 1; i++) {
@@ -367,14 +524,7 @@ export default function PlanEditor() {
                 nearestIdx = i;
               }
             }
-            const onVertex = verts.some(
-              (v) => Math.hypot(v.x - x, v.y - y) < VERTEX_TAP_RADIUS
-            );
-            if (
-              nearestIdx != null &&
-              nearestDist < SEGMENT_HANDLE_RADIUS &&
-              !onVertex
-            ) {
+            if (nearestIdx != null && nearestDist < SEGMENT_HANDLE_RADIUS) {
               intent = "curve";
               curveSegIndex = nearestIdx;
               setCurveEditSegmentIndex(nearestIdx);
@@ -388,29 +538,75 @@ export default function PlanEditor() {
             moved: false,
             intent,
             curveSegIndex,
+            draggedVertexIndex,
           };
 
-          setLiveTouch({ x, y });
-          if (verts.length > 0) setPreviewPoint({ x, y });
+          if (intent === "curve") {
+            setLiveTouch({ x, y, snapType: null, snapTarget: null });
+          } else if (intent === "maybe-drag-vertex") {
+            const v = verts[draggedVertexIndex];
+            setLiveTouch({
+              x: v.x,
+              y: v.y,
+              snapType: "vertex",
+              snapTarget: { x: v.x, y: v.y },
+            });
+          } else {
+            // Placement tap: snap the preview immediately so the crosshair
+            // reflects any active vertex/edge/ortho snap from the first pixel.
+            const { x: ax, y: ay, snapType, snapTarget } = adjustDrawPoint(x, y);
+            setLiveTouch({ x: ax, y: ay, snapType, snapTarget });
+            if (verts.length > 0) setPreviewPoint({ x: ax, y: ay });
+          }
           setScrollEnabled(false);
         },
 
         onPanResponderMove: (evt) => {
-          const { locationX: x, locationY: y } = evt.nativeEvent;
+          const { locationX: rawX, locationY: rawY } = evt.nativeEvent;
           const g = drawGestureRef.current;
-          const dx = x - g.startX;
-          const dy = y - g.startY;
+          const dx = rawX - g.startX;
+          const dy = rawY - g.startY;
           if (Math.hypot(dx, dy) > TAP_MOVE_THRESHOLD) g.moved = true;
 
-          setLiveTouch({ x, y });
-
+          // Curve adjust uses raw coords (finger is directly on the handle).
           if (g.intent === "curve" && g.curveSegIndex != null) {
-            const c = getCurvatureForSegment(x, y, g.curveSegIndex);
+            setLiveTouch({ x: rawX, y: rawY, snapType: null, snapTarget: null });
+            const c = getCurvatureForSegment(rawX, rawY, g.curveSegIndex);
             setSegmentCurvatures((prev) =>
               prev.map((v, i) => (i === g.curveSegIndex ? c : v))
             );
             return;
           }
+
+          // Vertex drag — once the user moves past the tap threshold, we
+          // promote maybe-drag-vertex → drag-vertex and start moving the
+          // vertex live (with snaps applied, excluding itself).
+          if (
+            (g.intent === "maybe-drag-vertex" || g.intent === "drag-vertex") &&
+            g.draggedVertexIndex != null
+          ) {
+            if (g.moved) g.intent = "drag-vertex";
+            if (g.intent === "drag-vertex") {
+              const { x, y, snapType, snapTarget } = adjustDrawPoint(
+                rawX,
+                rawY,
+                g.draggedVertexIndex
+              );
+              setLiveTouch({ x, y, snapType, snapTarget });
+              setVertices((prev) =>
+                prev.map((v, i) =>
+                  i === g.draggedVertexIndex ? { x, y } : v
+                )
+              );
+              return;
+            }
+            // Still in maybe-drag — treat as hover; don't place anything.
+            return;
+          }
+
+          // Placement tap: run snaps normally.
+          const { x, y, snapType, snapTarget } = adjustDrawPoint(rawX, rawY);
+          setLiveTouch({ x, y, snapType, snapTarget });
 
           const verts = verticesRef.current;
           if (verts.length > 0) {
@@ -425,7 +621,7 @@ export default function PlanEditor() {
         },
 
         onPanResponderRelease: (evt) => {
-          const { locationX: x, locationY: y } = evt.nativeEvent;
+          const { locationX: rawX, locationY: rawY } = evt.nativeEvent;
           const g = drawGestureRef.current;
           const dt = Date.now() - g.startedAt;
 
@@ -433,7 +629,7 @@ export default function PlanEditor() {
           setLiveTouch(null);
           setNearFirstVertex(false);
 
-          // Curve adjust: just release
+          // Curve adjust — release only.
           if (g.intent === "curve") {
             setCurveEditSegmentIndex(null);
             setPreviewPoint(null);
@@ -442,12 +638,39 @@ export default function PlanEditor() {
             return;
           }
 
-          // Interpret a slow/large motion as a drag (cancel) — but don't
-          // discard closing snaps.
+          // Vertex drag — position was updated live during move. Release only.
+          if (g.intent === "drag-vertex") {
+            setPreviewPoint(null);
+            setScrollEnabled(true);
+            drawGestureRef.current.intent = "idle";
+            return;
+          }
+
+          // Tapped on a vertex but never dragged — if it was the first vertex
+          // and we have ≥3 vertices, close the shape. Otherwise noop (user
+          // just tapped their own point, don't add a duplicate).
+          if (g.intent === "maybe-drag-vertex") {
+            const verts = verticesRef.current;
+            if (g.draggedVertexIndex === 0 && verts.length > 2) {
+              setPreviewPoint(null);
+              setScrollEnabled(true);
+              drawGestureRef.current.intent = "idle";
+              closeShape();
+              return;
+            }
+            setPreviewPoint(null);
+            setScrollEnabled(true);
+            drawGestureRef.current.intent = "idle";
+            return;
+          }
+
+          // Normal placement: commit at the adjusted release location so the
+          // vertex lands exactly under the finger (with snaps applied).
+          const { x, y } = adjustDrawPoint(rawX, rawY);
           const verts = verticesRef.current;
           const isLongDrag = g.moved && dt > TAP_MAX_DURATION_MS;
 
-          // Close shape if released near first vertex
+          // Close shape if released near the first vertex.
           if (verts.length > 2) {
             const first = verts[0];
             if (Math.hypot(first.x - x, first.y - y) < SNAP_RADIUS) {
@@ -466,8 +689,6 @@ export default function PlanEditor() {
             return;
           }
 
-          // Commit the new vertex at the RELEASE location (not the touch-down
-          // location) — this lets the user slide to fine-tune before lifting.
           if (verts.length === 0) {
             setVertices([{ x, y }]);
           } else {
@@ -772,23 +993,27 @@ export default function PlanEditor() {
   // Ultra-compact furniture hints (2 items each). Total prompt with 6 rooms
   // stays around 55-65 CLIP tokens -- safely under the 77-token truncation
   // limit so critical words like "furnished" aren't cut off.
+  // Signature furniture per room type — chosen to match what the Python
+  // `room_furniture_shapes` function draws into the segmentation mask, so
+  // prompt + mask reinforce each other. Kept compact so the full prompt stays
+  // under CLIP's 77-token limit even with 4-5 rooms.
   const ROOM_FURNITURE = {
-    "living room":  "sofa tv",
-    "bedroom":      "bed wardrobe",
-    "kitchen":      "island cabinets",
-    "bathroom":     "vanity shower",
-    "dining room":  "table chairs",
-    "office":       "desk shelf",
-    "kids room":    "bed toys",
+    "living room":  "sofa coffee table",
+    "bedroom":      "bed nightstand",
+    "kitchen":      "counter stove",
+    "bathroom":     "bathtub vanity",
+    "dining room":  "round table chairs",
+    "office":       "desk bookshelf",
+    "kids room":    "bed desk",
     "hallway":      "",
-    "closet":       "shelves",
+    "closet":       "wardrobe",
     "laundry room": "washer dryer",
-    "entryway":     "console mirror",
-    "balcony":      "seating plants",
-    "sunroom":      "seating plants",
-    "studio":       "sofa kitchenette",
-    "basement":     "seating tv",
-    "attic":        "seating",
+    "entryway":     "console",
+    "balcony":      "chairs table",
+    "sunroom":      "chairs table",
+    "studio":       "sofa bed",
+    "basement":     "sofa tv",
+    "attic":        "sofa",
     "full apartment": "",
   };
 
@@ -802,8 +1027,8 @@ export default function PlanEditor() {
       const furnishedPart = furniture ? ` with ${furniture}` : "";
       return (
         `professional interior photography, fully furnished ${rk}${furnishedPart}, ` +
-        `${style} style, ${tone} palette, ` +
-        `photorealistic, detailed textures, soft natural lighting, 8k`
+        `staged and styled, ${style} style, ${tone} palette, ` +
+        `photorealistic, sharp detail, soft natural lighting, 8k`
       );
     }
 
@@ -812,8 +1037,8 @@ export default function PlanEditor() {
 
     if (assigned.length === 0) {
       return (
-        `professional interior photography, fully furnished modern apartment, ` +
-        `${style} style, ${tone} palette, photorealistic, 8k`
+        `architectural 3d render, isometric interior, fully furnished apartment, ` +
+        `${style} ${tone}, photorealistic, warm lighting, 8k`
       );
     }
 
@@ -832,10 +1057,11 @@ export default function PlanEditor() {
       byType.get(t).push(pos);
     }
 
-    // Token-efficient ordering so CLIP keeps the important parts:
-    //   1) photorealism vocab first (styles the whole render)
-    //   2) per-room furniture + position hints
-    //   3) style + palette + quality tags at the tail (truncation-safe)
+    // Token-efficient ordering for CLIP (77-token limit):
+    //   1) quality + style framing at the front — never truncated
+    //   2) layout cue that reinforces the segmentation mask
+    //   3) per-room furniture + position
+    //   4) style + quality tags at the tail
     const phrases = [];
     for (const [type, positions] of byType) {
       const n = positions.length;
@@ -847,10 +1073,10 @@ export default function PlanEditor() {
     }
 
     return (
-      `architectural visualization, fully furnished modern apartment, top-down 3D, ` +
+      `architectural 3d render, isometric interior, interior design magazine, ` +
+      `fully furnished apartment, furniture arranged against walls, ` +
       `${phrases.join(", ")}, ` +
-      `${style} style, ${tone} palette, ` +
-      `photorealistic, detailed textures, soft natural lighting, 8k`
+      `${style} ${tone}, photorealistic, realistic materials, warm lighting, 8k`
     );
   };
 
@@ -1273,8 +1499,10 @@ export default function PlanEditor() {
                     color={COLORS.textSecondary}
                   />
                   <Text style={styles.planCanvasHint}>
-                    Tap a point — slide to fine-tune before lifting. Release on
-                    the first point to close. Drag a midpoint to curve.
+                    Tap to drop a point — place them freely, no forced
+                    overlap. Tap directly on a point to grab and slide it.
+                    Green = snapped to a shared corner/wall or 90° axis.
+                    Tap the first point to close the room.
                   </Text>
                 </View>
 
@@ -1401,42 +1629,113 @@ export default function PlanEditor() {
                       </>
                     )}
 
-                    {/* Vertices */}
-                    {vertices.map((v, i) => (
-                      <Circle
-                        key={`v-${i}`}
-                        cx={v.x}
-                        cy={v.y}
-                        r={i === 0 && vertices.length > 2 ? 9 : 5}
-                        fill={i === 0 ? COLORS.primaryDark : nextColor}
-                        stroke="#fff"
-                        strokeWidth={2}
-                      />
-                    ))}
+                    {/* Vertices — each is draggable: tap directly on a point
+                        and slide to fine-tune. Small halo indicates the tight
+                        grab zone so near-taps still create new points. */}
+                    {vertices.map((v, i) => {
+                      const isFirstClosable = i === 0 && vertices.length > 2;
+                      return (
+                        <React.Fragment key={`v-${i}`}>
+                          <Circle
+                            cx={v.x}
+                            cy={v.y}
+                            r={10}
+                            fill="rgba(255,255,255,0.05)"
+                            stroke="rgba(255,255,255,0.22)"
+                            strokeWidth={1}
+                          />
+                          <Circle
+                            cx={v.x}
+                            cy={v.y}
+                            r={isFirstClosable ? 9 : 6}
+                            fill={i === 0 ? COLORS.primaryDark : nextColor}
+                            stroke="#fff"
+                            strokeWidth={2}
+                          />
+                        </React.Fragment>
+                      );
+                    })}
 
                     {/* Live crosshair — shows exactly where a new vertex will
-                        drop if the user lifts now, so they can fine-tune. */}
-                    {liveTouch && (
-                      <>
-                        <Circle
-                          cx={liveTouch.x}
-                          cy={liveTouch.y}
-                          r={18}
-                          fill="none"
-                          stroke={nextColor}
-                          strokeWidth={1.5}
-                          opacity={0.75}
-                        />
-                        <Circle
-                          cx={liveTouch.x}
-                          cy={liveTouch.y}
-                          r={3}
-                          fill={nextColor}
-                          stroke="#fff"
-                          strokeWidth={1.2}
-                        />
-                      </>
-                    )}
+                        drop if the user lifts now. The crosshair floats above
+                        the finger so placement is never obscured. Color shifts
+                        to green when a snap is active. */}
+                    {liveTouch && (() => {
+                      const snapping = !!liveTouch.snapType;
+                      const crossColor = snapping ? "#22C55E" : nextColor;
+                      const outerR = snapping ? 20 : 18;
+                      return (
+                        <>
+                          {/* Axis snap guide — shows the horizontal/vertical
+                              line we're aligning to. */}
+                          {liveTouch.snapType === "ortho" &&
+                            liveTouch.snapTarget && (
+                              <SvgLine
+                                x1={liveTouch.snapTarget.fromX}
+                                y1={liveTouch.snapTarget.fromY}
+                                x2={liveTouch.x}
+                                y2={liveTouch.y}
+                                stroke="#22C55E"
+                                strokeWidth={1.2}
+                                strokeDasharray="4,4"
+                                opacity={0.7}
+                              />
+                            )}
+
+                          {/* Edge/vertex snap marker — emphasizes the spot we
+                              snapped onto. */}
+                          {(liveTouch.snapType === "edge" ||
+                            liveTouch.snapType === "vertex") &&
+                            liveTouch.snapTarget && (
+                              <Circle
+                                cx={liveTouch.snapTarget.x}
+                                cy={liveTouch.snapTarget.y}
+                                r={liveTouch.snapType === "vertex" ? 12 : 8}
+                                fill="#22C55E22"
+                                stroke="#22C55E"
+                                strokeWidth={1.5}
+                              />
+                            )}
+
+                          {/* Crosshair reticle */}
+                          <Circle
+                            cx={liveTouch.x}
+                            cy={liveTouch.y}
+                            r={outerR}
+                            fill="none"
+                            stroke={crossColor}
+                            strokeWidth={1.5}
+                            opacity={0.8}
+                          />
+                          <SvgLine
+                            x1={liveTouch.x - 10}
+                            y1={liveTouch.y}
+                            x2={liveTouch.x + 10}
+                            y2={liveTouch.y}
+                            stroke={crossColor}
+                            strokeWidth={1.2}
+                            opacity={0.8}
+                          />
+                          <SvgLine
+                            x1={liveTouch.x}
+                            y1={liveTouch.y - 10}
+                            x2={liveTouch.x}
+                            y2={liveTouch.y + 10}
+                            stroke={crossColor}
+                            strokeWidth={1.2}
+                            opacity={0.8}
+                          />
+                          <Circle
+                            cx={liveTouch.x}
+                            cy={liveTouch.y}
+                            r={3}
+                            fill={crossColor}
+                            stroke="#fff"
+                            strokeWidth={1.2}
+                          />
+                        </>
+                      );
+                    })()}
                   </Svg>
                 </View>
               </View>

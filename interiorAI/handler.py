@@ -259,78 +259,225 @@ ROOM_ANCHOR_COLORS = {
 
 
 def room_furniture_shapes(rtype, bbox):
-    """Furniture layout per room type. See modal/app.py for full docs.
+    """Wall-aligned furniture layouts per room type. See modal/app.py for the
+    full philosophy -- primary furniture goes AGAINST a wall, not in the
+    middle of the room, so ControlNet-Seg sees a spatially realistic layout.
+
     Returns list of (kind, color, (cx, cy, rx, ry))."""
     xmin, ymin, xmax, ymax = bbox
     w = max(1, xmax - xmin)
     h = max(1, ymax - ymin)
     cx = (xmin + xmax) / 2.0
     cy = (ymin + ymax) / 2.0
+    short = min(w, h)
+    inset = max(6.0, short * 0.03)
     long_horizontal = w >= h
     shapes = []
 
     if rtype in ("bedroom", "kids room"):
         if long_horizontal:
-            rx, ry = w * 0.28, h * 0.22
+            bed_half_w, bed_half_d = w * 0.22, h * 0.16
+            bcx = cx
+            bcy = ymin + inset + bed_half_d
+            shapes.append(("rect", ADE_BED, (bcx, bcy, bed_half_w, bed_half_d)))
+            ns = short * 0.04
+            shapes.append(("rect", ADE_TABLE,
+                           (bcx - bed_half_w - ns, ymin + inset + ns, ns, ns)))
+            shapes.append(("rect", ADE_TABLE,
+                           (bcx + bed_half_w + ns, ymin + inset + ns, ns, ns)))
+            shapes.append(("rect", ADE_WARDR,
+                           (cx, ymax - inset - h * 0.05, w * 0.30, h * 0.05)))
         else:
-            rx, ry = w * 0.22, h * 0.28
-        shapes.append(("rect", ADE_BED, (cx, cy, rx, ry)))
-        if long_horizontal:
-            shapes.append(("rect", ADE_WARDR, (cx, ymin + h * 0.10, w * 0.28, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_WARDR, (xmin + w * 0.10, cy, w * 0.06, h * 0.28)))
+            bed_half_w, bed_half_d = w * 0.16, h * 0.22
+            bcx = xmin + inset + bed_half_w
+            bcy = cy
+            shapes.append(("rect", ADE_BED, (bcx, bcy, bed_half_w, bed_half_d)))
+            ns = short * 0.04
+            shapes.append(("rect", ADE_TABLE,
+                           (xmin + inset + ns, bcy - bed_half_d - ns, ns, ns)))
+            shapes.append(("rect", ADE_TABLE,
+                           (xmin + inset + ns, bcy + bed_half_d + ns, ns, ns)))
+            shapes.append(("rect", ADE_WARDR,
+                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.30)))
 
     elif rtype == "living room":
         if long_horizontal:
-            shapes.append(("rect", ADE_SOFA, (cx, cy - h * 0.08, w * 0.32, h * 0.12)))
-            shapes.append(("ellipse", ADE_TABLE, (cx, cy + h * 0.05, w * 0.10, h * 0.06)))
+            sofa_half_w, sofa_half_d = w * 0.27, h * 0.09
+            scx = cx
+            scy = ymin + inset + sofa_half_d
+            shapes.append(("rect", ADE_SOFA, (scx, scy, sofa_half_w, sofa_half_d)))
+            shapes.append(("ellipse", ADE_TABLE,
+                           (scx, scy + sofa_half_d + h * 0.10,
+                            w * 0.11, h * 0.06)))
+            shapes.append(("rect", ADE_CAB,
+                           (cx, ymax - inset - h * 0.05, w * 0.30, h * 0.05)))
+            shapes.append(("rect", ADE_SOFA,
+                           (xmax - inset - w * 0.06, scy + sofa_half_d * 0.5,
+                            w * 0.06, h * 0.06)))
         else:
-            shapes.append(("rect", ADE_SOFA, (cx - w * 0.08, cy, w * 0.12, h * 0.32)))
-            shapes.append(("ellipse", ADE_TABLE, (cx + w * 0.05, cy, w * 0.06, h * 0.10)))
+            sofa_half_w, sofa_half_d = w * 0.09, h * 0.27
+            scx = xmin + inset + sofa_half_d
+            scy = cy
+            shapes.append(("rect", ADE_SOFA, (scx, scy, sofa_half_w, sofa_half_d)))
+            shapes.append(("ellipse", ADE_TABLE,
+                           (scx + sofa_half_w + w * 0.10, scy,
+                            w * 0.06, h * 0.11)))
+            shapes.append(("rect", ADE_CAB,
+                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.30)))
+            shapes.append(("rect", ADE_SOFA,
+                           (scx + sofa_half_w * 0.5, ymax - inset - h * 0.06,
+                            w * 0.06, h * 0.06)))
 
     elif rtype == "kitchen":
         if long_horizontal:
-            shapes.append(("rect", ADE_CAB, (cx, ymin + h * 0.12, w * 0.38, h * 0.08)))
-            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.05, w * 0.22, h * 0.09)))
+            counter_d = h * 0.08
+            shapes.append(("rect", ADE_CAB,
+                           (cx, ymin + inset + counter_d / 2,
+                            w * 0.45, counter_d / 2)))
+            shapes.append(("rect", ADE_CAB,
+                           (xmin + inset + w * 0.05, cy + h * 0.05,
+                            w * 0.05, h * 0.25)))
+            shapes.append(("rect", ADE_STOVE,
+                           (cx - w * 0.10, ymin + inset + counter_d / 2,
+                            w * 0.05, counter_d * 0.4)))
+            shapes.append(("rect", ADE_WARDR,
+                           (xmax - inset - w * 0.06, ymin + inset + h * 0.08,
+                            w * 0.06, h * 0.07)))
         else:
-            shapes.append(("rect", ADE_CAB, (xmin + w * 0.12, cy, w * 0.08, h * 0.38)))
-            shapes.append(("rect", ADE_CAB, (cx + w * 0.05, cy, w * 0.09, h * 0.22)))
+            counter_d = w * 0.08
+            shapes.append(("rect", ADE_CAB,
+                           (xmin + inset + counter_d / 2, cy,
+                            counter_d / 2, h * 0.45)))
+            shapes.append(("rect", ADE_CAB,
+                           (cx + w * 0.05, ymin + inset + h * 0.05,
+                            w * 0.25, h * 0.05)))
+            shapes.append(("rect", ADE_STOVE,
+                           (xmin + inset + counter_d / 2, cy - h * 0.10,
+                            counter_d * 0.4, h * 0.05)))
+            shapes.append(("rect", ADE_WARDR,
+                           (xmin + inset + w * 0.08, ymax - inset - h * 0.06,
+                            w * 0.07, h * 0.06)))
 
     elif rtype == "bathroom":
         if long_horizontal:
-            shapes.append(("rect", ADE_BATH, (cx, cy - h * 0.08, w * 0.30, h * 0.14)))
-            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.10, w * 0.22, h * 0.06)))
+            tub_half_w, tub_half_d = w * 0.18, h * 0.09
+            shapes.append(("rect", ADE_BATH,
+                           (cx - w * 0.08, ymin + inset + tub_half_d,
+                            tub_half_w, tub_half_d)))
+            shapes.append(("rect", ADE_CAB,
+                           (cx, ymax - inset - h * 0.06,
+                            w * 0.22, h * 0.06)))
+            shapes.append(("rect", ADE_CAB,
+                           (xmax - inset - w * 0.06,
+                            ymin + inset + h * 0.08,
+                            w * 0.04, h * 0.05)))
         else:
-            shapes.append(("rect", ADE_BATH, (cx - w * 0.08, cy, w * 0.14, h * 0.30)))
-            shapes.append(("rect", ADE_CAB, (cx + w * 0.10, cy, w * 0.06, h * 0.22)))
+            tub_half_w, tub_half_d = w * 0.09, h * 0.18
+            shapes.append(("rect", ADE_BATH,
+                           (xmin + inset + tub_half_w, cy - h * 0.08,
+                            tub_half_w, tub_half_d)))
+            shapes.append(("rect", ADE_CAB,
+                           (xmax - inset - w * 0.06, cy,
+                            w * 0.06, h * 0.22)))
+            shapes.append(("rect", ADE_CAB,
+                           (xmin + inset + w * 0.08,
+                            ymax - inset - h * 0.06,
+                            w * 0.05, h * 0.04)))
 
     elif rtype == "dining room":
-        r = min(w, h) * 0.22
+        r = short * 0.20
         shapes.append(("ellipse", ADE_TABLE, (cx, cy, r, r)))
+        chair = short * 0.045
+        shapes.append(("rect", ADE_SOFA, (cx, cy - r - chair, chair, chair)))
+        shapes.append(("rect", ADE_SOFA, (cx, cy + r + chair, chair, chair)))
+        shapes.append(("rect", ADE_SOFA, (cx - r - chair, cy, chair, chair)))
+        shapes.append(("rect", ADE_SOFA, (cx + r + chair, cy, chair, chair)))
+        if long_horizontal:
+            shapes.append(("rect", ADE_CAB,
+                           (cx, ymax - inset - h * 0.04, w * 0.28, h * 0.04)))
+        else:
+            shapes.append(("rect", ADE_CAB,
+                           (xmax - inset - w * 0.04, cy, w * 0.04, h * 0.28)))
 
     elif rtype == "office":
         if long_horizontal:
-            shapes.append(("rect", ADE_DESK, (cx, ymin + h * 0.20, w * 0.32, h * 0.08)))
+            desk_half_d = h * 0.05
+            shapes.append(("rect", ADE_DESK,
+                           (cx, ymin + inset + desk_half_d,
+                            w * 0.28, desk_half_d)))
+            shapes.append(("rect", ADE_SOFA,
+                           (cx, ymin + inset + h * 0.14,
+                            w * 0.04, h * 0.04)))
+            shapes.append(("rect", ADE_WARDR,
+                           (cx, ymax - inset - h * 0.05, w * 0.32, h * 0.05)))
         else:
-            shapes.append(("rect", ADE_DESK, (xmin + w * 0.20, cy, w * 0.08, h * 0.32)))
+            desk_half_d = w * 0.05
+            shapes.append(("rect", ADE_DESK,
+                           (xmin + inset + desk_half_d, cy,
+                            desk_half_d, h * 0.28)))
+            shapes.append(("rect", ADE_SOFA,
+                           (xmin + inset + w * 0.14, cy,
+                            w * 0.04, h * 0.04)))
+            shapes.append(("rect", ADE_WARDR,
+                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.32)))
 
     elif rtype == "closet":
         if long_horizontal:
-            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.38, h * 0.14)))
+            shapes.append(("rect", ADE_WARDR,
+                           (cx, ymin + inset + h * 0.07, w * 0.38, h * 0.07)))
+            shapes.append(("rect", ADE_WARDR,
+                           (cx, ymax - inset - h * 0.07, w * 0.38, h * 0.07)))
         else:
-            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.14, h * 0.38)))
+            shapes.append(("rect", ADE_WARDR,
+                           (xmin + inset + w * 0.07, cy, w * 0.07, h * 0.38)))
+            shapes.append(("rect", ADE_WARDR,
+                           (xmax - inset - w * 0.07, cy, w * 0.07, h * 0.38)))
 
     elif rtype == "laundry room":
-        shapes.append(("rect", ADE_STOVE, (cx, cy, w * 0.28, h * 0.14)))
+        if long_horizontal:
+            appl = min(w * 0.10, h * 0.10)
+            shapes.append(("rect", ADE_STOVE,
+                           (cx - appl, ymin + inset + appl / 2, appl / 2, appl / 2)))
+            shapes.append(("rect", ADE_STOVE,
+                           (cx + appl, ymin + inset + appl / 2, appl / 2, appl / 2)))
+            shapes.append(("rect", ADE_CAB,
+                           (cx, ymax - inset - h * 0.05, w * 0.30, h * 0.05)))
+        else:
+            appl = min(w * 0.10, h * 0.10)
+            shapes.append(("rect", ADE_STOVE,
+                           (xmin + inset + appl / 2, cy - appl, appl / 2, appl / 2)))
+            shapes.append(("rect", ADE_STOVE,
+                           (xmin + inset + appl / 2, cy + appl, appl / 2, appl / 2)))
+            shapes.append(("rect", ADE_CAB,
+                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.30)))
 
     elif rtype == "entryway":
-        shapes.append(("rect", ADE_DOORC, (cx, cy, w * 0.22, h * 0.10)))
+        if long_horizontal:
+            shapes.append(("rect", ADE_CAB,
+                           (cx, ymin + inset + h * 0.04, w * 0.25, h * 0.04)))
+        else:
+            shapes.append(("rect", ADE_CAB,
+                           (xmin + inset + w * 0.04, cy, w * 0.04, h * 0.25)))
 
     elif rtype in ("balcony", "sunroom"):
-        shapes.append(("ellipse", ADE_SOFA, (cx, cy, w * 0.20, h * 0.16)))
+        if long_horizontal:
+            shapes.append(("rect", ADE_SOFA,
+                           (cx, ymax - inset - h * 0.09, w * 0.22, h * 0.09)))
+            shapes.append(("ellipse", ADE_TABLE,
+                           (cx, cy - h * 0.05, w * 0.06, h * 0.05)))
+        else:
+            shapes.append(("rect", ADE_SOFA,
+                           (xmax - inset - w * 0.09, cy, w * 0.09, h * 0.22)))
+            shapes.append(("ellipse", ADE_TABLE,
+                           (cx - w * 0.05, cy, w * 0.05, h * 0.06)))
 
     elif rtype in ("basement", "attic", "studio"):
-        shapes.append(("rect", ADE_SOFA, (cx, cy, w * 0.28, h * 0.14)))
+        if long_horizontal:
+            shapes.append(("rect", ADE_SOFA,
+                           (cx, ymin + inset + h * 0.09, w * 0.28, h * 0.09)))
+        else:
+            shapes.append(("rect", ADE_SOFA,
+                           (xmin + inset + w * 0.09, cy, w * 0.09, h * 0.28)))
 
     return shapes
 
