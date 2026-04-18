@@ -240,29 +240,143 @@ ADE_CEILING = (120, 120, 80)
 ADE_WINDOW = (230, 230, 230)
 ADE_DOOR = (8, 255, 51)
 
-# Furniture-anchor colors -- RGB triples from the standard ADE20K palette so
+# Furniture colors -- RGB triples from the standard ADE20K palette so
 # ControlNet-Seg (lllyasviel/control_v11p_sd15_seg) recognizes them as the
-# intended object class. These are ONE SMALL BLOB per room, NOT a whole-room
-# fill (that was making SD tile giant furniture across entire rooms).
+# intended object class.
+ADE_SOFA   = (11, 102, 255)     # class 23
+ADE_BED    = (204, 5, 255)      # class 7
+ADE_TABLE  = (255, 6, 82)       # class 15 (dining / coffee table)
+ADE_CAB    = (224, 5, 255)      # class 10 (cabinet / kitchen counter)
+ADE_BATH   = (0, 102, 200)      # class 37 (bathtub)
+ADE_DESK   = (8, 255, 214)      # class 33
+ADE_WARDR  = (0, 163, 255)      # class 35 (wardrobe / closet)
+ADE_STOVE  = (255, 224, 0)      # appliance / washer
+ADE_DOORC  = (8, 255, 51)       # class 14 (door)
+
+# Legacy single-color per-room hint (kept for any outside caller; new code
+# uses _room_furniture_shapes which gives richer multi-object layouts).
 ROOM_ANCHOR_COLORS = {
-    "living room":    (11, 102, 255),   # sofa        (ADE class 23)
-    "bedroom":        (204, 5, 255),    # bed         (ADE class 7)
-    "kitchen":        (224, 5, 255),    # cabinet     (ADE class 10)
-    "bathroom":       (0, 102, 200),    # bathtub     (ADE class 37)
-    "dining room":    (255, 6, 82),     # table       (ADE class 15)
-    "office":         (8, 255, 214),    # desk        (ADE class 33)
-    "hallway":        None,             # corridor = no furniture anchor
-    "closet":         (0, 163, 255),    # wardrobe    (ADE class 35)
-    "laundry room":   (255, 224, 0),    # washer-ish
-    "entryway":       (8, 255, 51),     # door        (ADE class 14)
-    "balcony":        (11, 102, 255),   # sofa on balcony
-    "basement":       (11, 102, 255),   # sofa
-    "kids room":      (204, 5, 255),    # bed
-    "studio":         (11, 102, 255),   # sofa
+    "living room":    ADE_SOFA,
+    "bedroom":        ADE_BED,
+    "kitchen":        ADE_CAB,
+    "bathroom":       ADE_BATH,
+    "dining room":    ADE_TABLE,
+    "office":         ADE_DESK,
+    "hallway":        None,
+    "closet":         ADE_WARDR,
+    "laundry room":   ADE_STOVE,
+    "entryway":       ADE_DOORC,
+    "balcony":        ADE_SOFA,
+    "basement":       ADE_SOFA,
+    "kids room":      ADE_BED,
+    "studio":         ADE_SOFA,
     "full apartment": None,
-    "attic":          (11, 102, 255),
-    "sunroom":        (11, 102, 255),
+    "attic":          ADE_SOFA,
+    "sunroom":        ADE_SOFA,
 }
+
+
+def _room_furniture_shapes(rtype, bbox):
+    """
+    Return a list of furniture "shapes" to paint inside a room polygon,
+    ordered from LARGEST/FURTHEST-BACK to SMALLEST/CLOSEST (later shapes
+    paint on top).
+
+    Each shape is (kind, color, params) where:
+      kind   = "rect"    -> params = (cx, cy, rx, ry)
+      kind   = "ellipse" -> params = (cx, cy, rx, ry)
+
+    Sizes are expressed as fractions of the room's axis-aligned bbox so
+    furniture scales with the room. bbox = (xmin, ymin, xmax, ymax).
+
+    The shapes are deliberately BIG enough to force SD to render real
+    furniture (not empty floor), but leave clear floor margin around them
+    so the model doesn't tile them across the whole room.
+    """
+    xmin, ymin, xmax, ymax = bbox
+    w = max(1, xmax - xmin)
+    h = max(1, ymax - ymin)
+    cx = (xmin + xmax) / 2.0
+    cy = (ymin + ymax) / 2.0
+    # orient the bigger axis so sofas / beds lie along the longer wall
+    long_horizontal = w >= h
+
+    shapes = []
+
+    if rtype in ("bedroom", "kids room"):
+        # Bed: large rectangle centered, occupying ~55% x 40% of bbox
+        if long_horizontal:
+            rx, ry = w * 0.28, h * 0.22
+        else:
+            rx, ry = w * 0.22, h * 0.28
+        shapes.append(("rect", ADE_BED, (cx, cy, rx, ry)))
+        # Wardrobe: thin strip along the shorter wall opposite
+        if long_horizontal:
+            shapes.append(("rect", ADE_WARDR, (cx, ymin + h * 0.10, w * 0.28, h * 0.06)))
+        else:
+            shapes.append(("rect", ADE_WARDR, (xmin + w * 0.10, cy, w * 0.06, h * 0.28)))
+
+    elif rtype == "living room":
+        # Sofa: long rectangle along the longer axis
+        if long_horizontal:
+            rx, ry = w * 0.32, h * 0.12
+            shapes.append(("rect", ADE_SOFA, (cx, cy - h * 0.08, rx, ry)))
+            # coffee table in front of sofa
+            shapes.append(("ellipse", ADE_TABLE, (cx, cy + h * 0.05, w * 0.10, h * 0.06)))
+        else:
+            rx, ry = w * 0.12, h * 0.32
+            shapes.append(("rect", ADE_SOFA, (cx - w * 0.08, cy, rx, ry)))
+            shapes.append(("ellipse", ADE_TABLE, (cx + w * 0.05, cy, w * 0.06, h * 0.10)))
+
+    elif rtype == "kitchen":
+        # Counter strip along a wall + central island
+        if long_horizontal:
+            shapes.append(("rect", ADE_CAB, (cx, ymin + h * 0.12, w * 0.38, h * 0.08)))
+            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.05, w * 0.22, h * 0.09)))
+        else:
+            shapes.append(("rect", ADE_CAB, (xmin + w * 0.12, cy, w * 0.08, h * 0.38)))
+            shapes.append(("rect", ADE_CAB, (cx + w * 0.05, cy, w * 0.09, h * 0.22)))
+
+    elif rtype == "bathroom":
+        # Bathtub + vanity
+        if long_horizontal:
+            shapes.append(("rect", ADE_BATH, (cx, cy - h * 0.08, w * 0.30, h * 0.14)))
+            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.10, w * 0.22, h * 0.06)))
+        else:
+            shapes.append(("rect", ADE_BATH, (cx - w * 0.08, cy, w * 0.14, h * 0.30)))
+            shapes.append(("rect", ADE_CAB, (cx + w * 0.10, cy, w * 0.06, h * 0.22)))
+
+    elif rtype == "dining room":
+        # Round table centered
+        r = min(w, h) * 0.22
+        shapes.append(("ellipse", ADE_TABLE, (cx, cy, r, r)))
+
+    elif rtype == "office":
+        if long_horizontal:
+            shapes.append(("rect", ADE_DESK, (cx, ymin + h * 0.20, w * 0.32, h * 0.08)))
+        else:
+            shapes.append(("rect", ADE_DESK, (xmin + w * 0.20, cy, w * 0.08, h * 0.32)))
+
+    elif rtype == "closet":
+        if long_horizontal:
+            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.38, h * 0.14)))
+        else:
+            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.14, h * 0.38)))
+
+    elif rtype == "laundry room":
+        shapes.append(("rect", ADE_STOVE, (cx, cy, w * 0.28, h * 0.14)))
+
+    elif rtype == "entryway":
+        shapes.append(("rect", ADE_DOORC, (cx, cy, w * 0.22, h * 0.10)))
+
+    elif rtype in ("balcony", "sunroom"):
+        shapes.append(("ellipse", ADE_SOFA, (cx, cy, w * 0.20, h * 0.16)))
+
+    elif rtype in ("basement", "attic", "studio"):
+        shapes.append(("rect", ADE_SOFA, (cx, cy, w * 0.28, h * 0.14)))
+
+    # hallway / full apartment -> no furniture anchors
+    return shapes
 
 
 def _rasterize_rooms_mask(rooms, size_wh):
@@ -339,20 +453,41 @@ def _rasterize_rooms_mask(rooms, size_wh):
         if not changed:
             break
 
-    # ---- 4) render floor + anchor blobs ----
+    # ---- 4) render floor + realistic furniture layouts per room type ----
     out = np.zeros((h, w, 3), dtype=np.uint8)
     out[label_map > 0] = ADE_FLOOR
 
     for idx, poly in enumerate(parsed, start=1):
-        color = ROOM_ANCHOR_COLORS.get(poly["type"])
-        if color is None:
+        room_mask = label_map == idx
+        if not room_mask.any():
             continue
         xs, ys = poly["pts"][:, 0], poly["pts"][:, 1]
-        cx = int(xs.mean())
-        cy = int(ys.mean())
-        extent = min(int(xs.max() - xs.min()), int(ys.max() - ys.min()))
-        r_blob = max(10, int(extent * 0.18))
-        cv2.circle(out, (cx, cy), r_blob, color, -1)
+        bbox = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
+        shapes = _room_furniture_shapes(poly["type"], bbox)
+
+        # Paint each shape onto a scratch canvas then write into `out` only
+        # where it falls inside THIS room's territory (prevents furniture
+        # bleeding into neighbouring rooms even if the bbox extends past
+        # the polygon because the shape is oriented by the bbox).
+        for kind, color, params in shapes:
+            scratch = np.zeros((h, w), dtype=np.uint8)
+            pcx, pcy, prx, pry = params
+            cx_i, cy_i = int(pcx), int(pcy)
+            rx_i = max(1, int(prx))
+            ry_i = max(1, int(pry))
+            if kind == "rect":
+                x0 = max(0, cx_i - rx_i)
+                y0 = max(0, cy_i - ry_i)
+                x1 = min(w - 1, cx_i + rx_i)
+                y1 = min(h - 1, cy_i + ry_i)
+                cv2.rectangle(scratch, (x0, y0), (x1, y1), 255, -1)
+            else:  # "ellipse"
+                cv2.ellipse(scratch, (cx_i, cy_i), (rx_i, ry_i),
+                            0, 0, 360, 255, -1)
+            write = (scratch > 0) & room_mask
+            out[write] = color
+
+        # balcony / sunroom window strip on longest edge
         if poly["type"] in ("balcony", "sunroom"):
             pts = poly["pts"]
             best = (0.0, 0, 1)
@@ -412,14 +547,15 @@ def _synthesize_depth_from_mask(seg_img):
         return np.all(arr == c, axis=-1)
 
     depth = np.zeros((h, w), dtype=np.uint8)
-    # floor fills first
-    depth[_match(ADE_FLOOR)] = 110
-    # furniture anchor blobs sit at floor level (same plane)
-    for color in ROOM_ANCHOR_COLORS.values():
-        if color is not None:
-            depth[_match(color)] = 110
-    depth[_match(ADE_WINDOW)] = 60
-    depth[_match(ADE_WALL)] = 230
+    depth[_match(ADE_FLOOR)] = 100
+    # furniture pixels sit ABOVE the floor plane -- gives SD real 3D cues
+    # instead of treating furniture anchors as painted floor (which was
+    # producing empty rooms).
+    for color in (ADE_SOFA, ADE_BED, ADE_TABLE, ADE_CAB, ADE_BATH,
+                  ADE_DESK, ADE_WARDR, ADE_STOVE, ADE_DOORC):
+        depth[_match(color)] = 150
+    depth[_match(ADE_WINDOW)] = 55
+    depth[_match(ADE_WALL)] = 235
 
     # soften transitions so depth-net doesn't see step edges
     depth = cv2.GaussianBlur(depth, (7, 7), 0)
@@ -675,10 +811,12 @@ class InteriorAI:
                 for r in rooms
                 if r
             )
-            # Balanced conditioning: both nets get trustworthy, synthesized
-            # inputs so we can dial them to moderate strength without collapse.
-            cn_scales = [0.4, 0.75]
-            guidance_scale = 5.5
+            # Balanced conditioning: mask drives layout & furniture placement,
+            # text prompt drives style & materials. Slightly higher guidance
+            # so the prompt's furniture descriptors actually render instead of
+            # getting glossed over as empty floor.
+            cn_scales = [0.45, 0.70]
+            guidance_scale = 6.5
         else:
             depth_img = self._get_depth_image(image_bgr, size_wh)
             seg_map = self._get_segmentation_map(image_bgr)

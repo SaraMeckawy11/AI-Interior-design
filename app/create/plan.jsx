@@ -769,27 +769,27 @@ export default function PlanEditor() {
     return gridPositionLabel(c.x / canvasSize.width, c.y / canvasSize.height);
   };
 
-  // Compact signature-furniture hints per room type. Kept to 2 items each so
-  // the full prompt (with layout phrase) stays under the 77-token CLIP limit
-  // even for apartments with 5-6 rooms.
+  // Ultra-compact furniture hints (2 items each). Total prompt with 6 rooms
+  // stays around 55-65 CLIP tokens -- safely under the 77-token truncation
+  // limit so critical words like "furnished" aren't cut off.
   const ROOM_FURNITURE = {
-    "living room":  "sofa, tv unit",
-    "bedroom":      "bed, wardrobe",
-    "kitchen":      "island, cabinets",
-    "bathroom":     "vanity, shower",
-    "dining room":  "dining table, chairs",
-    "office":       "desk, bookshelf",
-    "kids room":    "bed, toys",
+    "living room":  "sofa tv",
+    "bedroom":      "bed wardrobe",
+    "kitchen":      "island cabinets",
+    "bathroom":     "vanity shower",
+    "dining room":  "table chairs",
+    "office":       "desk shelf",
+    "kids room":    "bed toys",
     "hallway":      "",
-    "closet":       "shelves, mirror",
-    "laundry room": "washer, dryer",
-    "entryway":     "console, mirror",
-    "balcony":      "outdoor seating, plants",
-    "sunroom":      "lounge seating, plants",
-    "studio":       "sofa bed, kitchenette",
-    "basement":     "seating, tv",
-    "attic":        "seating, storage",
-    "full apartment": "cohesive furniture",
+    "closet":       "shelves",
+    "laundry room": "washer dryer",
+    "entryway":     "console mirror",
+    "balcony":      "seating plants",
+    "sunroom":      "seating plants",
+    "studio":       "sofa kitchenette",
+    "basement":     "seating tv",
+    "attic":        "seating",
+    "full apartment": "",
   };
 
   const buildPrompt = () => {
@@ -801,26 +801,22 @@ export default function PlanEditor() {
       const furniture = ROOM_FURNITURE[rk] || "";
       const furnishedPart = furniture ? ` with ${furniture}` : "";
       return (
-        `photorealistic 3D interior of a ${rk}${furnishedPart}, ` +
-        `modern interior design, ${style} style, ${tone} color palette, ` +
-        `cohesive layout, soft natural lighting, 8k render, high detail`
+        `fully furnished modern ${rk}${furnishedPart}, ` +
+        `${style} style, ${tone} palette, ` +
+        `photorealistic 3D, soft lighting, 8k`
       );
     }
 
-    // Guided mode — compute per-room spatial placement.
+    // Guided mode
     const assigned = paths.filter((p) => p.roomType);
 
     if (assigned.length === 0) {
       return (
-        `photorealistic 3D furnished apartment interior, ` +
-        `modern interior design, ${style} style, ${tone} color palette, ` +
-        `cohesive layout, soft natural lighting, 8k render`
+        `fully furnished modern apartment interior, ` +
+        `${style} style, ${tone} palette, photorealistic 3D, 8k`
       );
     }
 
-    // Group rooms by type with count + position list (one phrase per type)
-    // so SD sees each room type ONCE, not duplicated across "room list" and
-    // "layout list" (that was making the model hallucinate multiple rooms).
     const plural = (type, n) => {
       if (n <= 1) return type;
       if (type.endsWith("y")) return type.slice(0, -1) + "ies";
@@ -836,26 +832,23 @@ export default function PlanEditor() {
       byType.get(t).push(pos);
     }
 
+    // Word order matters for CLIP truncation: put the most important
+    // concept ("fully furnished") first, then per-room furniture+position,
+    // then style/quality at the tail (truncation-safe).
     const phrases = [];
     for (const [type, positions] of byType) {
       const n = positions.length;
-      const label = `${n === 1 ? "a" : n} ${plural(type, n)}`;
+      const label = `${n === 1 ? "" : n + " "}${plural(type, n)}`;
       const furniture = ROOM_FURNITURE[type] || "";
-      const furnishedPart = furniture ? ` (${furniture})` : "";
+      const withPart = furniture ? ` with ${furniture}` : "";
       const uniquePositions = [...new Set(positions)];
-      phrases.push(
-        `${label}${furnishedPart} at ${uniquePositions.join(" and ")}`,
-      );
+      phrases.push(`${label}${withPart} at ${uniquePositions.join(" & ")}`);
     }
 
-    const layoutPhrase = phrases.join(", ");
-
     return (
-      `photorealistic 3D furnished apartment interior, top-down isometric view, ` +
-      `${layoutPhrase}, ` +
-      `each room fully furnished in its exact drawn location, one wall between rooms, ` +
-      `modern interior design, ${style} style, ${tone} palette, ` +
-      `cohesive layout, soft natural lighting, 8k render`
+      `fully furnished modern apartment interior, top-down 3D, ` +
+      `${phrases.join(", ")}, ` +
+      `${style} style, ${tone} palette, photorealistic, soft lighting, 8k`
     );
   };
 
