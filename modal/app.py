@@ -221,184 +221,57 @@ WINDOW_KEYWORDS = ["window", "windowpane"]
 
 
 # ---------------------------------------------------------------------------
-# ADE20K SEMANTIC ANCHORS (for guided-mode polygon rasterization)
+# GUIDED-MODE SEGMENTATION (only addition on top of the original modal/app.py)
 #
-# ControlNet-Seg (lllyasviel/control_v11p_sd15_seg) is trained on ADE20K
-# palette. To place a room EXACTLY where the user drew it, we rasterize each
-# drawn polygon into a synthetic ADE20K mask, filling the polygon with the
-# dominant furniture class color for the room type (bed for bedroom, sofa for
-# living room, bathtub for bathroom, …). Polygon boundaries are repainted as
-# ADE "wall" pixels so the generator keeps the room divisions.
-#
-# Colors below follow the standard ADE20K palette used by the ControlNet-Seg
-# reference checkpoint. The exact RGB is what matters — the model has learned
-# to associate each triple with a specific semantic class.
+# When the frontend (plan.jsx, "guided" mode) sends drawn room polygons we
+# rasterize them into a clean ADE20K-style semantic mask and feed THAT into
+# the seg ControlNet, instead of the UperNet-extracted segmentation of the
+# uploaded floor-plan image. Everything else in this file is unchanged.
 # ---------------------------------------------------------------------------
+
+# ADE20K palette colors (R, G, B) — only the two we need: wall + floor.
 ADE_WALL = (120, 120, 120)
 ADE_FLOOR = (80, 50, 50)
-ADE_CEILING = (120, 120, 80)
-ADE_WINDOW = (230, 230, 230)
-ADE_DOOR = (8, 255, 51)
 
-# Furniture colors -- RGB triples from the standard ADE20K palette so
-# ControlNet-Seg (lllyasviel/control_v11p_sd15_seg) recognizes them as the
-# intended object class.
-ADE_SOFA   = (11, 102, 255)     # class 23
-ADE_BED    = (204, 5, 255)      # class 7
-ADE_TABLE  = (255, 6, 82)       # class 15 (dining / coffee table)
-ADE_CAB    = (224, 5, 255)      # class 10 (cabinet / kitchen counter)
-ADE_BATH   = (0, 102, 200)      # class 37 (bathtub)
-ADE_DESK   = (8, 255, 214)      # class 33
-ADE_WARDR  = (0, 163, 255)      # class 35 (wardrobe / closet)
-ADE_STOVE  = (255, 224, 0)      # appliance / washer
-ADE_DOORC  = (8, 255, 51)       # class 14 (door)
-
-# Legacy single-color per-room hint (kept for any outside caller; new code
-# uses _room_furniture_shapes which gives richer multi-object layouts).
+# Stable per-room-type fill colors picked from the ADE palette so SD's seg
+# ControlNet associates each colored region with the right space type.
 ROOM_ANCHOR_COLORS = {
-    "living room":    ADE_SOFA,
-    "bedroom":        ADE_BED,
-    "kitchen":        ADE_CAB,
-    "bathroom":       ADE_BATH,
-    "dining room":    ADE_TABLE,
-    "office":         ADE_DESK,
-    "hallway":        None,
-    "closet":         ADE_WARDR,
-    "laundry room":   ADE_STOVE,
-    "entryway":       ADE_DOORC,
-    "balcony":        ADE_SOFA,
-    "basement":       ADE_SOFA,
-    "kids room":      ADE_BED,
-    "studio":         ADE_SOFA,
-    "full apartment": None,
-    "attic":          ADE_SOFA,
-    "sunroom":        ADE_SOFA,
+    "living room":    (11, 102, 255),    # sofa class -> living-room cue
+    "bedroom":        (255, 245, 0),     # bed
+    "kids room":      (255, 245, 0),
+    "kitchen":        (50, 50, 250),     # cabinet
+    "bathroom":       (200, 100, 100),   # bathtub
+    "dining room":    (255, 51, 7),      # table
+    "office":         (255, 102, 0),     # desk
+    "closet":         (102, 51, 0),      # wardrobe
+    "laundry room":   (235, 12, 255),    # appliance
+    "entryway":       (8, 255, 51),      # door
+    "balcony":        (230, 230, 230),   # window
+    "sunroom":        (230, 230, 230),
+    "studio":         (11, 102, 255),
+    "basement":       (11, 102, 255),
+    "attic":          (11, 102, 255),
+    "hallway":        ADE_FLOOR,
+    "full apartment": ADE_FLOOR,
 }
 
 
-def _room_furniture_shapes(rtype, bbox):
-    """
-    Return a list of furniture "shapes" to paint inside a room polygon.
+def _rasterize_rooms_mask(rooms, size_wh):
+    """Build a clean ADE20K mask from drawn polygons.
 
-    Each shape is (kind, color, params) where:
-      kind = "rect"    -> params = (cx, cy, rx, ry)
-      kind = "ellipse" -> params = (cx, cy, rx, ry)
-
-    DESIGN NOTE: we deliberately keep the mask SPARSE -- 1 or 2 blobs per
-    room, not a fully-staged layout. Dense layouts over-constrain
-    ControlNet-Seg and force SD into a schematic/isometric look. Sparse
-    blobs just nudge SD toward "there is a bed here, a sofa here" while
-    leaving enough freedom for photorealistic textures, lighting, and
-    staging to emerge from the diffusion prior (same quality as
-    non-guided quick mode).
-    """
-    xmin, ymin, xmax, ymax = bbox
-    w = max(1, xmax - xmin)
-    h = max(1, ymax - ymin)
-    cx = (xmin + xmax) / 2.0
-    cy = (ymin + ymax) / 2.0
-    long_horizontal = w >= h
-
-    shapes = []
-
-    if rtype in ("bedroom", "kids room"):
-        if long_horizontal:
-            rx, ry = w * 0.28, h * 0.22
-        else:
-            rx, ry = w * 0.22, h * 0.28
-        shapes.append(("rect", ADE_BED, (cx, cy, rx, ry)))
-        if long_horizontal:
-            shapes.append(("rect", ADE_WARDR, (cx, ymin + h * 0.10, w * 0.28, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_WARDR, (xmin + w * 0.10, cy, w * 0.06, h * 0.28)))
-
-    elif rtype == "living room":
-        if long_horizontal:
-            shapes.append(("rect", ADE_SOFA, (cx, cy - h * 0.08, w * 0.32, h * 0.12)))
-            shapes.append(("ellipse", ADE_TABLE, (cx, cy + h * 0.05, w * 0.10, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_SOFA, (cx - w * 0.08, cy, w * 0.12, h * 0.32)))
-            shapes.append(("ellipse", ADE_TABLE, (cx + w * 0.05, cy, w * 0.06, h * 0.10)))
-
-    elif rtype == "kitchen":
-        if long_horizontal:
-            shapes.append(("rect", ADE_CAB, (cx, ymin + h * 0.12, w * 0.38, h * 0.08)))
-            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.05, w * 0.22, h * 0.09)))
-        else:
-            shapes.append(("rect", ADE_CAB, (xmin + w * 0.12, cy, w * 0.08, h * 0.38)))
-            shapes.append(("rect", ADE_CAB, (cx + w * 0.05, cy, w * 0.09, h * 0.22)))
-
-    elif rtype == "bathroom":
-        if long_horizontal:
-            shapes.append(("rect", ADE_BATH, (cx, cy - h * 0.08, w * 0.30, h * 0.14)))
-            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.10, w * 0.22, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_BATH, (cx - w * 0.08, cy, w * 0.14, h * 0.30)))
-            shapes.append(("rect", ADE_CAB, (cx + w * 0.10, cy, w * 0.06, h * 0.22)))
-
-    elif rtype == "dining room":
-        r = min(w, h) * 0.22
-        shapes.append(("ellipse", ADE_TABLE, (cx, cy, r, r)))
-
-    elif rtype == "office":
-        if long_horizontal:
-            shapes.append(("rect", ADE_DESK, (cx, ymin + h * 0.20, w * 0.32, h * 0.08)))
-        else:
-            shapes.append(("rect", ADE_DESK, (xmin + w * 0.20, cy, w * 0.08, h * 0.32)))
-
-    elif rtype == "closet":
-        if long_horizontal:
-            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.38, h * 0.14)))
-        else:
-            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.14, h * 0.38)))
-
-    elif rtype == "laundry room":
-        shapes.append(("rect", ADE_STOVE, (cx, cy, w * 0.28, h * 0.14)))
-
-    elif rtype == "entryway":
-        shapes.append(("rect", ADE_DOORC, (cx, cy, w * 0.22, h * 0.10)))
-
-    elif rtype in ("balcony", "sunroom"):
-        shapes.append(("ellipse", ADE_SOFA, (cx, cy, w * 0.20, h * 0.16)))
-
-    elif rtype in ("basement", "attic", "studio"):
-        shapes.append(("rect", ADE_SOFA, (cx, cy, w * 0.28, h * 0.14)))
-
-    return shapes
-
-
-def _rasterize_rooms_mask(rooms, size_wh, user_doors=None):
-    """
-    Build a clean ADE20K-style semantic mask from drawn room polygons, with
-    automatic geometry repair.
-
-    What it does (in this order):
-
-      1. Parse each polygon; points are clipped to [0,1] then scaled.
-      2. Fill each room into an integer LABEL MAP (0 = outside, 1..N = room
-         id). Later-drawn polygons win on overlap -- matches user intuition
-         ("my last stroke is what I meant").
-      3. GAP FILL: for a few iterations, each room dilates 1px into any
-         adjacent background. This closes up to ~2.5% of the shorter canvas
-         dimension of accidental gap between rooms the user meant to make
-         adjacent.
-      4. Paint floor everywhere a room won, plus small centered furniture
-         anchor blobs (~18% of polygon extent) per room.
-      5. WALLS at BOUNDARIES: a pixel becomes wall only where the label map
-         changes to a DIFFERENT label (including 0/outside). This guarantees
-         EXACTLY ONE wall between any two adjacent rooms -- no double walls
-         even if the user's polygons overlapped on purpose, and no gaps.
-      6. Balcony / sunroom gets an ADE_WINDOW strip on its longest edge.
-
-    Returns: PIL.Image in RGB at `size_wh`.
+    Each polygon is filled with its room-type color (from ROOM_ANCHOR_COLORS,
+    falling back to ADE_FLOOR), then wall-colored borders are drawn around
+    every polygon edge so SD sees a "room with walls" structure for each
+    drawn shape. No furniture, no doors, no gap-fill — just the minimal
+    layout signal the user asked for.
     """
     import cv2
     import numpy as np
     from PIL import Image
 
     w, h = size_wh
+    out = np.zeros((h, w, 3), dtype=np.uint8)
 
-    # ---- 1) parse ----
     parsed = []
     for r in rooms or []:
         rtype = (r.get("type") or "").strip().lower()
@@ -411,245 +284,25 @@ def _rasterize_rooms_mask(rooms, size_wh, user_doors=None):
             except (TypeError, ValueError):
                 continue
         if len(pts) >= 3:
-            parsed.append({"type": rtype, "pts": np.array(pts, dtype=np.int32)})
+            parsed.append((rtype, np.array(pts, dtype=np.int32)))
 
     if not parsed:
         return Image.new("RGB", (w, h), (0, 0, 0))
 
-    # ---- 2) label map via painter's algorithm ----
-    label_map = np.zeros((h, w), dtype=np.int32)
-    for idx, poly in enumerate(parsed, start=1):
-        cv2.fillPoly(label_map, [poly["pts"]], idx)
+    # Fill each polygon with its room color (later polygons paint on top —
+    # matches user intent: most recent stroke wins on overlap).
+    for rtype, poly in parsed:
+        color = ROOM_ANCHOR_COLORS.get(rtype, ADE_FLOOR)
+        cv2.fillPoly(out, [poly], color)
 
-    # ---- 3) gap fill: iterative 1px dilation into background ----
-    max_gap_px = max(4, int(min(w, h) * 0.025))
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    for _ in range(max_gap_px):
-        background = label_map == 0
-        if not background.any():
-            break
-        next_map = label_map.copy()
-        changed = False
-        for idx in range(1, len(parsed) + 1):
-            mask = (label_map == idx).astype(np.uint8)
-            dilated = cv2.dilate(mask, kernel, iterations=1)
-            write = background & (dilated > 0) & (next_map == 0)
-            if write.any():
-                next_map[write] = idx
-                changed = True
-        label_map = next_map
-        if not changed:
-            break
-
-    # ---- 4) render floor + realistic furniture layouts per room type ----
-    out = np.zeros((h, w, 3), dtype=np.uint8)
-    out[label_map > 0] = ADE_FLOOR
-
-    for idx, poly in enumerate(parsed, start=1):
-        room_mask = label_map == idx
-        if not room_mask.any():
-            continue
-        xs, ys = poly["pts"][:, 0], poly["pts"][:, 1]
-        bbox = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
-        shapes = _room_furniture_shapes(poly["type"], bbox)
-
-        # Paint each shape onto a scratch canvas then write into `out` only
-        # where it falls inside THIS room's territory (prevents furniture
-        # bleeding into neighbouring rooms even if the bbox extends past
-        # the polygon because the shape is oriented by the bbox).
-        for kind, color, params in shapes:
-            scratch = np.zeros((h, w), dtype=np.uint8)
-            pcx, pcy, prx, pry = params
-            cx_i, cy_i = int(pcx), int(pcy)
-            rx_i = max(1, int(prx))
-            ry_i = max(1, int(pry))
-            if kind == "rect":
-                x0 = max(0, cx_i - rx_i)
-                y0 = max(0, cy_i - ry_i)
-                x1 = min(w - 1, cx_i + rx_i)
-                y1 = min(h - 1, cy_i + ry_i)
-                cv2.rectangle(scratch, (x0, y0), (x1, y1), 255, -1)
-            else:  # "ellipse"
-                cv2.ellipse(scratch, (cx_i, cy_i), (rx_i, ry_i),
-                            0, 0, 360, 255, -1)
-            write = (scratch > 0) & room_mask
-            out[write] = color
-
-        # balcony / sunroom window strip on longest edge
-        if poly["type"] in ("balcony", "sunroom"):
-            pts = poly["pts"]
-            best = (0.0, 0, 1)
-            for i in range(len(pts)):
-                a = pts[i]
-                b = pts[(i + 1) % len(pts)]
-                L = float(np.hypot(b[0] - a[0], b[1] - a[1]))
-                if L > best[0]:
-                    best = (L, i, (i + 1) % len(pts))
-            a = tuple(int(v) for v in pts[best[1]])
-            b = tuple(int(v) for v in pts[best[2]])
-            win_w = max(8, int(min(w, h) * 0.018))
-            cv2.line(out, a, b, ADE_WINDOW, thickness=win_w)
-
-    # ---- 5) walls only at label boundaries (single wall between rooms) ----
-    boundaries = np.zeros((h, w), dtype=np.uint8)
-    diff_v = (label_map[:-1, :] != label_map[1:, :])
-    diff_h = (label_map[:, :-1] != label_map[:, 1:])
-    boundaries[:-1, :] |= diff_v.astype(np.uint8)
-    boundaries[1:, :] |= diff_v.astype(np.uint8)
-    boundaries[:, :-1] |= diff_h.astype(np.uint8)
-    boundaries[:, 1:] |= diff_h.astype(np.uint8)
-
-    wall_thickness = max(8, int(min(w, h) * 0.016))
-    wall_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (wall_thickness, wall_thickness)
-    )
-    boundaries = cv2.dilate(boundaries, wall_kernel, iterations=1)
-    out[boundaries > 0] = ADE_WALL
-
-    # ---- 6) AUTO DOOR OPENINGS on shared walls ----
-    # For every pair of adjacent rooms, punch a door in the middle of the
-    # shared wall. We only REPLACE wall pixels so we don't bleed into floor
-    # or furniture. One door per room pair (no duplicates).
-    door_thickness = wall_thickness + 2
-    wall_rgb = np.array(ADE_WALL, dtype=np.uint8)
-    is_wall = np.all(out == wall_rgb, axis=-1)
-    placed_pairs = set()
-    for idx, poly in enumerate(parsed, start=1):
-        pts = poly["pts"]
-        n = len(pts)
-        for i in range(n):
-            a = pts[i]
-            b = pts[(i + 1) % n]
-            dx = float(b[0] - a[0])
-            dy = float(b[1] - a[1])
-            L = float(np.hypot(dx, dy))
-            if L < wall_thickness * 3:
-                continue
-            mx = (a[0] + b[0]) / 2.0
-            my = (a[1] + b[1]) / 2.0
-            # Perpendicular to the edge. We don't know which side is
-            # "outside this polygon" up front — sample both.
-            nx = -dy / L
-            ny = dx / L
-            step = wall_thickness * 1.5
-            s1x = int(mx + nx * step)
-            s1y = int(my + ny * step)
-            s2x = int(mx - nx * step)
-            s2y = int(my - ny * step)
-            outside_label = 0
-            if 0 <= s1x < w and 0 <= s1y < h and label_map[s1y, s1x] != idx:
-                outside_label = int(label_map[s1y, s1x])
-            elif 0 <= s2x < w and 0 <= s2y < h and label_map[s2y, s2x] != idx:
-                outside_label = int(label_map[s2y, s2x])
-            # Only punch doors on INTER-room walls (not on exterior walls
-            # to the outside / background). Exterior doors belong on the
-            # apartment entrance, which we can't reliably identify from
-            # polygons alone -- skipping them avoids random holes in the
-            # building envelope.
-            if outside_label <= 0 or outside_label == idx:
-                continue
-            pair = (min(idx, outside_label), max(idx, outside_label))
-            if pair in placed_pairs:
-                continue
-            placed_pairs.add(pair)
-            # Door segment: centered on edge midpoint, ~28% of edge length
-            ux = dx / L
-            uy = dy / L
-            door_len = max(wall_thickness * 3, min(L * 0.28, min(w, h) * 0.12))
-            ax = int(mx - ux * door_len / 2)
-            ay = int(my - uy * door_len / 2)
-            bx = int(mx + ux * door_len / 2)
-            by = int(my + uy * door_len / 2)
-            scratch = np.zeros((h, w), dtype=np.uint8)
-            cv2.line(scratch, (ax, ay), (bx, by), 255,
-                     thickness=door_thickness)
-            # Only REPLACE wall pixels -> clean opening, no bleed into
-            # floor / furniture zones.
-            paint = (scratch > 0) & is_wall
-            if paint.any():
-                out[paint] = ADE_DOOR
-                is_wall[paint] = False  # so next door pair doesn't re-hit
-
-    # ---- 7) USER-DRAWN doors: coordinates come normalized [0, 1]. We
-    # paint them on top of wall pixels with a slightly larger thickness
-    # so they extend onto exterior walls too (apartment entrance doors).
-    if user_doors:
-        for d in user_doors:
-            try:
-                x1 = max(0.0, min(1.0, float(d.get("x1", 0)))) * (w - 1)
-                y1 = max(0.0, min(1.0, float(d.get("y1", 0)))) * (h - 1)
-                x2 = max(0.0, min(1.0, float(d.get("x2", 0)))) * (w - 1)
-                y2 = max(0.0, min(1.0, float(d.get("y2", 0)))) * (h - 1)
-            except (TypeError, ValueError):
-                continue
-            if (x1 - x2) ** 2 + (y1 - y2) ** 2 < 4.0:
-                continue
-            scratch = np.zeros((h, w), dtype=np.uint8)
-            cv2.line(
-                scratch,
-                (int(x1), int(y1)), (int(x2), int(y2)),
-                255,
-                thickness=door_thickness + 2,
-            )
-            # Paint ONLY where we actually have a wall -- doors never bleed
-            # into floor or furniture territory.
-            paint = (scratch > 0) & is_wall
-            if paint.any():
-                out[paint] = ADE_DOOR
-                is_wall[paint] = False
+    # Draw walls along every polygon outline so SD has a clear boundary
+    # signal between rooms and outside.
+    wall_thickness = max(6, int(min(w, h) * 0.014))
+    for _rtype, poly in parsed:
+        cv2.polylines(out, [poly], isClosed=True,
+                      color=ADE_WALL, thickness=wall_thickness)
 
     return Image.fromarray(out)
-
-
-def _synthesize_depth_from_mask(seg_img):
-    """
-    Build a clean ControlNet-Depth conditioning image directly from the
-    rasterized semantic mask. This REPLACES running DPT on the noisy 2D
-    floor plan in guided mode, eliminating the #1 source of hallucinated
-    walls and drafting artifacts (Arabic labels, dimensions, electrical
-    symbols, hatching, door arcs were being read as fake 3D geometry).
-
-    Convention (ControlNet-Depth expects: bright = close to camera):
-      - walls           -> 230  (closest structures)
-      - floor + anchors -> 110  (mid)
-      - windows         -> 60   (farther)
-      - outside         -> 0    (background)
-    """
-    import cv2
-    import numpy as np
-    from PIL import Image
-
-    arr = np.array(seg_img).astype(np.int32)
-    h, w = arr.shape[:2]
-
-    def _match(color):
-        c = np.array(color, dtype=np.int32)
-        return np.all(arr == c, axis=-1)
-
-    # Per-furniture heights give ControlNet-Depth proper 3D object cues so
-    # SD renders real photorealistic furniture (not painted-on shapes).
-    # Convention: bright = close to camera. Heights picked to mimic real
-    # object proportions in a top-down isometric view.
-    depth = np.zeros((h, w), dtype=np.uint8)
-    depth[_match(ADE_FLOOR)] = 95        # floor plane
-    depth[_match(ADE_TABLE)] = 125       # coffee / dining table (low)
-    depth[_match(ADE_BED)] = 135         # bed (mattress + frame)
-    depth[_match(ADE_BATH)] = 140        # bathtub rim
-    depth[_match(ADE_SOFA)] = 145        # sofa back
-    depth[_match(ADE_DESK)] = 150        # desk
-    depth[_match(ADE_STOVE)] = 175       # appliances
-    depth[_match(ADE_CAB)] = 185         # kitchen counter / upper cabinets
-    depth[_match(ADE_WARDR)] = 210       # full-height wardrobe
-    depth[_match(ADE_DOORC)] = 220       # door
-    depth[_match(ADE_WINDOW)] = 50       # window opening (recedes)
-    depth[_match(ADE_WALL)] = 240        # walls closest to camera
-
-    # Stronger blur smooths the step edges between heights so DPT/DepthNet
-    # doesn't read them as hard object boundaries -- mimics the natural
-    # gradient of a real depth map.
-    depth = cv2.GaussianBlur(depth, (11, 11), 0)
-    depth_rgb = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
-    return Image.fromarray(depth_rgb)
 
 
 # ---------------------------------------------------------------------------
@@ -658,10 +311,10 @@ def _synthesize_depth_from_mask(seg_img):
 
 @app.cls(
     image=image,
-    gpu="L40S",  # 48 GB, ~$1.33/hr flex, ~6s/image -> ~$0.0022/image (cheapest per-image).
+    gpu="T4",  # 16 GB, cheapest suitable GPU (~$0.59/hr). Upgrade to "A10G" for ~2x speed.
     volumes={"/cache": hf_cache_vol},
     secrets=[api_key_secret],
-    scaledown_window=5,         # release container 5s after last request (minimizes idle bill)
+    scaledown_window=60,        # keep container warm 60s after last request
     min_containers=0,           # set to 1 for zero-cold-start (adds cost)
     max_containers=3,           # concurrent scale-out
     timeout=600,                # 10 min per-request max
@@ -873,84 +526,42 @@ class InteriorAI:
         rooms: list = None,
         canvas: dict = None,
         mode: str = "",
-        doors: list = None,
+        doors: list = None,  # accepted for API compatibility, intentionally unused
     ):
         """Pure-python callable version. Can be invoked from other Modal apps."""
         image_bgr = self._decode_base64_image(image)
         size_wh = self._resize_orientation(image_bgr)
 
-        # Guided mode: build a synthetic ADE20K mask from the drawn polygons
-        # and use it as the ControlNet-Seg input. This is what forces each
-        # room to land exactly where the user drew it.
-        use_room_mask = (
-            (mode or "").strip().lower() == "guided"
-            and isinstance(rooms, list)
-            and any(r and r.get("polygon") for r in rooms)
-        )
+        depth_img = self._get_depth_image(image_bgr, size_wh)
+        seg_map = self._get_segmentation_map(image_bgr)
+        seg_img = self._get_segmentation_image(seg_map, size_wh)
+        has_window = self._detect_window(seg_map)
 
-        if use_room_mask:
-            # GUIDED MODE
-            # - Build the clean ADE20K mask from the drawn polygons.
-            # - Synthesize depth from that SAME mask (skip DPT on the noisy
-            #   architectural drawing — Arabic labels / dimensions / electrical
-            #   symbols were being interpreted as real 3D geometry).
-            seg_img = _rasterize_rooms_mask(rooms, size_wh, user_doors=doors)
-            depth_img = _synthesize_depth_from_mask(seg_img)
-            has_window = any(
-                (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
-                for r in rooms
-                if r
-            )
-            # Mirror interior.jsx (quick mode) EXACTLY at [0.5, 0.1]. Higher
-            # seg values (we tried 0.28, 0.45) collapsed the render into a
-            # schematic/isometric look. The drawn layout is already encoded
-            # in the DEPTH map (wall elevations + per-furniture heights),
-            # so seg can be a very soft hint of furniture types without
-            # losing placement. This gives the same photorealistic AI feel
-            # that interior.jsx produces.
-            cn_scales = [0.5, 0.1]
-            guidance_scale = 7.5
-        else:
-            depth_img = self._get_depth_image(image_bgr, size_wh)
-            seg_map = self._get_segmentation_map(image_bgr)
-            seg_img = self._get_segmentation_image(seg_map, size_wh)
-            has_window = self._detect_window(seg_map)
-            cn_scales = [0.5, 0.1]
-            guidance_scale = 7.5
+        # Guided-mode override: if the user drew room polygons, replace the
+        # auto-extracted seg map with a rasterized version of THEIR layout.
+        # This is the only behavioral change versus the original modal/app.py.
+        if (mode or "").strip().lower() == "guided" and rooms:
+            try:
+                seg_img = _rasterize_rooms_mask(rooms, size_wh)
+            except Exception:
+                pass
 
         prompt = self._build_prompt(room_type, design_style, color_tone, custom_prompt)
         if has_window:
             prompt = prompt + ", window in place"
 
-        # Keep the base negative IDENTICAL to the pre-fix version so the
-        # interior.jsx / exterior.jsx / quick-mode flows behave exactly as
-        # they did before. Extra drafting- and duplication-blockers only
-        # apply to plan.jsx guided mode (use_room_mask).
         negative = (
             "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
         )
         if not has_window:
             negative += ", no window"
-        if use_room_mask:
-            negative += (
-                ", low quality, deformed, watermark, text, "
-                "duplicate rooms, repeated furniture, tiled pattern, multiple beds, "
-                "multiple sofas, mixed rooms, wrong room in wrong place, mismatched layout, "
-                "rooms outside their boundaries, overlapping room areas, fragmented layout, "
-                "2D floor plan, technical drawing, architectural drafting, dimension lines, "
-                "labels, arabic text, symbols, door swing arcs, plan annotations"
-            )
-
-        # Guided mode benefits from a few extra denoising steps for crisper
-        # textures without a noticeable latency impact.
-        steps = 35 if use_room_mask else 30
 
         result = self.pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            controlnet_conditioning_scale=cn_scales,
+            num_inference_steps=30,
+            guidance_scale=7.5,
+            controlnet_conditioning_scale=[0.5, 0.1],
             negative_prompt=negative,
             generator=self.torch.manual_seed(42),
         )
@@ -966,7 +577,6 @@ class InteriorAI:
             "prompt": prompt,
             "negative_prompt": negative,
             "has_window": has_window,
-            "guided_mask_used": use_room_mask,
         }
 
     # --------------------- public HTTP endpoint ---------------------
@@ -1004,10 +614,10 @@ class InteriorAI:
                 design_style=(body.get("design_style") or "").strip(),
                 color_tone=(body.get("color_tone") or "").strip(),
                 custom_prompt=body.get("custom_prompt") or "",
-                rooms=body.get("rooms") or None,
-                canvas=body.get("canvas") or None,
+                rooms=body.get("rooms") if isinstance(body.get("rooms"), list) else None,
+                canvas=body.get("canvas") if isinstance(body.get("canvas"), dict) else None,
                 mode=(body.get("mode") or "").strip(),
-                doors=body.get("doors") or None,
+                doors=body.get("doors") if isinstance(body.get("doors"), list) else None,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
