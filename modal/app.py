@@ -546,19 +546,28 @@ def _synthesize_depth_from_mask(seg_img):
         c = np.array(color, dtype=np.int32)
         return np.all(arr == c, axis=-1)
 
+    # Per-furniture heights give ControlNet-Depth proper 3D object cues so
+    # SD renders real photorealistic furniture (not painted-on shapes).
+    # Convention: bright = close to camera. Heights picked to mimic real
+    # object proportions in a top-down isometric view.
     depth = np.zeros((h, w), dtype=np.uint8)
-    depth[_match(ADE_FLOOR)] = 100
-    # furniture pixels sit ABOVE the floor plane -- gives SD real 3D cues
-    # instead of treating furniture anchors as painted floor (which was
-    # producing empty rooms).
-    for color in (ADE_SOFA, ADE_BED, ADE_TABLE, ADE_CAB, ADE_BATH,
-                  ADE_DESK, ADE_WARDR, ADE_STOVE, ADE_DOORC):
-        depth[_match(color)] = 150
-    depth[_match(ADE_WINDOW)] = 55
-    depth[_match(ADE_WALL)] = 235
+    depth[_match(ADE_FLOOR)] = 95        # floor plane
+    depth[_match(ADE_TABLE)] = 125       # coffee / dining table (low)
+    depth[_match(ADE_BED)] = 135         # bed (mattress + frame)
+    depth[_match(ADE_BATH)] = 140        # bathtub rim
+    depth[_match(ADE_SOFA)] = 145        # sofa back
+    depth[_match(ADE_DESK)] = 150        # desk
+    depth[_match(ADE_STOVE)] = 175       # appliances
+    depth[_match(ADE_CAB)] = 185         # kitchen counter / upper cabinets
+    depth[_match(ADE_WARDR)] = 210       # full-height wardrobe
+    depth[_match(ADE_DOORC)] = 220       # door
+    depth[_match(ADE_WINDOW)] = 50       # window opening (recedes)
+    depth[_match(ADE_WALL)] = 240        # walls closest to camera
 
-    # soften transitions so depth-net doesn't see step edges
-    depth = cv2.GaussianBlur(depth, (7, 7), 0)
+    # Stronger blur smooths the step edges between heights so DPT/DepthNet
+    # doesn't read them as hard object boundaries -- mimics the natural
+    # gradient of a real depth map.
+    depth = cv2.GaussianBlur(depth, (11, 11), 0)
     depth_rgb = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
     return Image.fromarray(depth_rgb)
 
@@ -811,12 +820,14 @@ class InteriorAI:
                 for r in rooms
                 if r
             )
-            # Balanced conditioning: mask drives layout & furniture placement,
-            # text prompt drives style & materials. Slightly higher guidance
-            # so the prompt's furniture descriptors actually render instead of
-            # getting glossed over as empty floor.
-            cn_scales = [0.45, 0.70]
-            guidance_scale = 6.5
+            # DEPTH-DOMINANT balance (mirrors the quick-mode ratio which is
+            # what gives that photorealistic AI look). Depth carries layout
+            # via elevated walls + per-furniture heights; seg is a soft HINT
+            # of furniture types rather than a hard target. High seg scales
+            # (0.7+) forced the model to mirror the schematic mask instead
+            # of rendering real furniture.
+            cn_scales = [0.55, 0.45]
+            guidance_scale = 7.5
         else:
             depth_img = self._get_depth_image(image_bgr, size_wh)
             seg_map = self._get_segmentation_map(image_bgr)
@@ -848,10 +859,14 @@ class InteriorAI:
                 "labels, arabic text, symbols, door swing arcs, plan annotations"
             )
 
+        # Guided mode benefits from a few extra denoising steps for crisper
+        # textures without a noticeable latency impact.
+        steps = 35 if use_room_mask else 30
+
         result = self.pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
-            num_inference_steps=30,
+            num_inference_steps=steps,
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=cn_scales,
             negative_prompt=negative,

@@ -465,16 +465,24 @@ def synthesize_depth_from_mask(seg_img):
         c = np.array(color, dtype=np.int32)
         return np.all(arr == c, axis=-1)
 
+    # Per-furniture heights give ControlNet-Depth proper 3D object cues so
+    # SD renders real photorealistic furniture (not painted-on shapes).
     depth = np.zeros((h, w), dtype=np.uint8)
-    depth[_match(ADE_FLOOR)] = 100
-    # furniture pixels sit above the floor plane -- gives SD real 3D cues
-    for color in (ADE_SOFA, ADE_BED, ADE_TABLE, ADE_CAB, ADE_BATH,
-                  ADE_DESK, ADE_WARDR, ADE_STOVE, ADE_DOORC):
-        depth[_match(color)] = 150
-    depth[_match(ADE_WINDOW)] = 55
-    depth[_match(ADE_WALL)] = 235
+    depth[_match(ADE_FLOOR)] = 95
+    depth[_match(ADE_TABLE)] = 125
+    depth[_match(ADE_BED)] = 135
+    depth[_match(ADE_BATH)] = 140
+    depth[_match(ADE_SOFA)] = 145
+    depth[_match(ADE_DESK)] = 150
+    depth[_match(ADE_STOVE)] = 175
+    depth[_match(ADE_CAB)] = 185
+    depth[_match(ADE_WARDR)] = 210
+    depth[_match(ADE_DOORC)] = 220
+    depth[_match(ADE_WINDOW)] = 50
+    depth[_match(ADE_WALL)] = 240
 
-    depth = cv2.GaussianBlur(depth, (7, 7), 0)
+    # Stronger blur -> natural depth gradient (not hard object edges)
+    depth = cv2.GaussianBlur(depth, (11, 11), 0)
     depth_rgb = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
     return Image.fromarray(depth_rgb)
 
@@ -614,8 +622,11 @@ def handler(event):
                 for r in rooms
                 if r
             )
-            cn_scales = [0.45, 0.70]
-            guidance_scale = 6.5
+            # Depth-dominant balance -> photorealistic quality with correct
+            # layout. Depth holds the layout via elevated walls + per-
+            # furniture heights; seg is a soft furniture-type hint.
+            cn_scales = [0.55, 0.45]
+            guidance_scale = 7.5
         else:
             depth_img = get_depth_image(image_bgr, size_wh)
             seg_map = get_segmentation_map(image_bgr)
@@ -687,10 +698,11 @@ def handler(event):
             )
 
         # --- Generate ---
+        steps = 35 if use_room_mask else 30
         result = pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
-            num_inference_steps=30,
+            num_inference_steps=steps,
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=cn_scales,
             negative_prompt=negative,

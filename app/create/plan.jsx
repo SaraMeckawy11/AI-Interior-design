@@ -801,9 +801,9 @@ export default function PlanEditor() {
       const furniture = ROOM_FURNITURE[rk] || "";
       const furnishedPart = furniture ? ` with ${furniture}` : "";
       return (
-        `fully furnished modern ${rk}${furnishedPart}, ` +
+        `professional interior photography, fully furnished ${rk}${furnishedPart}, ` +
         `${style} style, ${tone} palette, ` +
-        `photorealistic 3D, soft lighting, 8k`
+        `photorealistic, detailed textures, soft natural lighting, 8k`
       );
     }
 
@@ -812,8 +812,8 @@ export default function PlanEditor() {
 
     if (assigned.length === 0) {
       return (
-        `fully furnished modern apartment interior, ` +
-        `${style} style, ${tone} palette, photorealistic 3D, 8k`
+        `professional interior photography, fully furnished modern apartment, ` +
+        `${style} style, ${tone} palette, photorealistic, 8k`
       );
     }
 
@@ -832,9 +832,10 @@ export default function PlanEditor() {
       byType.get(t).push(pos);
     }
 
-    // Word order matters for CLIP truncation: put the most important
-    // concept ("fully furnished") first, then per-room furniture+position,
-    // then style/quality at the tail (truncation-safe).
+    // Token-efficient ordering so CLIP keeps the important parts:
+    //   1) photorealism vocab first (styles the whole render)
+    //   2) per-room furniture + position hints
+    //   3) style + palette + quality tags at the tail (truncation-safe)
     const phrases = [];
     for (const [type, positions] of byType) {
       const n = positions.length;
@@ -846,9 +847,10 @@ export default function PlanEditor() {
     }
 
     return (
-      `fully furnished modern apartment interior, top-down 3D, ` +
+      `architectural visualization, fully furnished modern apartment, top-down 3D, ` +
       `${phrases.join(", ")}, ` +
-      `${style} style, ${tone} palette, photorealistic, soft lighting, 8k`
+      `${style} style, ${tone} palette, ` +
+      `photorealistic, detailed textures, soft natural lighting, 8k`
     );
   };
 
