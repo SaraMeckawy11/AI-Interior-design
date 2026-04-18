@@ -1209,65 +1209,45 @@ export default function PlanEditor() {
     const tone = DEFAULT_COLOR_TONE.toLowerCase();
 
     if (mode === "quick") {
-      const rk = roomType.toLowerCase();
-      const furniture = ROOM_FURNITURE[rk] || "";
-      const furnishedPart = furniture ? ` with ${furniture}` : "";
       return (
-        `professional interior photography, fully furnished ${rk}${furnishedPart}, ` +
-        `staged and styled, ${style} style, ${tone} palette, ` +
-        `photorealistic, sharp detail, soft natural lighting, 8k`
+        `2D floor plan to 3D furnished ${roomType.toLowerCase()} interior, ` +
+        `strictly respect all inner walls and room partitions from the plan, ` +
+        `${style} style, ${tone} color palette, ` +
+        `convert architectural floor plan to realistic 3D room visualization with furniture, ` +
+        `preserve interior wall layout and room boundaries`
       );
     }
 
-    // Guided mode
+    // Guided mode — compute per-room spatial placement.
     const assigned = paths.filter((p) => p.roomType);
 
     if (assigned.length === 0) {
       return (
-        `professional interior photography, fully furnished apartment, ` +
-        `staged and styled, ${style} style, ${tone} palette, ` +
-        `photorealistic, sharp detail, soft natural lighting, 8k`
+        `2D floor plan to 3D furnished interior, ` +
+        `strictly respect all inner walls and room partitions from the plan, ` +
+        `${style} style, ${tone} color palette, ` +
+        `convert architectural floor plan to realistic 3D visualization with furniture, ` +
+        `preserve interior wall layout`
       );
     }
 
-    const plural = (type, n) => {
-      if (n <= 1) return type;
-      if (type.endsWith("y")) return type.slice(0, -1) + "ies";
-      if (type.endsWith("s")) return type;
-      return type + "s";
-    };
+    const layoutParts = assigned.map(
+      (p) => `${p.roomType.toLowerCase()} in the ${describeRoomPosition(p)}`
+    );
+    const layoutPhrase = layoutParts.join(", ");
+    const uniqueRooms = [
+      ...new Set(assigned.map((p) => p.roomType.toLowerCase())),
+    ];
+    const roomList = uniqueRooms.join(", ");
 
-    const byType = new Map();
-    for (const p of assigned) {
-      const t = p.roomType.toLowerCase();
-      const pos = describeRoomPosition(p);
-      if (!byType.has(t)) byType.set(t, []);
-      byType.get(t).push(pos);
-    }
-
-    // Token-efficient ordering for CLIP (77-token limit):
-    //   1) quality + style framing at the front — never truncated
-    //   2) layout cue that reinforces the segmentation mask
-    //   3) per-room furniture + position
-    //   4) style + quality tags at the tail
-    const phrases = [];
-    for (const [type, positions] of byType) {
-      const n = positions.length;
-      const label = `${n === 1 ? "" : n + " "}${plural(type, n)}`;
-      const furniture = ROOM_FURNITURE[type] || "";
-      const withPart = furniture ? ` with ${furniture}` : "";
-      const uniquePositions = [...new Set(positions)];
-      phrases.push(`${label}${withPart} at ${uniquePositions.join(" & ")}`);
-    }
-
-    // Match interior.jsx (quick mode) prompt DNA so guided output reads as
-    // "AI-generated interior photography", not architectural diagram.
-    // Only the per-room phrases differ (they anchor the drawn layout).
     return (
-      `professional interior photography, fully furnished apartment, ` +
-      `${phrases.join(", ")}, ` +
-      `staged and styled, ${style} style, ${tone} palette, ` +
-      `photorealistic, sharp detail, soft natural lighting, 8k`
+      `2D floor plan to 3D furnished interior with ${roomList}, ` +
+      `layout: ${layoutPhrase}, ` +
+      `place each room EXACTLY in its mapped position, ` +
+      `strictly respect all inner walls and room partitions separating each room, ` +
+      `${style} style, ${tone} color palette, ` +
+      `convert architectural floor plan to realistic 3D visualization with furniture, ` +
+      `preserve the exact interior wall layout and room boundaries as drawn`
     );
   };
 

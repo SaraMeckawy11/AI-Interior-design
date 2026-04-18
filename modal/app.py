@@ -311,7 +311,7 @@ def _rasterize_rooms_mask(rooms, size_wh):
 
 @app.cls(
     image=image,
-    gpu="T4",  # 16 GB, cheapest suitable GPU (~$0.59/hr). Upgrade to "A10G" for ~2x speed.
+    gpu="L40S",                 # 48 GB, ~3-4x faster than T4 at fp16, best price/perf for SD1.5
     volumes={"/cache": hf_cache_vol},
     secrets=[api_key_secret],
     scaledown_window=60,        # keep container warm 60s after last request
