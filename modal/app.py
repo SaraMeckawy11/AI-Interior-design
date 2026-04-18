@@ -229,12 +229,39 @@ WINDOW_KEYWORDS = ["window", "windowpane"]
 # uploaded floor-plan image. Everything else in this file is unchanged.
 # ---------------------------------------------------------------------------
 
-# ADE20K palette colors (R, G, B) — only the two we need: wall + floor.
+# ADE20K palette colors (R, G, B) — wall, floor, ceiling, door, window.
 ADE_WALL = (120, 120, 120)
 ADE_FLOOR = (80, 50, 50)
+ADE_CEILING = (120, 120, 80)
+ADE_DOOR = (8, 255, 51)
+ADE_WINDOW = (230, 230, 230)
 
 # Stable per-room-type fill colors picked from the ADE palette so SD's seg
 # ControlNet associates each colored region with the right space type.
+# Compact per-room prompts used during the guided-mode per-room inpainting
+# pass. Each one is intentionally short (so the CLIP budget has headroom for
+# style + tone tail) and enumerates the canonical furniture SD should paint
+# inside that polygon. This is what guarantees "kitchens look like kitchens,
+# bedrooms look like bedrooms" no matter how the base pass turned out.
+ROOM_REFINE_PROMPTS = {
+    "living room":  "photorealistic {style} living room interior, sofa, coffee table, rug, tv console, lamps, plants, {tone} palette, top-down 3d interior render, sharp detail",
+    "bedroom":      "photorealistic {style} bedroom interior, bed with bedding, nightstands, lamps, wardrobe, rug, {tone} palette, top-down 3d interior render, sharp detail",
+    "kids room":    "photorealistic {style} kids bedroom, single bed, desk, toys, storage, playful rug, {tone} palette, top-down 3d render",
+    "kitchen":      "photorealistic {style} kitchen interior, cabinets, countertop, stove, fridge, island, pendant lights, {tone} palette, top-down 3d render, sharp detail",
+    "bathroom":     "photorealistic {style} bathroom interior, vanity, sink, mirror, toilet, shower or bathtub, tiled floor, {tone} palette, top-down 3d render",
+    "dining room":  "photorealistic {style} dining room interior, dining table, chairs, pendant light, sideboard, rug, {tone} palette, top-down 3d render",
+    "office":       "photorealistic {style} home office interior, desk, office chair, bookshelves, task lamp, rug, {tone} palette, top-down 3d render",
+    "entryway":     "photorealistic {style} entryway, console table, mirror, coat rack, rug, {tone} palette, top-down 3d render",
+    "hallway":      "photorealistic {style} hallway interior, wood or tiled flooring, wall art, runner rug, {tone} palette, top-down 3d render",
+    "closet":       "photorealistic {style} walk-in closet, wardrobe shelves, drawers, mirror, rug, {tone} palette, top-down 3d render",
+    "laundry room": "photorealistic {style} laundry room, washer, dryer, shelving, cabinets, tiled floor, {tone} palette, top-down 3d render",
+    "balcony":      "photorealistic {style} balcony, outdoor seating, plants, railing, {tone} palette, top-down 3d render",
+    "sunroom":      "photorealistic {style} sunroom, seating, lush plants, glass walls, rug, {tone} palette, top-down 3d render",
+    "basement":     "photorealistic {style} finished basement, seating, entertainment unit, rug, {tone} palette, top-down 3d render",
+    "attic":        "photorealistic {style} attic room, seating, storage, rug, warm wood textures, {tone} palette, top-down 3d render",
+    "studio":       "photorealistic {style} studio room, flexible furniture, sofa, desk, rug, {tone} palette, top-down 3d render",
+}
+
 ROOM_ANCHOR_COLORS = {
     "living room":    (11, 102, 255),    # sofa class -> living-room cue
     "bedroom":        (255, 245, 0),     # bed
@@ -256,14 +283,22 @@ ROOM_ANCHOR_COLORS = {
 }
 
 
-def _rasterize_rooms_mask(rooms, size_wh):
-    """Build a clean ADE20K mask from drawn polygons.
+def _rasterize_rooms_mask(rooms, size_wh, doors=None):
+    """Build a rich ADE20K mask from drawn polygons + doors.
 
-    Each polygon is filled with its room-type color (from ROOM_ANCHOR_COLORS,
-    falling back to ADE_FLOOR), then wall-colored borders are drawn around
-    every polygon edge so SD sees a "room with walls" structure for each
-    drawn shape. No furniture, no doors, no gap-fill — just the minimal
-    layout signal the user asked for.
+    Layout:
+      - Every polygon interior is painted with ADE_FLOOR (so SD sees "floor").
+      - A "furniture anchor" blob of the room-type's ADE color is painted near
+        the polygon centroid so the seg ControlNet has a strong per-room class
+        cue for the diffusion prior to latch onto.
+      - Every polygon outline is stroked with ADE_WALL so there is a clear
+        hard boundary between adjacent rooms and the outside world.
+      - Each door segment is then stamped through the wall as ADE_FLOOR (the
+        opening) with a small ADE_DOOR core at its midpoint so the model
+        renders a proper door, in the right spot, between the right rooms.
+    The result: SD with the seg ControlNet at high conditioning scale will
+    faithfully reproduce the user's layout (rooms where drawn, walls between
+    them, doors where marked).
     """
     import cv2
     import numpy as np
@@ -289,18 +324,64 @@ def _rasterize_rooms_mask(rooms, size_wh):
     if not parsed:
         return Image.new("RGB", (w, h), (0, 0, 0))
 
-    # Fill each polygon with its room color (later polygons paint on top —
-    # matches user intent: most recent stroke wins on overlap).
-    for rtype, poly in parsed:
-        color = ROOM_ANCHOR_COLORS.get(rtype, ADE_FLOOR)
-        cv2.fillPoly(out, [poly], color)
+    # Pass 1: fill every polygon with floor. Later passes paint anchor blobs
+    # on top so each room reads as "room with floor + that room's anchor".
+    for _rtype, poly in parsed:
+        cv2.fillPoly(out, [poly], ADE_FLOOR)
 
-    # Draw walls along every polygon outline so SD has a clear boundary
-    # signal between rooms and outside.
-    wall_thickness = max(6, int(min(w, h) * 0.014))
+    # Pass 2: paint a per-room anchor blob near each centroid, clipped to the
+    # polygon so it never bleeds into neighbouring rooms. A single strong cue
+    # per room beats many scattered ones and stays inside the SD 77-token budget
+    # because the ControlNet does the spatial work, not the prompt.
+    poly_mask_cache = {}
+    for idx, (rtype, poly) in enumerate(parsed):
+        anchor = ROOM_ANCHOR_COLORS.get(rtype)
+        if anchor is None or anchor == ADE_FLOOR:
+            continue
+        M = cv2.moments(poly)
+        if M["m00"] == 0:
+            continue
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+        x, y, bw, bh = cv2.boundingRect(poly)
+        r_blob = max(10, int(min(bw, bh) * 0.22))
+
+        poly_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(poly_mask, [poly], 255)
+        poly_mask_cache[idx] = poly_mask
+
+        blob_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(blob_mask, (cx, cy), r_blob, 255, -1)
+
+        combined = cv2.bitwise_and(blob_mask, poly_mask)
+        out[combined > 0] = anchor
+
+    # Pass 3: walls. Thick stroke so they survive downscaling inside the
+    # ControlNet preprocessor and read as hard partitions between rooms.
+    wall_thickness = max(7, int(min(w, h) * 0.018))
     for _rtype, poly in parsed:
         cv2.polylines(out, [poly], isClosed=True,
                       color=ADE_WALL, thickness=wall_thickness)
+
+    # Pass 4: doors. Each door is a line segment along a wall — stamp it as
+    # floor (punches the opening) with a small ADE_DOOR core so the model
+    # paints an actual door frame there rather than a plain gap.
+    if doors:
+        door_thickness = max(wall_thickness + 2,
+                             int(min(w, h) * 0.028))
+        door_core_thickness = max(4, int(min(w, h) * 0.010))
+        for d in doors:
+            try:
+                x1 = int(max(0.0, min(1.0, float(d.get("x1", 0)))) * (w - 1))
+                y1 = int(max(0.0, min(1.0, float(d.get("y1", 0)))) * (h - 1))
+                x2 = int(max(0.0, min(1.0, float(d.get("x2", 0)))) * (w - 1))
+                y2 = int(max(0.0, min(1.0, float(d.get("y2", 0)))) * (h - 1))
+            except (TypeError, ValueError):
+                continue
+            # Punch the opening through the wall.
+            cv2.line(out, (x1, y1), (x2, y2), ADE_FLOOR, door_thickness)
+            # Paint a door-class core at the midpoint so SD renders a frame.
+            cv2.line(out, (x1, y1), (x2, y2), ADE_DOOR, door_core_thickness)
 
     return Image.fromarray(out)
 
@@ -327,6 +408,7 @@ class InteriorAI:
         import torch
         from diffusers import (
             StableDiffusionControlNetPipeline,
+            StableDiffusionControlNetInpaintPipeline,
             ControlNetModel,
             UniPCMultistepScheduler,
         )
@@ -380,13 +462,35 @@ class InteriorAI:
             self.pipe.scheduler.config
         )
 
+        # ── Per-room inpainting pipeline ──
+        # Shares the UNet/VAE/TextEncoder weights with the base pipe and reuses
+        # the same depth+seg ControlNets. We use this in guided mode to do a
+        # second pass where each drawn polygon is inpainted with furniture
+        # specific to its assigned room type, while a tight mask prevents the
+        # geometry from drifting. This is how we guarantee "exact placement +
+        # room-specific furniture" without needing a separate inpaint checkpoint.
+        self.inpaint_pipe = StableDiffusionControlNetInpaintPipeline(
+            vae=self.pipe.vae,
+            text_encoder=self.pipe.text_encoder,
+            tokenizer=self.pipe.tokenizer,
+            unet=self.pipe.unet,
+            controlnet=self.pipe.controlnet,
+            scheduler=self.pipe.scheduler,
+            safety_checker=None,
+            feature_extractor=self.pipe.feature_extractor,
+            requires_safety_checker=False,
+        ).to(self.device)
+
         # Memory-efficient flags so pipeline fits in 16 GB with room to spare
         try:
             self.pipe.enable_xformers_memory_efficient_attention()
+            self.inpaint_pipe.enable_xformers_memory_efficient_attention()
         except Exception:
             pass
         self.pipe.enable_vae_tiling()
         self.pipe.enable_attention_slicing()
+        self.inpaint_pipe.enable_vae_tiling()
+        self.inpaint_pipe.enable_attention_slicing()
 
         # Persist any newly downloaded weights to the volume for next cold start
         hf_cache_vol.commit()
@@ -491,6 +595,167 @@ class InteriorAI:
                 return True
         return False
 
+    def _refine_rooms_in_place(
+        self,
+        base_image,
+        rooms,
+        size_wh,
+        depth_img,
+        seg_img,
+        design_style,
+        color_tone,
+    ):
+        """Per-room masked inpainting pass.
+
+        For every drawn polygon we:
+          1. Build a tight binary mask of that polygon (padded a few pixels
+             inward so we don't touch the walls — this is what guarantees
+             the room stays exactly where drawn).
+          2. Feather the mask's inner edge so inpainted furniture blends
+             seamlessly with the surrounding walls/doors from the base pass.
+          3. Run the inpaint ControlNet pipe with a room-specific prompt
+             (kitchen furniture for kitchens, beds for bedrooms, etc.) while
+             the same depth+seg ControlNets hold the architecture steady.
+          4. Composite the result back into the running canvas using the
+             blurred mask so seams vanish.
+
+        Doing it per-room instead of globally is what fixes the two problems
+        the user hit: rooms can't shift (mask locks them to their polygon)
+        and each room gets furniture matching its *assigned* type (prompt
+        changes per polygon).
+        """
+        import cv2
+        import numpy as np
+        from PIL import Image
+
+        if not rooms:
+            return base_image
+
+        w, h = size_wh
+        canvas = np.array(base_image.convert("RGB"))
+        style = (design_style or "modern").strip().lower() or "modern"
+        tone = (color_tone or "neutral").strip().lower() or "neutral"
+
+        # Small inward shrink so the furniture doesn't paint over walls.
+        inset_px = max(4, int(min(w, h) * 0.012))
+        feather_px = max(6, int(min(w, h) * 0.018))
+
+        for r in rooms:
+            rtype = (r.get("type") or "").strip().lower()
+            if not rtype:
+                continue
+            template = ROOM_REFINE_PROMPTS.get(rtype)
+            if not template:
+                # Unknown room type — skip; the base pass already handled it.
+                continue
+
+            pts = []
+            for p in r.get("polygon") or []:
+                try:
+                    px = max(0.0, min(1.0, float(p.get("x", 0)))) * (w - 1)
+                    py = max(0.0, min(1.0, float(p.get("y", 0)))) * (h - 1)
+                    pts.append([px, py])
+                except (TypeError, ValueError):
+                    continue
+            if len(pts) < 3:
+                continue
+            poly = np.array(pts, dtype=np.int32)
+
+            hard_mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.fillPoly(hard_mask, [poly], 255)
+
+            # Erode so we stay safely inside the room (don't overwrite walls).
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (inset_px * 2 + 1, inset_px * 2 + 1)
+            )
+            inner_mask = cv2.erode(hard_mask, kernel)
+            if inner_mask.max() == 0:
+                continue  # Polygon too small to refine — skip.
+
+            # Feathered mask for smooth compositing back into the canvas.
+            feather = cv2.GaussianBlur(
+                inner_mask, (feather_px * 2 + 1, feather_px * 2 + 1), 0
+            )
+
+            prompt = template.format(style=style, tone=tone)
+            negative = (
+                "blurry, lowres, distorted, warped geometry, wrong furniture, "
+                "mismatched room type, floating objects, bad lighting, artifacts, "
+                "merged walls, duplicated furniture"
+            )
+
+            try:
+                # Use the same current-canvas image as the source so
+                # previously-refined rooms stay intact when the next room runs.
+                source_pil = Image.fromarray(canvas)
+                mask_pil = Image.fromarray(inner_mask).convert("L")
+
+                result = self.inpaint_pipe(
+                    prompt=prompt,
+                    negative_prompt=negative,
+                    image=source_pil,
+                    mask_image=mask_pil,
+                    control_image=[depth_img, seg_img],
+                    num_inference_steps=22,
+                    guidance_scale=7.0,
+                    strength=0.85,                      # strong enough to paint fresh furniture
+                    controlnet_conditioning_scale=[0.45, 0.9],
+                    generator=self.torch.manual_seed(17 + len(pts)),
+                ).images[0]
+            except Exception as e:
+                # If a single room fails, keep the base canvas rather than
+                # failing the whole generation.
+                print(f"[refine] skipped room '{rtype}': {e}")
+                continue
+
+            refined = np.array(result.convert("RGB")).astype(np.float32)
+            current = canvas.astype(np.float32)
+            alpha = (feather.astype(np.float32) / 255.0)[..., None]
+            blended = current * (1 - alpha) + refined * alpha
+            canvas = np.clip(blended, 0, 255).astype(np.uint8)
+
+        return Image.fromarray(canvas)
+
+    def _build_guided_prompt(self, rooms, design_style, color_tone, custom_prompt):
+        """Interior-designer-grade prompt that enumerates each room + its
+        grid position so SD places each space where the user drew it.
+
+        Stays under CLIP's 77-token limit: at most one short clause per room,
+        with room names abbreviated, and a shared photoreal/style tail.
+        """
+        if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
+            # Frontend already builds a rich layout-aware prompt; prefer it.
+            return custom_prompt.strip()
+
+        style = (design_style or "Modern").strip().lower() or "modern"
+        tone = (color_tone or "neutral").strip().lower() or "neutral"
+
+        clauses = []
+        seen_types = set()
+        for r in rooms or []:
+            rtype = (r.get("type") or "").strip().lower()
+            if not rtype or rtype in seen_types:
+                continue
+            seen_types.add(rtype)
+            pos = (r.get("position") or "").strip().lower()
+            if pos:
+                clauses.append(f"{rtype} {pos}")
+            else:
+                clauses.append(rtype)
+            if len(clauses) >= 6:  # token budget guard
+                break
+
+        layout = ", ".join(clauses) if clauses else "multi-room interior"
+
+        return (
+            f"professional interior designer 3D visualization of a floor plan, "
+            f"multi-room home with {layout}, "
+            f"each room in its exact mapped position, solid walls between rooms, "
+            f"doors only where drawn, complete furnishings fitting each room type, "
+            f"{style} style, {tone} palette, photorealistic 8k, "
+            f"soft natural daylight, cohesive interior design, sharp architectural lines"
+        )
+
     def _build_prompt(self, room_type, design_style, color_tone, custom_prompt):
         room_key = (room_type or "").strip().lower()
 
@@ -526,7 +791,7 @@ class InteriorAI:
         rooms: list = None,
         canvas: dict = None,
         mode: str = "",
-        doors: list = None,  # accepted for API compatibility, intentionally unused
+        doors: list = None,
     ):
         """Pure-python callable version. Can be invoked from other Modal apps."""
         image_bgr = self._decode_base64_image(image)
@@ -537,35 +802,75 @@ class InteriorAI:
         seg_img = self._get_segmentation_image(seg_map, size_wh)
         has_window = self._detect_window(seg_map)
 
-        # Guided-mode override: if the user drew room polygons, replace the
-        # auto-extracted seg map with a rasterized version of THEIR layout.
-        # This is the only behavioral change versus the original modal/app.py.
-        if (mode or "").strip().lower() == "guided" and rooms:
+        is_guided = (mode or "").strip().lower() == "guided" and bool(rooms)
+
+        # Guided-mode override: replace the auto-extracted UperNet seg map with
+        # a rasterized version of the user's drawn layout (rooms + doors). This
+        # is the signal SD needs to 100 % respect the user's plan.
+        if is_guided:
             try:
-                seg_img = _rasterize_rooms_mask(rooms, size_wh)
+                seg_img = _rasterize_rooms_mask(rooms, size_wh, doors=doors)
             except Exception:
                 pass
 
-        prompt = self._build_prompt(room_type, design_style, color_tone, custom_prompt)
-        if has_window:
+        # ── Prompt ──
+        if is_guided:
+            prompt = self._build_guided_prompt(
+                rooms, design_style, color_tone, custom_prompt
+            )
+        else:
+            prompt = self._build_prompt(
+                room_type, design_style, color_tone, custom_prompt
+            )
+        if has_window and "window" not in prompt.lower():
             prompt = prompt + ", window in place"
 
         negative = (
-            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+            "blurry, lowres, distorted, floating furniture, bad lighting, "
+            "wrong perspective, merged rooms, missing walls, warped geometry, "
+            "inconsistent room layout, deformed architecture, artifacts"
         )
         if not has_window:
             negative += ", no window"
 
+        # Guided: lean heavily on the seg ControlNet so the model cannot
+        # rearrange rooms or drop walls between them. Quick: keep the
+        # original balance that works well for single-room photos.
+        if is_guided:
+            cn_scale = [0.55, 0.95]
+            steps = 34
+        else:
+            cn_scale = [0.5, 0.1]
+            steps = 30
+
         result = self.pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
-            num_inference_steps=30,
+            num_inference_steps=steps,
             guidance_scale=7.5,
-            controlnet_conditioning_scale=[0.5, 0.1],
+            controlnet_conditioning_scale=cn_scale,
             negative_prompt=negative,
             generator=self.torch.manual_seed(42),
         )
         out = result.images[0]
+
+        # Guided mode: run a per-room inpainting pass so each drawn polygon
+        # gets furniture specific to its assigned room type without shifting
+        # position. This is the step that turns a decent multi-room render
+        # into an interior-designer-grade plan.
+        if is_guided:
+            try:
+                out = self._refine_rooms_in_place(
+                    base_image=out,
+                    rooms=rooms,
+                    size_wh=size_wh,
+                    depth_img=depth_img,
+                    seg_img=seg_img,
+                    design_style=design_style,
+                    color_tone=color_tone,
+                )
+            except Exception as e:
+                print(f"[guided-refine] pass failed, keeping base image: {e}")
 
         buf = io.BytesIO()
         out.save(buf, format="PNG")

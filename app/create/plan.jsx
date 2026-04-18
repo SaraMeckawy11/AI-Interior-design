@@ -1039,6 +1039,7 @@ export default function PlanEditor() {
     setSegmentCurvatures([]);
     setCurveEditSegmentIndex(null);
     setPreviewPoint(null);
+    setDoors([]);
     pathsRef.current = [];
 
     if (asset.base64) {
@@ -1060,6 +1061,7 @@ export default function PlanEditor() {
     setSegmentCurvatures([]);
     setCurveEditSegmentIndex(null);
     setPreviewPoint(null);
+    setDoors([]);
     pathsRef.current = [];
   };
 
@@ -1079,6 +1081,7 @@ export default function PlanEditor() {
     setSegmentCurvatures([]);
     setCurveEditSegmentIndex(null);
     setPreviewPoint(null);
+    setDoors([]);
     pathsRef.current = [];
   };
 
@@ -1429,7 +1432,29 @@ export default function PlanEditor() {
         <View>
         <View style={styles.titleHeader}>
           <Text style={styles.title}>LIVINAI</Text>
-          <Text style={styles.planHeaderTagline}>Floor plan → 3D</Text>
+          <View style={styles.planHeaderChipRow}>
+            <View style={styles.planHeaderChip}>
+              <Ionicons
+                name="scan-outline"
+                size={moderateScale(11)}
+                color={COLORS.primaryDark}
+              />
+              <Text style={styles.planHeaderChipText}>2D plan</Text>
+            </View>
+            <Ionicons
+              name="arrow-forward"
+              size={moderateScale(12)}
+              color={COLORS.textSecondary}
+            />
+            <View style={styles.planHeaderChip}>
+              <Ionicons
+                name="cube-outline"
+                size={moderateScale(11)}
+                color={COLORS.primaryDark}
+              />
+              <Text style={styles.planHeaderChipText}>3D design</Text>
+            </View>
+          </View>
           {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
             <View style={styles.coinsContainer}>
               <Text style={styles.coinsText}>{coins} Coins</Text>
@@ -1443,18 +1468,8 @@ export default function PlanEditor() {
           accessibilityRole="tablist"
         >
           {[
-            {
-              id: "quick",
-              icon: "flash",
-              label: "Quick",
-              subtitle: "One room",
-            },
-            {
-              id: "guided",
-              icon: "grid",
-              label: "Guided",
-              subtitle: "Floor plan",
-            },
+            { id: "quick", icon: "flash", label: "Quick" },
+            { id: "guided", icon: "grid", label: "Guided" },
           ].map((opt) => {
             const active = mode === opt.id;
             return (
@@ -1484,88 +1499,10 @@ export default function PlanEditor() {
                     {opt.label}
                   </Text>
                 </View>
-                <Text
-                  style={[
-                    styles.planModeTabSubtext,
-                    active && styles.planModeTabSubtextActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {opt.subtitle}
-                </Text>
               </TouchableOpacity>
             );
           })}
         </View>
-
-        {/* ── Step indicator ── */}
-        {(() => {
-          const step1Done = !!image;
-          const step2Done =
-            mode === "quick"
-              ? !!image && !!roomType
-              : !!image && paths.some((p) => p.roomType);
-          const currentStep = !step1Done ? 1 : !step2Done ? 2 : 3;
-          const steps = [
-            { n: 1, label: "Upload", done: step1Done },
-            {
-              n: 2,
-              label: mode === "quick" ? "Customize" : "Draw rooms",
-              done: step2Done,
-            },
-            { n: 3, label: "Generate", done: false },
-          ];
-          return (
-            <View style={styles.planStepsRow}>
-              {steps.map((s, idx) => {
-                const active = currentStep === s.n;
-                const done = s.done;
-                return (
-                  <React.Fragment key={s.n}>
-                    <View style={styles.planStepItem}>
-                      <View
-                        style={[
-                          styles.planStepBadge,
-                          active && styles.planStepBadgeActive,
-                          done && styles.planStepBadgeDone,
-                        ]}
-                      >
-                        {done ? (
-                          <Ionicons name="checkmark" size={14} color="#fff" />
-                        ) : (
-                          <Text
-                            style={[
-                              styles.planStepBadgeText,
-                              active && styles.planStepBadgeTextActive,
-                            ]}
-                          >
-                            {s.n}
-                          </Text>
-                        )}
-                      </View>
-                      <Text
-                        style={[
-                          styles.planStepLabel,
-                          active && styles.planStepLabelActive,
-                        ]}
-                      >
-                        {s.label}
-                      </Text>
-                    </View>
-                    {idx < steps.length - 1 && (
-                      <View
-                        style={[
-                          styles.planStepConnector,
-                          done && styles.planStepConnectorDone,
-                        ]}
-                      />
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </View>
-          );
-        })()}
 
         <View style={styles.form}>
           <View style={styles.formGroup}>
@@ -1720,10 +1657,6 @@ export default function PlanEditor() {
                       id: "room",
                       icon: "scan",
                       label: "Rooms",
-                      subtitle:
-                        paths.length > 0
-                          ? `${paths.length} drawn`
-                          : "Tap to add",
                       disabled: false,
                       badge: null,
                     },
@@ -1731,10 +1664,6 @@ export default function PlanEditor() {
                       id: "door",
                       icon: "log-in",
                       label: "Doors",
-                      subtitle:
-                        paths.length === 0
-                          ? "Draw a room first"
-                          : "Tap a wall",
                       disabled: paths.length === 0,
                       badge: doors.length > 0 ? doors.length : null,
                     },
@@ -1801,16 +1730,6 @@ export default function PlanEditor() {
                             </View>
                           )}
                         </View>
-                        <Text
-                          style={[
-                            styles.planToolToggleBtnSubtext,
-                            active && styles.planToolToggleBtnSubtextActive,
-                            opt.disabled && { color: COLORS.disabled },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {opt.subtitle}
-                        </Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -1818,14 +1737,18 @@ export default function PlanEditor() {
 
                 <View style={styles.planCanvasHintContainer}>
                   <Ionicons
-                    name="information-circle-outline"
+                    name={
+                      tool === "door"
+                        ? "log-in-outline"
+                        : "finger-print-outline"
+                    }
                     size={16}
                     color={COLORS.textSecondary}
                   />
                   <Text style={styles.planCanvasHint}>
                     {tool === "door"
-                      ? "Tap a wall to drop a door opening. Tap an existing door to remove it. Doors between rooms are also placed automatically."
-                      : "Tap exactly where you want a point — placement is 1:1, no magnet. Tap directly on an existing point to grab and slide it. Tap the first point to close the room."}
+                      ? "Tap a wall to drop a door. Tap an existing door to remove it."
+                      : "Tap the canvas to place corners, then tap the first point to close each room."}
                   </Text>
                 </View>
 
@@ -2155,36 +2078,49 @@ export default function PlanEditor() {
         )}
 
         <TouchableOpacity
-          style={styles.buttonWrapper}
+          style={styles.planGenerateBtn}
           onPress={handleSubmit}
           disabled={loading}
+          activeOpacity={0.9}
         >
           {loading ? (
             <LinearGradient
               colors={[COLORS.primary, COLORS.primary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.buttonGradient}
+              style={styles.planGenerateBtnInner}
             >
               <ActivityIndicator color={COLORS.white} />
+              <Text style={styles.planGenerateBtnText}>
+                Rendering your 3D design…
+              </Text>
             </LinearGradient>
           ) : (
             <LinearGradient
               colors={[COLORS.primaryDark, COLORS.primary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.buttonGradient}
+              style={styles.planGenerateBtnInner}
             >
               <Ionicons
-                name="cloud-upload-outline"
-                size={20}
+                name="sparkles"
+                size={moderateScale(18)}
                 color={COLORS.white}
-                style={styles.buttonIcon}
               />
-              <Text style={styles.buttonText}>Generate</Text>
+              <Text style={styles.planGenerateBtnText}>
+                Generate 3D Design
+              </Text>
             </LinearGradient>
           )}
         </TouchableOpacity>
+
+        {!loading && (
+          <Text style={styles.planGenerateCaption}>
+            {mode === "guided"
+              ? "Your drawn rooms and doors will be respected exactly."
+              : "A photorealistic 3D render will be created from your plan."}
+          </Text>
+        )}
 
         </View>
 
@@ -2374,10 +2310,8 @@ export default function PlanEditor() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Converting your plan…</Text>
-            <Text style={styles.loadingSubtext}>
-              This may take up to 30 seconds
-            </Text>
+            <Text style={styles.loadingText}>Designing your dream space...</Text>
+            <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
           </View>
         </View>
       </Modal>

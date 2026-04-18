@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
   },
 
   buttonGradient: {
-    paddingVertical:verticalScale(9),
+    paddingVertical:verticalScale(7),
     flexDirection: "row",
     alignItems: 'center',
     justifyContent: 'center',
@@ -358,7 +358,7 @@ modalButton: {
   justifyContent: 'center',
   backgroundColor: COLORS.primaryDark,
   borderRadius: moderateScale(16),
-  paddingVertical: verticalScale(10),
+  paddingVertical: verticalScale(7),
   marginBottom: verticalScale(10),
     shadowColor: COLORS.primaryDark,
     shadowOpacity: 0.25,
@@ -402,7 +402,7 @@ modalMissingButton: {
   justifyContent: 'center',
   backgroundColor: COLORS.primaryDark,
   borderRadius: moderateScale(16),
-  paddingVertical: verticalScale(8),
+  paddingVertical: verticalScale(6),
   marginBottom: verticalScale(10),
   width: '50%',
 },
@@ -610,14 +610,13 @@ customPromptInput: {
   },
   planModeTab: {
     flex: 1,
-    flexDirection: "column",
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: verticalScale(12),
+    paddingVertical: verticalScale(5),
     paddingHorizontal: moderateScale(10),
-    borderRadius: moderateScale(14),
+    borderRadius: moderateScale(12),
     backgroundColor: "transparent",
-    gap: verticalScale(2),
   },
   planModeTabActive: {
     backgroundColor: COLORS.primaryDark,
@@ -706,7 +705,7 @@ customPromptInput: {
     color: COLORS.primaryDark,
   },
   planToolBtn: {
-    padding: moderateScale(8),
+    padding: moderateScale(6),
     borderRadius: moderateScale(12),
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -732,14 +731,13 @@ customPromptInput: {
   },
   planToolToggleBtn: {
     flex: 1,
-    flexDirection: "column",
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: verticalScale(9),
+    paddingVertical: verticalScale(4),
     paddingHorizontal: moderateScale(8),
-    borderRadius: moderateScale(11),
+    borderRadius: moderateScale(10),
     backgroundColor: "transparent",
-    gap: verticalScale(2),
   },
   planToolToggleBtnActive: {
     backgroundColor: COLORS.primaryDark,
@@ -801,7 +799,7 @@ customPromptInput: {
   planRoomItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: verticalScale(12),
+    paddingVertical: verticalScale(8),
     paddingHorizontal: moderateScale(14),
     backgroundColor: "#fff",
     borderRadius: moderateScale(16),
@@ -862,7 +860,7 @@ customPromptInput: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: moderateScale(14),
-    paddingVertical: verticalScale(10),
+    paddingVertical: verticalScale(7),
     borderRadius: moderateScale(16),
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -909,7 +907,7 @@ customPromptInput: {
     backgroundColor: COLORS.primaryDark,
     borderRadius: moderateScale(14),
     paddingHorizontal: moderateScale(20),
-    paddingVertical: verticalScale(12),
+    paddingVertical: verticalScale(8),
     justifyContent: "center",
     shadowColor: COLORS.primaryDark,
     shadowOffset: { width: 0, height: 2 },
@@ -987,6 +985,77 @@ customPromptInput: {
   },
   planStepConnectorDone: {
     backgroundColor: COLORS.primaryDark,
+  },
+
+  // ── Header chip row ("2D plan → 3D design") ──
+  planHeaderChipRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: moderateScale(8),
+    marginTop: verticalScale(8),
+  },
+  planHeaderChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: moderateScale(5),
+    paddingHorizontal: moderateScale(10),
+    paddingVertical: verticalScale(5),
+    backgroundColor: "rgba(127, 160, 136, 0.10)",
+    borderRadius: moderateScale(20),
+    borderWidth: 1,
+    borderColor: "rgba(127, 160, 136, 0.18)",
+  },
+  planHeaderChipText: {
+    fontSize: moderateScale(11),
+    fontWeight: "700",
+    color: COLORS.primaryDark,
+    letterSpacing: 0.2,
+  },
+
+  // ── Primary CTA (Generate) ──
+  planGenerateBtn: {
+    marginTop: verticalScale(22),
+    borderRadius: moderateScale(18),
+    overflow: "hidden",
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.30,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  planGenerateBtnInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: moderateScale(10),
+    paddingVertical: verticalScale(10),
+    paddingHorizontal: moderateScale(24),
+  },
+  planGenerateBtnText: {
+    color: "#fff",
+    fontSize: moderateScale(16),
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  planGenerateCaption: {
+    marginTop: verticalScale(10),
+    textAlign: "center",
+    fontSize: moderateScale(11.5),
+    color: COLORS.textSecondary,
+    fontStyle: "italic",
+    paddingHorizontal: moderateScale(18),
+  },
+
+  // ── Loading modal icon wrap ──
+  planLoadingIconWrap: {
+    width: moderateScale(48),
+    height: moderateScale(48),
+    borderRadius: moderateScale(16),
+    backgroundColor: "rgba(127, 160, 136, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: verticalScale(4),
   },
 });
 
