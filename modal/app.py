@@ -278,282 +278,92 @@ ROOM_ANCHOR_COLORS = {
 
 def _room_furniture_shapes(rtype, bbox):
     """
-    Return a list of furniture "shapes" to paint inside a room polygon,
-    ordered from LARGEST/FURTHEST-BACK to SMALLEST/CLOSEST (later shapes
-    paint on top).
+    Return a list of furniture "shapes" to paint inside a room polygon.
 
     Each shape is (kind, color, params) where:
-      kind   = "rect"    -> params = (cx, cy, rx, ry)
-      kind   = "ellipse" -> params = (cx, cy, rx, ry)
+      kind = "rect"    -> params = (cx, cy, rx, ry)
+      kind = "ellipse" -> params = (cx, cy, rx, ry)
 
-    ALIGNMENT PHILOSOPHY
-    --------------------
-    Real rooms have furniture AGAINST WALLS, not floating in the middle.
-    Every layout here places the primary piece flush against a wall
-    (headboard, sofa back, counter, desk, vanity, etc.) with an `inset`
-    margin just large enough for the wall thickness drawn later to touch
-    it without eating into the furniture color. Secondary pieces go
-    against perpendicular or opposite walls. Only coffee tables and dining
-    tables sit in the middle (where they belong).
-
-    The result: ControlNet-Seg sees a spatially realistic layout with
-    clearly defined "room zones" (bed zone, seating zone, counter zone),
-    and SD renders furniture that looks properly staged instead of
-    scattered randomly across the floor.
+    DESIGN NOTE: we deliberately keep the mask SPARSE -- 1 or 2 blobs per
+    room, not a fully-staged layout. Dense layouts over-constrain
+    ControlNet-Seg and force SD into a schematic/isometric look. Sparse
+    blobs just nudge SD toward "there is a bed here, a sofa here" while
+    leaving enough freedom for photorealistic textures, lighting, and
+    staging to emerge from the diffusion prior (same quality as
+    non-guided quick mode).
     """
     xmin, ymin, xmax, ymax = bbox
     w = max(1, xmax - xmin)
     h = max(1, ymax - ymin)
     cx = (xmin + xmax) / 2.0
     cy = (ymin + ymax) / 2.0
-    short = min(w, h)
-    # Margin from the polygon edge so furniture sits flush against the
-    # wall that gets drawn at boundary time (wall_thickness ~ 0.016 * short)
-    inset = max(6.0, short * 0.03)
     long_horizontal = w >= h
 
     shapes = []
 
     if rtype in ("bedroom", "kids room"):
-        # BED — headboard against the long wall. The headboard face is
-        # flush with the wall; a nightstand flanks each side.
         if long_horizontal:
-            bed_half_w, bed_half_d = w * 0.22, h * 0.16
-            bcx = cx
-            bcy = ymin + inset + bed_half_d
-            shapes.append(("rect", ADE_BED, (bcx, bcy, bed_half_w, bed_half_d)))
-            ns = short * 0.04
-            shapes.append(("rect", ADE_TABLE,
-                           (bcx - bed_half_w - ns, ymin + inset + ns, ns, ns)))
-            shapes.append(("rect", ADE_TABLE,
-                           (bcx + bed_half_w + ns, ymin + inset + ns, ns, ns)))
-            # WARDROBE — full-height against the opposite long wall
-            shapes.append(("rect", ADE_WARDR,
-                           (cx, ymax - inset - h * 0.05, w * 0.30, h * 0.05)))
+            rx, ry = w * 0.28, h * 0.22
         else:
-            bed_half_w, bed_half_d = w * 0.16, h * 0.22
-            bcx = xmin + inset + bed_half_w
-            bcy = cy
-            shapes.append(("rect", ADE_BED, (bcx, bcy, bed_half_w, bed_half_d)))
-            ns = short * 0.04
-            shapes.append(("rect", ADE_TABLE,
-                           (xmin + inset + ns, bcy - bed_half_d - ns, ns, ns)))
-            shapes.append(("rect", ADE_TABLE,
-                           (xmin + inset + ns, bcy + bed_half_d + ns, ns, ns)))
-            shapes.append(("rect", ADE_WARDR,
-                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.30)))
+            rx, ry = w * 0.22, h * 0.28
+        shapes.append(("rect", ADE_BED, (cx, cy, rx, ry)))
+        if long_horizontal:
+            shapes.append(("rect", ADE_WARDR, (cx, ymin + h * 0.10, w * 0.28, h * 0.06)))
+        else:
+            shapes.append(("rect", ADE_WARDR, (xmin + w * 0.10, cy, w * 0.06, h * 0.28)))
 
     elif rtype == "living room":
-        # SOFA — back flush against a long wall, coffee table floats in
-        # front, TV credenza against the opposite wall.
         if long_horizontal:
-            sofa_half_w, sofa_half_d = w * 0.27, h * 0.09
-            scx = cx
-            scy = ymin + inset + sofa_half_d
-            shapes.append(("rect", ADE_SOFA, (scx, scy, sofa_half_w, sofa_half_d)))
-            # Coffee table directly in front of the sofa
-            shapes.append(("ellipse", ADE_TABLE,
-                           (scx, scy + sofa_half_d + h * 0.10,
-                            w * 0.11, h * 0.06)))
-            # TV credenza against opposite wall
-            shapes.append(("rect", ADE_CAB,
-                           (cx, ymax - inset - h * 0.05, w * 0.30, h * 0.05)))
-            # Accent chair in a corner
-            shapes.append(("rect", ADE_SOFA,
-                           (xmax - inset - w * 0.06, scy + sofa_half_d * 0.5,
-                            w * 0.06, h * 0.06)))
+            shapes.append(("rect", ADE_SOFA, (cx, cy - h * 0.08, w * 0.32, h * 0.12)))
+            shapes.append(("ellipse", ADE_TABLE, (cx, cy + h * 0.05, w * 0.10, h * 0.06)))
         else:
-            sofa_half_w, sofa_half_d = w * 0.09, h * 0.27
-            scx = xmin + inset + sofa_half_d
-            scy = cy
-            shapes.append(("rect", ADE_SOFA, (scx, scy, sofa_half_w, sofa_half_d)))
-            shapes.append(("ellipse", ADE_TABLE,
-                           (scx + sofa_half_w + w * 0.10, scy,
-                            w * 0.06, h * 0.11)))
-            shapes.append(("rect", ADE_CAB,
-                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.30)))
-            shapes.append(("rect", ADE_SOFA,
-                           (scx + sofa_half_w * 0.5, ymax - inset - h * 0.06,
-                            w * 0.06, h * 0.06)))
+            shapes.append(("rect", ADE_SOFA, (cx - w * 0.08, cy, w * 0.12, h * 0.32)))
+            shapes.append(("ellipse", ADE_TABLE, (cx + w * 0.05, cy, w * 0.06, h * 0.10)))
 
     elif rtype == "kitchen":
-        # L-SHAPED COUNTER — runs along one long wall and wraps into
-        # a short wall. Stove and sink sit in the counter line.
         if long_horizontal:
-            counter_d = h * 0.08
-            # Long counter against top wall
-            shapes.append(("rect", ADE_CAB,
-                           (cx, ymin + inset + counter_d / 2,
-                            w * 0.45, counter_d / 2)))
-            # Perpendicular counter along left wall
-            shapes.append(("rect", ADE_CAB,
-                           (xmin + inset + w * 0.05, cy + h * 0.05,
-                            w * 0.05, h * 0.25)))
-            # Stove inset in the long counter
-            shapes.append(("rect", ADE_STOVE,
-                           (cx - w * 0.10, ymin + inset + counter_d / 2,
-                            w * 0.05, counter_d * 0.4)))
-            # Refrigerator at the end of the long counter
-            shapes.append(("rect", ADE_WARDR,
-                           (xmax - inset - w * 0.06, ymin + inset + h * 0.08,
-                            w * 0.06, h * 0.07)))
+            shapes.append(("rect", ADE_CAB, (cx, ymin + h * 0.12, w * 0.38, h * 0.08)))
+            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.05, w * 0.22, h * 0.09)))
         else:
-            counter_d = w * 0.08
-            shapes.append(("rect", ADE_CAB,
-                           (xmin + inset + counter_d / 2, cy,
-                            counter_d / 2, h * 0.45)))
-            shapes.append(("rect", ADE_CAB,
-                           (cx + w * 0.05, ymin + inset + h * 0.05,
-                            w * 0.25, h * 0.05)))
-            shapes.append(("rect", ADE_STOVE,
-                           (xmin + inset + counter_d / 2, cy - h * 0.10,
-                            counter_d * 0.4, h * 0.05)))
-            shapes.append(("rect", ADE_WARDR,
-                           (xmin + inset + w * 0.08, ymax - inset - h * 0.06,
-                            w * 0.07, h * 0.06)))
+            shapes.append(("rect", ADE_CAB, (xmin + w * 0.12, cy, w * 0.08, h * 0.38)))
+            shapes.append(("rect", ADE_CAB, (cx + w * 0.05, cy, w * 0.09, h * 0.22)))
 
     elif rtype == "bathroom":
-        # BATHTUB against long wall, VANITY on opposite wall, TOILET in a
-        # corner — a realistic 3-piece bathroom layout.
         if long_horizontal:
-            tub_half_w, tub_half_d = w * 0.18, h * 0.09
-            shapes.append(("rect", ADE_BATH,
-                           (cx - w * 0.08,
-                            ymin + inset + tub_half_d,
-                            tub_half_w, tub_half_d)))
-            # Vanity against opposite wall
-            shapes.append(("rect", ADE_CAB,
-                           (cx, ymax - inset - h * 0.06,
-                            w * 0.22, h * 0.06)))
-            # Toilet tucked in a corner
-            shapes.append(("rect", ADE_CAB,
-                           (xmax - inset - w * 0.06,
-                            ymin + inset + h * 0.08,
-                            w * 0.04, h * 0.05)))
+            shapes.append(("rect", ADE_BATH, (cx, cy - h * 0.08, w * 0.30, h * 0.14)))
+            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.10, w * 0.22, h * 0.06)))
         else:
-            tub_half_w, tub_half_d = w * 0.09, h * 0.18
-            shapes.append(("rect", ADE_BATH,
-                           (xmin + inset + tub_half_w,
-                            cy - h * 0.08,
-                            tub_half_w, tub_half_d)))
-            shapes.append(("rect", ADE_CAB,
-                           (xmax - inset - w * 0.06, cy,
-                            w * 0.06, h * 0.22)))
-            shapes.append(("rect", ADE_CAB,
-                           (xmin + inset + w * 0.08,
-                            ymax - inset - h * 0.06,
-                            w * 0.05, h * 0.04)))
+            shapes.append(("rect", ADE_BATH, (cx - w * 0.08, cy, w * 0.14, h * 0.30)))
+            shapes.append(("rect", ADE_CAB, (cx + w * 0.10, cy, w * 0.06, h * 0.22)))
 
     elif rtype == "dining room":
-        # Dining TABLE centered with chairs around, SIDEBOARD against wall.
-        r = short * 0.20
+        r = min(w, h) * 0.22
         shapes.append(("ellipse", ADE_TABLE, (cx, cy, r, r)))
-        # Four chairs around the table (rendered as small sofa blobs which
-        # ControlNet-Seg interprets as seating)
-        chair = short * 0.045
-        shapes.append(("rect", ADE_SOFA, (cx, cy - r - chair, chair, chair)))
-        shapes.append(("rect", ADE_SOFA, (cx, cy + r + chair, chair, chair)))
-        shapes.append(("rect", ADE_SOFA, (cx - r - chair, cy, chair, chair)))
-        shapes.append(("rect", ADE_SOFA, (cx + r + chair, cy, chair, chair)))
-        # Sideboard against the long wall
-        if long_horizontal:
-            shapes.append(("rect", ADE_CAB,
-                           (cx, ymax - inset - h * 0.04, w * 0.28, h * 0.04)))
-        else:
-            shapes.append(("rect", ADE_CAB,
-                           (xmax - inset - w * 0.04, cy, w * 0.04, h * 0.28)))
 
     elif rtype == "office":
-        # DESK against a wall, bookcase on the opposite wall, desk chair in
-        # front of the desk.
         if long_horizontal:
-            desk_half_d = h * 0.05
-            shapes.append(("rect", ADE_DESK,
-                           (cx, ymin + inset + desk_half_d,
-                            w * 0.28, desk_half_d)))
-            # Desk chair in front
-            shapes.append(("rect", ADE_SOFA,
-                           (cx, ymin + inset + h * 0.14,
-                            w * 0.04, h * 0.04)))
-            # Bookcase on opposite wall
-            shapes.append(("rect", ADE_WARDR,
-                           (cx, ymax - inset - h * 0.05, w * 0.32, h * 0.05)))
+            shapes.append(("rect", ADE_DESK, (cx, ymin + h * 0.20, w * 0.32, h * 0.08)))
         else:
-            desk_half_d = w * 0.05
-            shapes.append(("rect", ADE_DESK,
-                           (xmin + inset + desk_half_d, cy,
-                            desk_half_d, h * 0.28)))
-            shapes.append(("rect", ADE_SOFA,
-                           (xmin + inset + w * 0.14, cy,
-                            w * 0.04, h * 0.04)))
-            shapes.append(("rect", ADE_WARDR,
-                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.32)))
+            shapes.append(("rect", ADE_DESK, (xmin + w * 0.20, cy, w * 0.08, h * 0.32)))
 
     elif rtype == "closet":
-        # Wardrobes along BOTH long walls.
         if long_horizontal:
-            shapes.append(("rect", ADE_WARDR,
-                           (cx, ymin + inset + h * 0.07, w * 0.38, h * 0.07)))
-            shapes.append(("rect", ADE_WARDR,
-                           (cx, ymax - inset - h * 0.07, w * 0.38, h * 0.07)))
+            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.38, h * 0.14)))
         else:
-            shapes.append(("rect", ADE_WARDR,
-                           (xmin + inset + w * 0.07, cy, w * 0.07, h * 0.38)))
-            shapes.append(("rect", ADE_WARDR,
-                           (xmax - inset - w * 0.07, cy, w * 0.07, h * 0.38)))
+            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.14, h * 0.38)))
 
     elif rtype == "laundry room":
-        # Washer + dryer side-by-side against a wall.
-        if long_horizontal:
-            appl = min(w * 0.10, h * 0.10)
-            shapes.append(("rect", ADE_STOVE,
-                           (cx - appl, ymin + inset + appl / 2, appl / 2, appl / 2)))
-            shapes.append(("rect", ADE_STOVE,
-                           (cx + appl, ymin + inset + appl / 2, appl / 2, appl / 2)))
-            # Folding counter against opposite wall
-            shapes.append(("rect", ADE_CAB,
-                           (cx, ymax - inset - h * 0.05, w * 0.30, h * 0.05)))
-        else:
-            appl = min(w * 0.10, h * 0.10)
-            shapes.append(("rect", ADE_STOVE,
-                           (xmin + inset + appl / 2, cy - appl, appl / 2, appl / 2)))
-            shapes.append(("rect", ADE_STOVE,
-                           (xmin + inset + appl / 2, cy + appl, appl / 2, appl / 2)))
-            shapes.append(("rect", ADE_CAB,
-                           (xmax - inset - w * 0.05, cy, w * 0.05, h * 0.30)))
+        shapes.append(("rect", ADE_STOVE, (cx, cy, w * 0.28, h * 0.14)))
 
     elif rtype == "entryway":
-        # Console + coat hooks against the long wall.
-        if long_horizontal:
-            shapes.append(("rect", ADE_CAB,
-                           (cx, ymin + inset + h * 0.04, w * 0.25, h * 0.04)))
-        else:
-            shapes.append(("rect", ADE_CAB,
-                           (xmin + inset + w * 0.04, cy, w * 0.04, h * 0.25)))
+        shapes.append(("rect", ADE_DOORC, (cx, cy, w * 0.22, h * 0.10)))
 
     elif rtype in ("balcony", "sunroom"):
-        # Outdoor sofa + small table against the interior wall.
-        if long_horizontal:
-            shapes.append(("rect", ADE_SOFA,
-                           (cx, ymax - inset - h * 0.09, w * 0.22, h * 0.09)))
-            shapes.append(("ellipse", ADE_TABLE,
-                           (cx, cy - h * 0.05, w * 0.06, h * 0.05)))
-        else:
-            shapes.append(("rect", ADE_SOFA,
-                           (xmax - inset - w * 0.09, cy, w * 0.09, h * 0.22)))
-            shapes.append(("ellipse", ADE_TABLE,
-                           (cx - w * 0.05, cy, w * 0.05, h * 0.06)))
+        shapes.append(("ellipse", ADE_SOFA, (cx, cy, w * 0.20, h * 0.16)))
 
     elif rtype in ("basement", "attic", "studio"):
-        # Generic seating against one wall.
-        if long_horizontal:
-            shapes.append(("rect", ADE_SOFA,
-                           (cx, ymin + inset + h * 0.09, w * 0.28, h * 0.09)))
-        else:
-            shapes.append(("rect", ADE_SOFA,
-                           (xmin + inset + w * 0.09, cy, w * 0.09, h * 0.28)))
+        shapes.append(("rect", ADE_SOFA, (cx, cy, w * 0.28, h * 0.14)))
 
-    # hallway / full apartment -> no furniture anchors
     return shapes
 
 
@@ -695,6 +505,70 @@ def _rasterize_rooms_mask(rooms, size_wh):
     )
     boundaries = cv2.dilate(boundaries, wall_kernel, iterations=1)
     out[boundaries > 0] = ADE_WALL
+
+    # ---- 6) AUTO DOOR OPENINGS on shared walls ----
+    # For every pair of adjacent rooms, punch a door in the middle of the
+    # shared wall. We only REPLACE wall pixels so we don't bleed into floor
+    # or furniture. One door per room pair (no duplicates).
+    door_thickness = wall_thickness + 2
+    wall_rgb = np.array(ADE_WALL, dtype=np.uint8)
+    is_wall = np.all(out == wall_rgb, axis=-1)
+    placed_pairs = set()
+    for idx, poly in enumerate(parsed, start=1):
+        pts = poly["pts"]
+        n = len(pts)
+        for i in range(n):
+            a = pts[i]
+            b = pts[(i + 1) % n]
+            dx = float(b[0] - a[0])
+            dy = float(b[1] - a[1])
+            L = float(np.hypot(dx, dy))
+            if L < wall_thickness * 3:
+                continue
+            mx = (a[0] + b[0]) / 2.0
+            my = (a[1] + b[1]) / 2.0
+            # Perpendicular to the edge. We don't know which side is
+            # "outside this polygon" up front — sample both.
+            nx = -dy / L
+            ny = dx / L
+            step = wall_thickness * 1.5
+            s1x = int(mx + nx * step)
+            s1y = int(my + ny * step)
+            s2x = int(mx - nx * step)
+            s2y = int(my - ny * step)
+            outside_label = 0
+            if 0 <= s1x < w and 0 <= s1y < h and label_map[s1y, s1x] != idx:
+                outside_label = int(label_map[s1y, s1x])
+            elif 0 <= s2x < w and 0 <= s2y < h and label_map[s2y, s2x] != idx:
+                outside_label = int(label_map[s2y, s2x])
+            # Only punch doors on INTER-room walls (not on exterior walls
+            # to the outside / background). Exterior doors belong on the
+            # apartment entrance, which we can't reliably identify from
+            # polygons alone -- skipping them avoids random holes in the
+            # building envelope.
+            if outside_label <= 0 or outside_label == idx:
+                continue
+            pair = (min(idx, outside_label), max(idx, outside_label))
+            if pair in placed_pairs:
+                continue
+            placed_pairs.add(pair)
+            # Door segment: centered on edge midpoint, ~28% of edge length
+            ux = dx / L
+            uy = dy / L
+            door_len = max(wall_thickness * 3, min(L * 0.28, min(w, h) * 0.12))
+            ax = int(mx - ux * door_len / 2)
+            ay = int(my - uy * door_len / 2)
+            bx = int(mx + ux * door_len / 2)
+            by = int(my + uy * door_len / 2)
+            scratch = np.zeros((h, w), dtype=np.uint8)
+            cv2.line(scratch, (ax, ay), (bx, by), 255,
+                     thickness=door_thickness)
+            # Only REPLACE wall pixels -> clean opening, no bleed into
+            # floor / furniture zones.
+            paint = (scratch > 0) & is_wall
+            if paint.any():
+                out[paint] = ADE_DOOR
+                is_wall[paint] = False  # so next door pair doesn't re-hit
 
     return Image.fromarray(out)
 
@@ -998,13 +872,15 @@ class InteriorAI:
                 for r in rooms
                 if r
             )
-            # DEPTH-DOMINANT balance (mirrors the quick-mode ratio which is
-            # what gives that photorealistic AI look). Depth carries layout
-            # via elevated walls + per-furniture heights; seg is a soft HINT
-            # of furniture types rather than a hard target. High seg scales
-            # (0.7+) forced the model to mirror the schematic mask instead
-            # of rendering real furniture.
-            cn_scales = [0.55, 0.45]
+            # DEPTH-DOMINANT balance, tuned very close to quick mode's
+            # [0.5, 0.1] so the render keeps the photorealistic AI look
+            # instead of collapsing into a schematic/isometric aesthetic.
+            # seg_cn at 0.28 is just strong enough to anchor rooms to their
+            # drawn locations + hint at furniture types, while leaving SD
+            # enough freedom to paint real materials, shadows, and staging.
+            # Depth (walls, furniture elevations, window wells) carries the
+            # heavy layout signal.
+            cn_scales = [0.55, 0.28]
             guidance_scale = 7.5
         else:
             depth_img = self._get_depth_image(image_bgr, size_wh)

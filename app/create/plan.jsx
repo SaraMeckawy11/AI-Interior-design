@@ -101,14 +101,17 @@ const MAX_CANVAS_WIDTH = width - moderateScale(48);
 const MAX_CANVAS_HEIGHT = height * 0.45;
 
 // Drawing thresholds (in canvas pixels)
-const SNAP_RADIUS = 28;            // tap-to-close radius around first vertex
-const COMPLETED_VERTEX_SNAP_RADIUS = 18; // snap onto a vertex of a FINISHED room (shared corners)
-const VERTEX_GRAB_RADIUS = 12;     // must be nearly ON an in-progress vertex to grab it for dragging
-const SEGMENT_HANDLE_RADIUS = 26;  // grab radius for segment mid-handles
+// Snap radii tuned *down* so points no longer get forced on top of each
+// other. Snap is a gentle HINT, not magnetism — it only engages when the
+// finger is already essentially ON the target.
+const SNAP_RADIUS = 18;            // tap-to-close radius around FIRST vertex of current room
+const COMPLETED_VERTEX_SNAP_RADIUS = 10; // snap onto a vertex of a FINISHED room (shared corners)
+const VERTEX_GRAB_RADIUS = 10;     // must be essentially ON an in-progress vertex to grab it for dragging
+const SEGMENT_HANDLE_RADIUS = 20;  // grab radius for segment mid-handles
 const TAP_MOVE_THRESHOLD = 8;      // movement below this = tap, not drag
 const TAP_MAX_DURATION_MS = 600;   // above this = treat as drag
-const EDGE_SNAP_RADIUS = 12;       // snap onto a FINISHED room's edge (shared walls)
-const ORTHO_SNAP_DEG = 6;          // snap to exact 0°/90° within this tolerance
+const EDGE_SNAP_RADIUS = 6;        // snap onto a FINISHED room's edge — very tight, only right on the wall
+const ORTHO_SNAP_DEG = 3;          // snap to exact 0°/90° only within this very tight tolerance
 
 // Project a point onto a line segment, returning both the nearest point on
 // the segment and the perpendicular distance. Used by edge-snap.
@@ -1073,10 +1076,10 @@ export default function PlanEditor() {
     }
 
     return (
-      `architectural 3d render, isometric interior, interior design magazine, ` +
-      `fully furnished apartment, furniture arranged against walls, ` +
+      `architectural visualization, fully furnished modern apartment, top-down 3D, ` +
       `${phrases.join(", ")}, ` +
-      `${style} ${tone}, photorealistic, realistic materials, warm lighting, 8k`
+      `${style} style, ${tone} palette, ` +
+      `photorealistic, detailed textures, soft natural lighting, 8k`
     );
   };
 
@@ -1499,10 +1502,9 @@ export default function PlanEditor() {
                     color={COLORS.textSecondary}
                   />
                   <Text style={styles.planCanvasHint}>
-                    Tap to drop a point — place them freely, no forced
-                    overlap. Tap directly on a point to grab and slide it.
-                    Green = snapped to a shared corner/wall or 90° axis.
-                    Tap the first point to close the room.
+                    Tap exactly where you want a point — placement is 1:1,
+                    no magnet. Tap directly on an existing point to grab
+                    and slide it. Tap the first point to close the room.
                   </Text>
                 </View>
 
