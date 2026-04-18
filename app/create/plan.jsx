@@ -769,16 +769,41 @@ export default function PlanEditor() {
     return gridPositionLabel(c.x / canvasSize.width, c.y / canvasSize.height);
   };
 
+  // Compact signature-furniture hints per room type. Kept to 2 items each so
+  // the full prompt (with layout phrase) stays under the 77-token CLIP limit
+  // even for apartments with 5-6 rooms.
+  const ROOM_FURNITURE = {
+    "living room":  "sofa, tv unit",
+    "bedroom":      "bed, wardrobe",
+    "kitchen":      "island, cabinets",
+    "bathroom":     "vanity, shower",
+    "dining room":  "dining table, chairs",
+    "office":       "desk, bookshelf",
+    "kids room":    "bed, toys",
+    "hallway":      "",
+    "closet":       "shelves, mirror",
+    "laundry room": "washer, dryer",
+    "entryway":     "console, mirror",
+    "balcony":      "outdoor seating, plants",
+    "sunroom":      "lounge seating, plants",
+    "studio":       "sofa bed, kitchenette",
+    "basement":     "seating, tv",
+    "attic":        "seating, storage",
+    "full apartment": "cohesive furniture",
+  };
+
   const buildPrompt = () => {
     const style = DEFAULT_DESIGN_STYLE.toLowerCase();
     const tone = DEFAULT_COLOR_TONE.toLowerCase();
 
     if (mode === "quick") {
+      const rk = roomType.toLowerCase();
+      const furniture = ROOM_FURNITURE[rk] || "";
+      const furnishedPart = furniture ? ` with ${furniture}` : "";
       return (
-        `photorealistic 3D interior of a ${roomType.toLowerCase()}, ` +
-        `${style} style, ${tone} color palette, ` +
-        `furnished with appropriate furniture, cohesive layout, ` +
-        `soft natural lighting, 8k render, high detail`
+        `photorealistic 3D interior of a ${rk}${furnishedPart}, ` +
+        `modern interior design, ${style} style, ${tone} color palette, ` +
+        `cohesive layout, soft natural lighting, 8k render, high detail`
       );
     }
 
@@ -788,7 +813,7 @@ export default function PlanEditor() {
     if (assigned.length === 0) {
       return (
         `photorealistic 3D furnished apartment interior, ` +
-        `${style} style, ${tone} color palette, ` +
+        `modern interior design, ${style} style, ${tone} color palette, ` +
         `cohesive layout, soft natural lighting, 8k render`
       );
     }
@@ -815,19 +840,22 @@ export default function PlanEditor() {
     for (const [type, positions] of byType) {
       const n = positions.length;
       const label = `${n === 1 ? "a" : n} ${plural(type, n)}`;
-      // dedupe positions while preserving order
+      const furniture = ROOM_FURNITURE[type] || "";
+      const furnishedPart = furniture ? ` (${furniture})` : "";
       const uniquePositions = [...new Set(positions)];
-      phrases.push(`${label} in the ${uniquePositions.join(" and ")}`);
+      phrases.push(
+        `${label}${furnishedPart} at ${uniquePositions.join(" and ")}`,
+      );
     }
 
     const layoutPhrase = phrases.join(", ");
 
     return (
-      `photorealistic 3D furnished apartment interior, ` +
-      `top-down isometric view, ${layoutPhrase}, ` +
-      `each room in its exact drawn location, clear wall separations, ` +
-      `${style} style, ${tone} color palette, ` +
-      `cohesive furniture, soft natural lighting, 8k render`
+      `photorealistic 3D furnished apartment interior, top-down isometric view, ` +
+      `${layoutPhrase}, ` +
+      `each room fully furnished in its exact drawn location, one wall between rooms, ` +
+      `modern interior design, ${style} style, ${tone} palette, ` +
+      `cohesive layout, soft natural lighting, 8k render`
     );
   };
 

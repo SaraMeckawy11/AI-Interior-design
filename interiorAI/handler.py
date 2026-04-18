@@ -252,73 +252,100 @@ ROOM_ANCHOR_COLORS = {
 
 def rasterize_rooms_mask(rooms, size_wh):
     """
-    Clean ADE20K semantic mask from drawn polygons. See modal/app.py for the
-    full rationale. Summary: floor base + small centered furniture anchor
-    blob per room + thick wall outlines. NEVER flood whole rooms with
-    furniture color -- that tiles giant beds/sofas in the output.
+    Clean ADE20K semantic mask with auto geometry repair. See modal/app.py
+    for the full rationale. Summary:
+      - label map via painter's algorithm (later polygons win on overlap)
+      - iterative 1px dilation closes small accidental gaps
+      - walls painted only where LABELS change -> exactly one wall between
+        any two rooms, regardless of how the user drew them
+      - small centered furniture anchor blob per room
+      - balcony/sunroom: window strip on its longest edge
     """
-    import math
-    from PIL import Image, ImageDraw
-
     w, h = size_wh
-    img = Image.new("RGB", (w, h), (0, 0, 0))
-    draw = ImageDraw.Draw(img)
 
-    def _poly_points(poly):
+    parsed = []
+    for r in rooms or []:
+        rtype = (r.get("type") or "").strip().lower()
         pts = []
-        for p in poly or []:
+        for p in r.get("polygon") or []:
             try:
                 px = max(0.0, min(1.0, float(p.get("x", 0)))) * (w - 1)
                 py = max(0.0, min(1.0, float(p.get("y", 0)))) * (h - 1)
-                pts.append((px, py))
+                pts.append([px, py])
             except (TypeError, ValueError):
                 continue
-        return pts
-
-    # 1) Fill each polygon interior with floor.
-    for r in rooms or []:
-        pts = _poly_points(r.get("polygon"))
         if len(pts) >= 3:
-            draw.polygon(pts, fill=ADE_FLOOR)
+            parsed.append({"type": rtype, "pts": np.array(pts, dtype=np.int32)})
 
-    # 2) Small centered furniture anchor blob per room.
-    for r in rooms or []:
-        rtype = (r.get("type") or "").strip().lower()
-        color = ROOM_ANCHOR_COLORS.get(rtype)
-        pts = _poly_points(r.get("polygon"))
-        if color is None or len(pts) < 3:
+    if not parsed:
+        return Image.new("RGB", (w, h), (0, 0, 0))
+
+    label_map = np.zeros((h, w), dtype=np.int32)
+    for idx, poly in enumerate(parsed, start=1):
+        cv2.fillPoly(label_map, [poly["pts"]], idx)
+
+    max_gap_px = max(4, int(min(w, h) * 0.025))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    for _ in range(max_gap_px):
+        background = label_map == 0
+        if not background.any():
+            break
+        next_map = label_map.copy()
+        changed = False
+        for idx in range(1, len(parsed) + 1):
+            mask = (label_map == idx).astype(np.uint8)
+            dilated = cv2.dilate(mask, kernel, iterations=1)
+            write = background & (dilated > 0) & (next_map == 0)
+            if write.any():
+                next_map[write] = idx
+                changed = True
+        label_map = next_map
+        if not changed:
+            break
+
+    out = np.zeros((h, w, 3), dtype=np.uint8)
+    out[label_map > 0] = ADE_FLOOR
+
+    for idx, poly in enumerate(parsed, start=1):
+        color = ROOM_ANCHOR_COLORS.get(poly["type"])
+        if color is None:
             continue
-        cx = sum(p[0] for p in pts) / len(pts)
-        cy = sum(p[1] for p in pts) / len(pts)
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        extent = min(max(xs) - min(xs), max(ys) - min(ys))
-        r_blob = max(10.0, extent * 0.18)
-        draw.ellipse(
-            [cx - r_blob, cy - r_blob, cx + r_blob, cy + r_blob],
-            fill=color,
-        )
-        if rtype in ("balcony", "sunroom"):
+        xs, ys = poly["pts"][:, 0], poly["pts"][:, 1]
+        cx = int(xs.mean())
+        cy = int(ys.mean())
+        extent = min(int(xs.max() - xs.min()), int(ys.max() - ys.min()))
+        r_blob = max(10, int(extent * 0.18))
+        cv2.circle(out, (cx, cy), r_blob, color, -1)
+        if poly["type"] in ("balcony", "sunroom"):
+            pts = poly["pts"]
             best = (0.0, 0, 1)
             for i in range(len(pts)):
                 a = pts[i]
                 b = pts[(i + 1) % len(pts)]
-                L = math.hypot(b[0] - a[0], b[1] - a[1])
+                L = float(np.hypot(b[0] - a[0], b[1] - a[1]))
                 if L > best[0]:
                     best = (L, i, (i + 1) % len(pts))
-            a = pts[best[1]]
-            b = pts[best[2]]
-            window_w = max(8, int(min(w, h) * 0.018))
-            draw.line([a, b], fill=ADE_WINDOW, width=window_w)
+            a = tuple(int(v) for v in pts[best[1]])
+            b = tuple(int(v) for v in pts[best[2]])
+            win_w = max(8, int(min(w, h) * 0.018))
+            cv2.line(out, a, b, ADE_WINDOW, thickness=win_w)
 
-    # 3) Thick wall outlines over the polygon borders.
+    boundaries = np.zeros((h, w), dtype=np.uint8)
+    diff_v = (label_map[:-1, :] != label_map[1:, :])
+    diff_h = (label_map[:, :-1] != label_map[:, 1:])
+    boundaries[:-1, :] |= diff_v.astype(np.uint8)
+    boundaries[1:, :] |= diff_v.astype(np.uint8)
+    boundaries[:, :-1] |= diff_h.astype(np.uint8)
+    boundaries[:, 1:] |= diff_h.astype(np.uint8)
+
     wall_thickness = max(8, int(min(w, h) * 0.016))
-    for r in rooms or []:
-        pts = _poly_points(r.get("polygon"))
-        if len(pts) >= 3:
-            draw.line(pts + [pts[0]], fill=ADE_WALL, width=wall_thickness, joint="curve")
+    wall_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (wall_thickness, wall_thickness)
+    )
+    boundaries = cv2.dilate(boundaries, wall_kernel, iterations=1)
+    out[boundaries > 0] = ADE_WALL
 
-    return img
+    return Image.fromarray(out)
 
 
 def synthesize_depth_from_mask(seg_img):

@@ -267,90 +267,123 @@ ROOM_ANCHOR_COLORS = {
 
 def _rasterize_rooms_mask(rooms, size_wh):
     """
-    Build a clean ADE20K-style semantic mask from drawn room polygons.
+    Build a clean ADE20K-style semantic mask from drawn room polygons, with
+    automatic geometry repair.
 
-    Strategy (crucial — do NOT flood the polygon with furniture color; that's
-    what was causing giant tiled beds/sofas in the output):
+    What it does (in this order):
 
-      1. Background = black (anything outside the drawn rooms).
-      2. Each polygon interior = ADE_FLOOR (floor pixels).
-      3. A SMALL centered blob of the room's anchor color (bed / sofa /
-         bathtub / ...), ~18% of the polygon's shorter extent. This tells
-         SD "put ONE of these here" instead of "tile this whole area".
-      4. Polygon borders = thick ADE_WALL pixels so room divisions stay sharp.
-      5. Balcony / sunroom → a thin ADE_WINDOW strip along its longest edge
-         (outer wall).
+      1. Parse each polygon; points are clipped to [0,1] then scaled.
+      2. Fill each room into an integer LABEL MAP (0 = outside, 1..N = room
+         id). Later-drawn polygons win on overlap -- matches user intuition
+         ("my last stroke is what I meant").
+      3. GAP FILL: for a few iterations, each room dilates 1px into any
+         adjacent background. This closes up to ~2.5% of the shorter canvas
+         dimension of accidental gap between rooms the user meant to make
+         adjacent.
+      4. Paint floor everywhere a room won, plus small centered furniture
+         anchor blobs (~18% of polygon extent) per room.
+      5. WALLS at BOUNDARIES: a pixel becomes wall only where the label map
+         changes to a DIFFERENT label (including 0/outside). This guarantees
+         EXACTLY ONE wall between any two adjacent rooms -- no double walls
+         even if the user's polygons overlapped on purpose, and no gaps.
+      6. Balcony / sunroom gets an ADE_WINDOW strip on its longest edge.
 
-    Args:
-      rooms:  list of {"type": str, "polygon": [{"x": 0..1, "y": 0..1}, ...]}
-      size_wh: (width, height) of the target mask in pixels.
-
-    Returns:
-      PIL.Image in RGB at `size_wh`, ready to be fed as ControlNet-Seg input.
+    Returns: PIL.Image in RGB at `size_wh`.
     """
-    import math
-    from PIL import Image, ImageDraw
+    import cv2
+    import numpy as np
+    from PIL import Image
 
     w, h = size_wh
-    img = Image.new("RGB", (w, h), (0, 0, 0))
-    draw = ImageDraw.Draw(img)
 
-    def _poly_points(poly):
+    # ---- 1) parse ----
+    parsed = []
+    for r in rooms or []:
+        rtype = (r.get("type") or "").strip().lower()
         pts = []
-        for p in poly or []:
+        for p in r.get("polygon") or []:
             try:
                 px = max(0.0, min(1.0, float(p.get("x", 0)))) * (w - 1)
                 py = max(0.0, min(1.0, float(p.get("y", 0)))) * (h - 1)
-                pts.append((px, py))
+                pts.append([px, py])
             except (TypeError, ValueError):
                 continue
-        return pts
-
-    # 1) Fill each polygon interior with floor.
-    for r in rooms or []:
-        pts = _poly_points(r.get("polygon"))
         if len(pts) >= 3:
-            draw.polygon(pts, fill=ADE_FLOOR)
+            parsed.append({"type": rtype, "pts": np.array(pts, dtype=np.int32)})
 
-    # 2) Small centered furniture anchor blob per room.
-    for r in rooms or []:
-        rtype = (r.get("type") or "").strip().lower()
-        color = ROOM_ANCHOR_COLORS.get(rtype)
-        pts = _poly_points(r.get("polygon"))
-        if color is None or len(pts) < 3:
+    if not parsed:
+        return Image.new("RGB", (w, h), (0, 0, 0))
+
+    # ---- 2) label map via painter's algorithm ----
+    label_map = np.zeros((h, w), dtype=np.int32)
+    for idx, poly in enumerate(parsed, start=1):
+        cv2.fillPoly(label_map, [poly["pts"]], idx)
+
+    # ---- 3) gap fill: iterative 1px dilation into background ----
+    max_gap_px = max(4, int(min(w, h) * 0.025))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    for _ in range(max_gap_px):
+        background = label_map == 0
+        if not background.any():
+            break
+        next_map = label_map.copy()
+        changed = False
+        for idx in range(1, len(parsed) + 1):
+            mask = (label_map == idx).astype(np.uint8)
+            dilated = cv2.dilate(mask, kernel, iterations=1)
+            write = background & (dilated > 0) & (next_map == 0)
+            if write.any():
+                next_map[write] = idx
+                changed = True
+        label_map = next_map
+        if not changed:
+            break
+
+    # ---- 4) render floor + anchor blobs ----
+    out = np.zeros((h, w, 3), dtype=np.uint8)
+    out[label_map > 0] = ADE_FLOOR
+
+    for idx, poly in enumerate(parsed, start=1):
+        color = ROOM_ANCHOR_COLORS.get(poly["type"])
+        if color is None:
             continue
-        cx = sum(p[0] for p in pts) / len(pts)
-        cy = sum(p[1] for p in pts) / len(pts)
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        extent = min(max(xs) - min(xs), max(ys) - min(ys))
-        r_blob = max(10.0, extent * 0.18)
-        draw.ellipse(
-            [cx - r_blob, cy - r_blob, cx + r_blob, cy + r_blob],
-            fill=color,
-        )
-        # balcony / sunroom get a window strip along the longest edge
-        if rtype in ("balcony", "sunroom"):
+        xs, ys = poly["pts"][:, 0], poly["pts"][:, 1]
+        cx = int(xs.mean())
+        cy = int(ys.mean())
+        extent = min(int(xs.max() - xs.min()), int(ys.max() - ys.min()))
+        r_blob = max(10, int(extent * 0.18))
+        cv2.circle(out, (cx, cy), r_blob, color, -1)
+        if poly["type"] in ("balcony", "sunroom"):
+            pts = poly["pts"]
             best = (0.0, 0, 1)
             for i in range(len(pts)):
                 a = pts[i]
                 b = pts[(i + 1) % len(pts)]
-                L = math.hypot(b[0] - a[0], b[1] - a[1])
+                L = float(np.hypot(b[0] - a[0], b[1] - a[1]))
                 if L > best[0]:
                     best = (L, i, (i + 1) % len(pts))
-            a = pts[best[1]]
-            b = pts[best[2]]
-            window_w = max(8, int(min(w, h) * 0.018))
-            draw.line([a, b], fill=ADE_WINDOW, width=window_w)
+            a = tuple(int(v) for v in pts[best[1]])
+            b = tuple(int(v) for v in pts[best[2]])
+            win_w = max(8, int(min(w, h) * 0.018))
+            cv2.line(out, a, b, ADE_WINDOW, thickness=win_w)
 
-    # 3) Thick wall outlines over the polygon borders.
+    # ---- 5) walls only at label boundaries (single wall between rooms) ----
+    boundaries = np.zeros((h, w), dtype=np.uint8)
+    diff_v = (label_map[:-1, :] != label_map[1:, :])
+    diff_h = (label_map[:, :-1] != label_map[:, 1:])
+    boundaries[:-1, :] |= diff_v.astype(np.uint8)
+    boundaries[1:, :] |= diff_v.astype(np.uint8)
+    boundaries[:, :-1] |= diff_h.astype(np.uint8)
+    boundaries[:, 1:] |= diff_h.astype(np.uint8)
+
     wall_thickness = max(8, int(min(w, h) * 0.016))
-    for r in rooms or []:
-        pts = _poly_points(r.get("polygon"))
-        if len(pts) >= 3:
-            draw.line(pts + [pts[0]], fill=ADE_WALL, width=wall_thickness, joint="curve")
+    wall_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (wall_thickness, wall_thickness)
+    )
+    boundaries = cv2.dilate(boundaries, wall_kernel, iterations=1)
+    out[boundaries > 0] = ADE_WALL
 
-    return img
+    return Image.fromarray(out)
 
 
 def _synthesize_depth_from_mask(seg_img):
