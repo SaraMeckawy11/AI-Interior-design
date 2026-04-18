@@ -221,6 +221,94 @@ WINDOW_KEYWORDS = ["window", "windowpane"]
 
 
 # ---------------------------------------------------------------------------
+# ADE20K SEMANTIC ANCHORS (for guided-mode polygon rasterization)
+#
+# ControlNet-Seg (lllyasviel/control_v11p_sd15_seg) is trained on ADE20K
+# palette. To place a room EXACTLY where the user drew it, we rasterize each
+# drawn polygon into a synthetic ADE20K mask, filling the polygon with the
+# dominant furniture class color for the room type (bed for bedroom, sofa for
+# living room, bathtub for bathroom, …). Polygon boundaries are repainted as
+# ADE "wall" pixels so the generator keeps the room divisions.
+#
+# Colors below follow the standard ADE20K palette used by the ControlNet-Seg
+# reference checkpoint. The exact RGB is what matters — the model has learned
+# to associate each triple with a specific semantic class.
+# ---------------------------------------------------------------------------
+ADE_WALL = (120, 120, 120)
+ADE_FLOOR = (80, 50, 50)
+ADE_CEILING = (120, 120, 80)
+ADE_WINDOW = (230, 230, 230)
+ADE_DOOR = (8, 255, 51)
+
+ROOM_ANCHOR_COLORS = {
+    "living room":    (11, 102, 255),   # sofa
+    "bedroom":        (204, 5, 255),    # bed
+    "kitchen":        (255, 122, 8),    # cabinet/countertop family
+    "bathroom":       (0, 194, 255),    # bathtub
+    "dining room":    (255, 6, 82),     # dining table
+    "office":         (143, 255, 140),  # desk
+    "hallway":        (80, 50, 50),     # floor (corridor = floor-dominant)
+    "closet":         (255, 112, 0),    # wardrobe
+    "laundry room":   (10, 255, 71),    # washer-ish
+    "entryway":       (8, 255, 51),     # door
+    "balcony":        (230, 230, 230),  # windowpane / outside-adjacent
+    "basement":       (133, 133, 80),   # ceiling-ish
+    "kids room":      (204, 100, 255),  # bed-ish, lighter hue
+    "studio":         (11, 150, 255),   # sofa-ish
+    "full apartment": (80, 50, 50),     # floor base
+    "attic":          (120, 120, 80),   # ceiling
+    "sunroom":        (230, 230, 230),  # windowpane
+}
+
+
+def _rasterize_rooms_mask(rooms, size_wh):
+    """
+    Build an ADE20K-style semantic mask from drawn room polygons.
+
+    Args:
+      rooms:  list of {"type": str, "polygon": [{"x": 0..1, "y": 0..1}, ...]}
+      size_wh: (width, height) of the target mask in pixels.
+
+    Returns:
+      PIL.Image in RGB at `size_wh`, ready to be fed as ControlNet-Seg input.
+    """
+    from PIL import Image, ImageDraw
+
+    w, h = size_wh
+    img = Image.new("RGB", (w, h), ADE_FLOOR)
+    draw = ImageDraw.Draw(img)
+
+    def _poly_points(poly):
+        pts = []
+        for p in poly or []:
+            try:
+                px = max(0.0, min(1.0, float(p.get("x", 0)))) * (w - 1)
+                py = max(0.0, min(1.0, float(p.get("y", 0)))) * (h - 1)
+                pts.append((px, py))
+            except (TypeError, ValueError):
+                continue
+        return pts
+
+    # 1) Fill each polygon with the ADE anchor color of its room type.
+    for r in rooms or []:
+        rtype = (r.get("type") or "").strip().lower()
+        color = ROOM_ANCHOR_COLORS.get(rtype, ADE_FLOOR)
+        pts = _poly_points(r.get("polygon"))
+        if len(pts) >= 3:
+            draw.polygon(pts, fill=color)
+
+    # 2) Repaint polygon boundaries as thick ADE "wall" pixels so the
+    #    generator keeps the user's room divisions sharp.
+    wall_thickness = max(6, int(min(w, h) * 0.012))
+    for r in rooms or []:
+        pts = _poly_points(r.get("polygon"))
+        if len(pts) >= 3:
+            draw.line(pts + [pts[0]], fill=ADE_WALL, width=wall_thickness, joint="curve")
+
+    return img
+
+
+# ---------------------------------------------------------------------------
 # INFERENCE CLASS
 # ---------------------------------------------------------------------------
 
@@ -438,15 +526,43 @@ class InteriorAI:
         design_style: str = "",
         color_tone: str = "",
         custom_prompt: str = "",
+        rooms: list = None,
+        canvas: dict = None,
+        mode: str = "",
     ):
         """Pure-python callable version. Can be invoked from other Modal apps."""
         image_bgr = self._decode_base64_image(image)
         size_wh = self._resize_orientation(image_bgr)
 
+        # Guided mode: build a synthetic ADE20K mask from the drawn polygons
+        # and use it as the ControlNet-Seg input. This is what forces each
+        # room to land exactly where the user drew it.
+        use_room_mask = (
+            (mode or "").strip().lower() == "guided"
+            and isinstance(rooms, list)
+            and any(r and r.get("polygon") for r in rooms)
+        )
+
         depth_img = self._get_depth_image(image_bgr, size_wh)
-        seg_map = self._get_segmentation_map(image_bgr)
-        seg_img = self._get_segmentation_image(seg_map, size_wh)
-        has_window = self._detect_window(seg_map)
+
+        if use_room_mask:
+            seg_img = _rasterize_rooms_mask(rooms, size_wh)
+            # Windows are driven by room type in guided mode (balcony/sunroom
+            # rooms imply a window in the scene).
+            has_window = any(
+                (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
+                for r in rooms
+                if r
+            )
+            # Mask-driven: let seg ControlNet dominate placement. Depth from a
+            # line-art floor plan is noisy, so we keep a minimal depth weight
+            # only to anchor a plausible interior perspective.
+            cn_scales = [0.25, 0.95]
+        else:
+            seg_map = self._get_segmentation_map(image_bgr)
+            seg_img = self._get_segmentation_image(seg_map, size_wh)
+            has_window = self._detect_window(seg_map)
+            cn_scales = [0.5, 0.1]
 
         prompt = self._build_prompt(room_type, design_style, color_tone, custom_prompt)
         if has_window:
@@ -457,13 +573,18 @@ class InteriorAI:
         )
         if not has_window:
             negative += ", no window"
+        if use_room_mask:
+            negative += (
+                ", mixed rooms, wrong room in wrong place, mismatched layout, "
+                "rooms outside their boundaries, overlapping room areas"
+            )
 
         result = self.pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
             num_inference_steps=30,
             guidance_scale=7.5,
-            controlnet_conditioning_scale=[0.5, 0.1],
+            controlnet_conditioning_scale=cn_scales,
             negative_prompt=negative,
             generator=self.torch.manual_seed(42),
         )
@@ -479,6 +600,7 @@ class InteriorAI:
             "prompt": prompt,
             "negative_prompt": negative,
             "has_window": has_window,
+            "guided_mask_used": use_room_mask,
         }
 
     # --------------------- public HTTP endpoint ---------------------
@@ -516,6 +638,9 @@ class InteriorAI:
                 design_style=(body.get("design_style") or "").strip(),
                 color_tone=(body.get("color_tone") or "").strip(),
                 custom_prompt=body.get("custom_prompt") or "",
+                rooms=body.get("rooms") or None,
+                canvas=body.get("canvas") or None,
+                mode=(body.get("mode") or "").strip(),
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

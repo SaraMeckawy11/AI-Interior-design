@@ -215,6 +215,76 @@ FALLBACK_PROMPT = (
 EXTERIOR_KEYS = {k.lower(): k for k in EXTERIOR_PROMPTS.keys()}
 
 # ---------------------------------------------------------------------------
+# ADE20K SEMANTIC ANCHORS (guided-mode polygon rasterization)
+#
+# Turns the room polygons drawn in plan.jsx into an ADE20K-style semantic
+# mask so ControlNet-Seg places each room EXACTLY where the user drew it.
+# ---------------------------------------------------------------------------
+ADE_WALL = (120, 120, 120)
+ADE_FLOOR = (80, 50, 50)
+ADE_CEILING = (120, 120, 80)
+ADE_WINDOW = (230, 230, 230)
+ADE_DOOR = (8, 255, 51)
+
+ROOM_ANCHOR_COLORS = {
+    "living room":    (11, 102, 255),   # sofa
+    "bedroom":        (204, 5, 255),    # bed
+    "kitchen":        (255, 122, 8),    # cabinet/countertop family
+    "bathroom":       (0, 194, 255),    # bathtub
+    "dining room":    (255, 6, 82),     # dining table
+    "office":         (143, 255, 140),  # desk
+    "hallway":        (80, 50, 50),     # floor (corridor = floor-dominant)
+    "closet":         (255, 112, 0),    # wardrobe
+    "laundry room":   (10, 255, 71),    # washer-ish
+    "entryway":       (8, 255, 51),     # door
+    "balcony":        (230, 230, 230),  # windowpane / outside-adjacent
+    "basement":       (133, 133, 80),   # ceiling-ish
+    "kids room":      (204, 100, 255),  # bed-ish, lighter hue
+    "studio":         (11, 150, 255),   # sofa-ish
+    "full apartment": (80, 50, 50),     # floor base
+    "attic":          (120, 120, 80),   # ceiling
+    "sunroom":        (230, 230, 230),  # windowpane
+}
+
+
+def rasterize_rooms_mask(rooms, size_wh):
+    """
+    Build an ADE20K-style semantic mask from drawn room polygons.
+    See modal/app.py for full documentation.
+    """
+    from PIL import Image, ImageDraw
+
+    w, h = size_wh
+    img = Image.new("RGB", (w, h), ADE_FLOOR)
+    draw = ImageDraw.Draw(img)
+
+    def _poly_points(poly):
+        pts = []
+        for p in poly or []:
+            try:
+                px = max(0.0, min(1.0, float(p.get("x", 0)))) * (w - 1)
+                py = max(0.0, min(1.0, float(p.get("y", 0)))) * (h - 1)
+                pts.append((px, py))
+            except (TypeError, ValueError):
+                continue
+        return pts
+
+    for r in rooms or []:
+        rtype = (r.get("type") or "").strip().lower()
+        color = ROOM_ANCHOR_COLORS.get(rtype, ADE_FLOOR)
+        pts = _poly_points(r.get("polygon"))
+        if len(pts) >= 3:
+            draw.polygon(pts, fill=color)
+
+    wall_thickness = max(6, int(min(w, h) * 0.012))
+    for r in rooms or []:
+        pts = _poly_points(r.get("polygon"))
+        if len(pts) >= 3:
+            draw.line(pts + [pts[0]], fill=ADE_WALL, width=wall_thickness, joint="curve")
+
+    return img
+
+# ---------------------------------------------------------------------------
 # UTILITIES
 # ---------------------------------------------------------------------------
 
@@ -318,6 +388,10 @@ def handler(event):
         design_style = (body.get("design_style") or "").strip()
         color_tone = (body.get("color_tone") or "").strip()
 
+        # Guided-mode fields (optional)
+        rooms = body.get("rooms")
+        mode = (body.get("mode") or "").strip().lower()
+
         if not base64_image:
             return {"error": "Missing image"}
 
@@ -328,10 +402,28 @@ def handler(event):
         size_wh = resize_orientation(image_bgr)
 
         depth_img = get_depth_image(image_bgr, size_wh)
-        seg_map = get_segmentation_map(image_bgr)
-        seg_img = get_segmentation_image(seg_map, size_wh)
 
-        has_window = detect_window(seg_map)
+        use_room_mask = (
+            mode == "guided"
+            and isinstance(rooms, list)
+            and any(r and r.get("polygon") for r in rooms)
+        )
+
+        if use_room_mask:
+            # Build the semantic mask from drawn polygons and use it as the
+            # ControlNet-Seg input. Boost seg weight, lower depth weight.
+            seg_img = rasterize_rooms_mask(rooms, size_wh)
+            has_window = any(
+                (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
+                for r in rooms
+                if r
+            )
+            cn_scales = [0.25, 0.95]
+        else:
+            seg_map = get_segmentation_map(image_bgr)
+            seg_img = get_segmentation_image(seg_map, size_wh)
+            has_window = detect_window(seg_map)
+            cn_scales = [0.5, 0.1]
 
         # --- PROMPTS ---
         custom_prompt = body.get("custom_prompt")  # user-sent prompt (may be empty)
@@ -381,6 +473,11 @@ def handler(event):
         negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
         if not has_window:
             negative += ", no window"
+        if use_room_mask:
+            negative += (
+                ", mixed rooms, wrong room in wrong place, mismatched layout, "
+                "rooms outside their boundaries, overlapping room areas"
+            )
 
         # --- Generate ---
         result = pipe(
@@ -388,7 +485,7 @@ def handler(event):
             image=[depth_img, seg_img],
             num_inference_steps=30,
             guidance_scale=7.5,
-            controlnet_conditioning_scale=[0.5, 0.1],
+            controlnet_conditioning_scale=cn_scales,
             negative_prompt=negative,
             generator=torch.manual_seed(42)
         )
@@ -404,7 +501,8 @@ def handler(event):
             "generatedImage": img_str,
             "prompt": prompt,
             "negative_prompt": negative,
-            "has_window": has_window
+            "has_window": has_window,
+            "guided_mask_used": use_room_mask,
         }
 
     except Exception as e:

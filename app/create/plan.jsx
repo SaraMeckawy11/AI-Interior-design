@@ -3,7 +3,7 @@ import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import {
+import React, {
     useCallback,
     useEffect,
     useMemo,
@@ -16,6 +16,7 @@ import {
     Image,
     KeyboardAvoidingView,
     Modal,
+    PanResponder,
     Platform,
     ScrollView,
     StyleSheet,
@@ -30,7 +31,11 @@ import {
     RewardedAdEventType,
 } from "react-native-google-mobile-ads";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, Path } from "react-native-svg";
+import Svg, {
+    Circle,
+    Path,
+    Text as SvgText,
+} from "react-native-svg";
 import styles from "../../assets/styles/create/create.styles";
 import { useAuthStore } from "../../authStore";
 import RoomTypeSelector from "../../components/create/RoomTypeSelector";
@@ -93,6 +98,34 @@ const OUTLINE_COLORS = [
 
 const MAX_CANVAS_WIDTH = width - moderateScale(48);
 const MAX_CANVAS_HEIGHT = height * 0.45;
+
+// Drawing thresholds (in canvas pixels)
+const SNAP_RADIUS = 26;            // tap-to-close radius around first vertex
+const VERTEX_TAP_RADIUS = 16;      // considered "on" an existing vertex
+const SEGMENT_HANDLE_RADIUS = 26;  // grab radius for segment mid-handles
+const TAP_MOVE_THRESHOLD = 8;      // movement below this = tap, not drag
+const TAP_MAX_DURATION_MS = 600;   // above this = treat as drag
+
+// Map a (0..1, 0..1) centroid to a 3x3 grid position label.
+function gridPositionLabel(nx, ny) {
+  const col = nx < 0.34 ? "left" : nx > 0.66 ? "right" : "center";
+  const row = ny < 0.34 ? "top" : ny > 0.66 ? "bottom" : "middle";
+  if (col === "center" && row === "middle") return "center";
+  if (row === "middle") return `${col} side`;
+  if (col === "center") return `${row} center`;
+  return `${row}-${col}`;
+}
+
+function polygonCentroid(verts) {
+  if (!verts || verts.length === 0) return { x: 0, y: 0 };
+  let sx = 0;
+  let sy = 0;
+  for (const v of verts) {
+    sx += v.x;
+    sy += v.y;
+  }
+  return { x: sx / verts.length, y: sy / verts.length };
+}
 
 // ---------------------------------------------------------------------------
 // SMOOTH PATH FROM TOUCH POINTS
@@ -207,10 +240,32 @@ export default function PlanEditor() {
   const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
 
   const pathsRef = useRef([]);
+  const verticesRef = useRef([]);
+  const segmentCurvaturesRef = useRef([]);
+  const modeRef = useRef("quick");
+  const drawGestureRef = useRef({
+    startX: 0,
+    startY: 0,
+    startedAt: 0,
+    moved: false,
+    intent: "idle", // 'idle' | 'tap' | 'curve'
+    curveSegIndex: null,
+  });
+  const [liveTouch, setLiveTouch] = useState(null); // crosshair while finger is down
+  const [nearFirstVertex, setNearFirstVertex] = useState(false);
 
   useEffect(() => {
     pathsRef.current = paths;
   }, [paths]);
+  useEffect(() => {
+    verticesRef.current = vertices;
+  }, [vertices]);
+  useEffect(() => {
+    segmentCurvaturesRef.current = segmentCurvatures;
+  }, [segmentCurvatures]);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   // ── Canvas display size ──
   const canvasSize = useMemo(() => {
@@ -230,22 +285,18 @@ export default function PlanEditor() {
   const nextColor = OUTLINE_COLORS[paths.length % OUTLINE_COLORS.length];
 
   // ═══════════════════════════════════════════════════════════════
-  // DRAWING HANDLERS
+  // DRAWING HANDLERS — PanResponder with tap-vs-drag detection
   // ═══════════════════════════════════════════════════════════════
-  const SNAP_RADIUS = 18; // tap the first vertex to close
-  const VERTEX_TAP_RADIUS = 12;
-  const SEGMENT_HANDLE_RADIUS = 22;
-
   const getCurvatureForSegment = (touchX, touchY, segIndex) => {
-    const a = vertices[segIndex];
-    const b = vertices[segIndex + 1];
+    const verts = verticesRef.current;
+    const a = verts[segIndex];
+    const b = verts[segIndex + 1];
     if (!a || !b) return 0;
 
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const len = Math.hypot(dx, dy) || 1;
 
-    // Perpendicular (normal) vector
     const nx = -dy / len;
     const ny = dx / len;
 
@@ -253,119 +304,192 @@ export default function PlanEditor() {
     const my = (a.y + b.y) / 2;
 
     const signedDist = (touchX - mx) * nx + (touchY - my) * ny;
-
-    // Map signed perpendicular distance into -1..1
     const curvature = signedDist / (len * 0.25);
     return Math.max(-1, Math.min(1, curvature));
   };
 
-  const handleCanvasTap = (evt) => {
-    const { locationX: x, locationY: y } = evt.nativeEvent;
-    
-    if (vertices.length > 2) {
-      const first = vertices[0];
-      const dist = Math.hypot(first.x - x, first.y - y);
-      if (dist < SNAP_RADIUS) {
-        closeShape();
-        return;
-      }
-    }
-
-    // When dragging a curve handle, avoid adding new points.
-    if (curveEditSegmentIndex != null) return;
-
-    // Enter curve-edit mode when user taps near a segment midpoint.
-    if (vertices.length >= 2) {
-      let nearestSegIndex = null;
-      let nearestDist = Infinity;
-      for (let i = 0; i < vertices.length - 1; i++) {
-        const a = vertices[i];
-        const b = vertices[i + 1];
-        const mx = (a.x + b.x) / 2;
-        const my = (a.y + b.y) / 2;
-        const dist = Math.hypot(mx - x, my - y);
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestSegIndex = i;
-        }
-      }
-
-      if (
-        nearestSegIndex != null &&
-        nearestDist < SEGMENT_HANDLE_RADIUS
-      ) {
-        const nearVertex = vertices.some(
-          (v) => Math.hypot(v.x - x, v.y - y) < VERTEX_TAP_RADIUS
-        );
-        if (!nearVertex) {
-          setCurveEditSegmentIndex(nearestSegIndex);
-          setPreviewPoint(null);
-          setScrollEnabled(false);
-          return;
-        }
-      }
-    }
-
-    // Add new point
-    if (vertices.length === 0) {
-      setVertices([{ x, y }]);
-    } else {
-      setVertices((prev) => [...prev, { x, y }]);
-      setSegmentCurvatures((prev) => [...prev, 0]); // new segment starts straight
-    }
-
-    setPreviewPoint(null);
-    setScrollEnabled(false);
-  };
-
-  const handleCanvasMove = (evt) => {
-    if (vertices.length === 0) return;
-    const { locationX: x, locationY: y } = evt.nativeEvent;
-
-    // Curve handle drag
-    if (curveEditSegmentIndex != null) {
-      const newCurvature = getCurvatureForSegment(x, y, curveEditSegmentIndex);
-      setSegmentCurvatures((prev) =>
-        prev.map((c, i) => (i === curveEditSegmentIndex ? newCurvature : c))
-      );
-      return;
-    }
-
-    setPreviewPoint({ x, y });
-  };
-
-  const handleCanvasRelease = () => {
-    setCurveEditSegmentIndex(null);
-    setPreviewPoint(null);
-    setScrollEnabled(true);
-  };
-
   const closeShape = () => {
-    if (vertices.length < 3) return;
-    
-    const pathData = buildPathFromVertices(vertices, segmentCurvatures, true);
+    const verts = verticesRef.current;
+    const curvs = segmentCurvaturesRef.current;
+    if (verts.length < 3) return;
+
+    const pathData = buildPathFromVertices(verts, curvs, true);
     const colorIdx = pathsRef.current.length % OUTLINE_COLORS.length;
     const newPath = {
       pathData,
       color: OUTLINE_COLORS[colorIdx],
       roomType: null,
-      vertices: vertices.map((v) => ({ x: v.x, y: v.y })),
-      segmentCurvatures: [...segmentCurvatures],
+      vertices: verts.map((v) => ({ x: v.x, y: v.y })),
+      segmentCurvatures: [...curvs],
     };
-    
-    setPaths((prev) => {
-      const updated = [...prev, newPath];
-      pathsRef.current = updated;
-      return updated;
-    });
-    
+
+    const updated = [...pathsRef.current, newPath];
+    pathsRef.current = updated;
+    setPaths(updated);
+
     setVertices([]);
     setSegmentCurvatures([]);
     setCurveEditSegmentIndex(null);
     setPreviewPoint(null);
-    setAssigningPathIndex(pathsRef.current.length);
+    setLiveTouch(null);
+    setNearFirstVertex(false);
+    setAssigningPathIndex(updated.length - 1);
     setShowRoomAssign(true);
   };
+
+  // Stable PanResponder — reads latest state from refs so we don't have to
+  // recreate it on every vertex change.
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => modeRef.current === "guided",
+        onMoveShouldSetPanResponder: () => modeRef.current === "guided",
+        onPanResponderTerminationRequest: () => false,
+
+        onPanResponderGrant: (evt) => {
+          const { locationX: x, locationY: y } = evt.nativeEvent;
+          const verts = verticesRef.current;
+
+          // Detect curve-handle grab
+          let intent = "tap";
+          let curveSegIndex = null;
+          if (verts.length >= 2) {
+            let nearestIdx = null;
+            let nearestDist = Infinity;
+            for (let i = 0; i < verts.length - 1; i++) {
+              const a = verts[i];
+              const b = verts[i + 1];
+              const mx = (a.x + b.x) / 2;
+              const my = (a.y + b.y) / 2;
+              const d = Math.hypot(mx - x, my - y);
+              if (d < nearestDist) {
+                nearestDist = d;
+                nearestIdx = i;
+              }
+            }
+            const onVertex = verts.some(
+              (v) => Math.hypot(v.x - x, v.y - y) < VERTEX_TAP_RADIUS
+            );
+            if (
+              nearestIdx != null &&
+              nearestDist < SEGMENT_HANDLE_RADIUS &&
+              !onVertex
+            ) {
+              intent = "curve";
+              curveSegIndex = nearestIdx;
+              setCurveEditSegmentIndex(nearestIdx);
+            }
+          }
+
+          drawGestureRef.current = {
+            startX: x,
+            startY: y,
+            startedAt: Date.now(),
+            moved: false,
+            intent,
+            curveSegIndex,
+          };
+
+          setLiveTouch({ x, y });
+          if (verts.length > 0) setPreviewPoint({ x, y });
+          setScrollEnabled(false);
+        },
+
+        onPanResponderMove: (evt) => {
+          const { locationX: x, locationY: y } = evt.nativeEvent;
+          const g = drawGestureRef.current;
+          const dx = x - g.startX;
+          const dy = y - g.startY;
+          if (Math.hypot(dx, dy) > TAP_MOVE_THRESHOLD) g.moved = true;
+
+          setLiveTouch({ x, y });
+
+          if (g.intent === "curve" && g.curveSegIndex != null) {
+            const c = getCurvatureForSegment(x, y, g.curveSegIndex);
+            setSegmentCurvatures((prev) =>
+              prev.map((v, i) => (i === g.curveSegIndex ? c : v))
+            );
+            return;
+          }
+
+          const verts = verticesRef.current;
+          if (verts.length > 0) {
+            setPreviewPoint({ x, y });
+          }
+          if (verts.length > 2) {
+            const first = verts[0];
+            setNearFirstVertex(Math.hypot(first.x - x, first.y - y) < SNAP_RADIUS);
+          } else {
+            setNearFirstVertex(false);
+          }
+        },
+
+        onPanResponderRelease: (evt) => {
+          const { locationX: x, locationY: y } = evt.nativeEvent;
+          const g = drawGestureRef.current;
+          const dt = Date.now() - g.startedAt;
+
+          // Always clear transient visuals
+          setLiveTouch(null);
+          setNearFirstVertex(false);
+
+          // Curve adjust: just release
+          if (g.intent === "curve") {
+            setCurveEditSegmentIndex(null);
+            setPreviewPoint(null);
+            setScrollEnabled(true);
+            drawGestureRef.current.intent = "idle";
+            return;
+          }
+
+          // Interpret a slow/large motion as a drag (cancel) — but don't
+          // discard closing snaps.
+          const verts = verticesRef.current;
+          const isLongDrag = g.moved && dt > TAP_MAX_DURATION_MS;
+
+          // Close shape if released near first vertex
+          if (verts.length > 2) {
+            const first = verts[0];
+            if (Math.hypot(first.x - x, first.y - y) < SNAP_RADIUS) {
+              setPreviewPoint(null);
+              setScrollEnabled(true);
+              drawGestureRef.current.intent = "idle";
+              closeShape();
+              return;
+            }
+          }
+
+          if (isLongDrag) {
+            setPreviewPoint(null);
+            setScrollEnabled(true);
+            drawGestureRef.current.intent = "idle";
+            return;
+          }
+
+          // Commit the new vertex at the RELEASE location (not the touch-down
+          // location) — this lets the user slide to fine-tune before lifting.
+          if (verts.length === 0) {
+            setVertices([{ x, y }]);
+          } else {
+            setVertices((prev) => [...prev, { x, y }]);
+            setSegmentCurvatures((prev) => [...prev, 0]);
+          }
+          setPreviewPoint(null);
+          setScrollEnabled(true);
+          drawGestureRef.current.intent = "idle";
+        },
+
+        onPanResponderTerminate: () => {
+          setCurveEditSegmentIndex(null);
+          setPreviewPoint(null);
+          setLiveTouch(null);
+          setNearFirstVertex(false);
+          setScrollEnabled(true);
+          drawGestureRef.current.intent = "idle";
+        },
+      }),
+    []
+  );
 
   // ═══════════════════════════════════════════════════════════════
   // AD SETUP
@@ -632,9 +756,19 @@ export default function PlanEditor() {
 
   // ═══════════════════════════════════════════════════════════════
   // PROMPT BUILDING
-  // Simple, compact prompt (CLIP-friendly) that also nudges the generator
-  // to preserve the apartment's inner walls and room partitions.
+  // For guided mode we also describe WHERE each room sits on the plan
+  // (top-left, center, bottom-right, etc.) so the generator places each
+  // room close to where the user drew it.
   // ═══════════════════════════════════════════════════════════════
+  const describeRoomPosition = (pathObj) => {
+    const verts = pathObj?.vertices || [];
+    if (verts.length === 0 || !canvasSize?.width || !canvasSize?.height) {
+      return "center";
+    }
+    const c = polygonCentroid(verts);
+    return gridPositionLabel(c.x / canvasSize.width, c.y / canvasSize.height);
+  };
+
   const buildPrompt = () => {
     const style = DEFAULT_DESIGN_STYLE.toLowerCase();
     const tone = DEFAULT_COLOR_TONE.toLowerCase();
@@ -649,13 +783,10 @@ export default function PlanEditor() {
       );
     }
 
-    // Guided mode
-    const roomNames = paths
-      .filter((p) => p.roomType)
-      .map((p) => p.roomType.toLowerCase());
-    const uniqueRooms = [...new Set(roomNames)];
+    // Guided mode — compute per-room spatial placement.
+    const assigned = paths.filter((p) => p.roomType);
 
-    if (uniqueRooms.length === 0) {
+    if (assigned.length === 0) {
       return (
         `2D floor plan to 3D furnished interior, ` +
         `strictly respect all inner walls and room partitions from the plan, ` +
@@ -665,14 +796,41 @@ export default function PlanEditor() {
       );
     }
 
+    const layoutParts = assigned.map(
+      (p) => `${p.roomType.toLowerCase()} in the ${describeRoomPosition(p)}`
+    );
+    const layoutPhrase = layoutParts.join(", ");
+    const uniqueRooms = [
+      ...new Set(assigned.map((p) => p.roomType.toLowerCase())),
+    ];
     const roomList = uniqueRooms.join(", ");
+
     return (
       `2D floor plan to 3D furnished interior with ${roomList}, ` +
+      `layout: ${layoutPhrase}, ` +
+      `place each room EXACTLY in its mapped position, ` +
       `strictly respect all inner walls and room partitions separating each room, ` +
       `${style} style, ${tone} color palette, ` +
       `convert architectural floor plan to realistic 3D visualization with furniture, ` +
       `preserve the exact interior wall layout and room boundaries as drawn`
     );
+  };
+
+  // Build the structured rooms payload — normalized to [0,1] in canvas space
+  // so the backend can rasterize a segmentation mask when it's ready to use it.
+  const buildRoomsPayload = () => {
+    if (mode !== "guided") return [];
+    const w = canvasSize?.width || 1;
+    const h = canvasSize?.height || 1;
+    return paths.map((p) => ({
+      type: p.roomType || "unassigned",
+      color: p.color,
+      position: describeRoomPosition(p),
+      polygon: (p.vertices || []).map((v) => ({
+        x: Math.max(0, Math.min(1, v.x / w)),
+        y: Math.max(0, Math.min(1, v.y / h)),
+      })),
+    }));
   };
 
   // ═══════════════════════════════════════════════════════════════
@@ -720,6 +878,7 @@ export default function PlanEditor() {
       }
 
       const customPrompt = buildPrompt();
+      const rooms = buildRoomsPayload();
 
       const requestBody = {
         roomType: mode === "quick" ? roomType : "Floor Plan",
@@ -727,6 +886,14 @@ export default function PlanEditor() {
         colorTone: DEFAULT_COLOR_TONE,
         customPrompt,
         image: imageDataUrl,
+        // Guided-mode spatial info — the backend can use this to build a
+        // ControlNet segmentation mask so rooms land in their drawn positions.
+        mode,
+        rooms,
+        canvas:
+          mode === "guided"
+            ? { width: canvasSize.width, height: canvasSize.height }
+            : undefined,
       };
 
       const response = await fetch(
@@ -818,8 +985,8 @@ export default function PlanEditor() {
           )}
         </View>
 
-        {/* Quick / Guided toggle — hidden; flow stays on Quick (see mode state). */}
-        {/* <View style={styles.planModeToggleContainer}>
+        {/* Quick / Guided toggle */}
+        <View style={styles.planModeToggleContainer}>
           <TouchableOpacity
             style={[styles.planModeTab, mode === "quick" && styles.planModeTabActive]}
             onPress={() => switchMode("quick")}
@@ -860,7 +1027,76 @@ export default function PlanEditor() {
               Guided
             </Text>
           </TouchableOpacity>
-        </View> */}
+        </View>
+
+        {/* ── Step indicator ── */}
+        {(() => {
+          const step1Done = !!image;
+          const step2Done =
+            mode === "quick"
+              ? !!image && !!roomType
+              : !!image && paths.some((p) => p.roomType);
+          const currentStep = !step1Done ? 1 : !step2Done ? 2 : 3;
+          const steps = [
+            { n: 1, label: "Upload", done: step1Done },
+            {
+              n: 2,
+              label: mode === "quick" ? "Customize" : "Draw rooms",
+              done: step2Done,
+            },
+            { n: 3, label: "Generate", done: false },
+          ];
+          return (
+            <View style={styles.planStepsRow}>
+              {steps.map((s, idx) => {
+                const active = currentStep === s.n;
+                const done = s.done;
+                return (
+                  <React.Fragment key={s.n}>
+                    <View style={styles.planStepItem}>
+                      <View
+                        style={[
+                          styles.planStepBadge,
+                          active && styles.planStepBadgeActive,
+                          done && styles.planStepBadgeDone,
+                        ]}
+                      >
+                        {done ? (
+                          <Ionicons name="checkmark" size={14} color="#fff" />
+                        ) : (
+                          <Text
+                            style={[
+                              styles.planStepBadgeText,
+                              active && styles.planStepBadgeTextActive,
+                            ]}
+                          >
+                            {s.n}
+                          </Text>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.planStepLabel,
+                          active && styles.planStepLabelActive,
+                        ]}
+                      >
+                        {s.label}
+                      </Text>
+                    </View>
+                    {idx < steps.length - 1 && (
+                      <View
+                        style={[
+                          styles.planStepConnector,
+                          done && styles.planStepConnectorDone,
+                        ]}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </View>
+          );
+        })()}
 
         <View style={styles.form}>
           <View style={styles.formGroup}>
@@ -993,9 +1229,14 @@ export default function PlanEditor() {
                 </View>
 
                 <View style={styles.planCanvasHintContainer}>
-                  <Ionicons name="information-circle-outline" size={16} color={COLORS.textSecondary} />
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={16}
+                    color={COLORS.textSecondary}
+                  />
                   <Text style={styles.planCanvasHint}>
-                    Tap to add points. Tap the first point to close. Drag a segment midpoint to curve.
+                    Tap a point — slide to fine-tune before lifting. Release on
+                    the first point to close. Drag a midpoint to curve.
                   </Text>
                 </View>
 
@@ -1005,9 +1246,7 @@ export default function PlanEditor() {
                     vertices.length > 0 && styles.planCanvasContainerActive,
                     { width: canvasSize.width, height: canvasSize.height },
                   ]}
-                  onTouchStart={handleCanvasTap}
-                  onTouchMove={handleCanvasMove}
-                  onTouchEnd={handleCanvasRelease}
+                  {...panResponder.panHandlers}
                 >
                   <Image
                     source={{ uri: image }}
@@ -1024,20 +1263,41 @@ export default function PlanEditor() {
                     height={canvasSize.height}
                   >
                     {/* Completed paths */}
-                    {paths.map((p, i) => (
-                      <Path
-                        key={`path-${i}`}
-                        d={p.pathData}
-                        stroke={p.color}
-                        strokeWidth={3}
-                        fill={p.color + "25"}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    ))}
-                    
+                    {paths.map((p, i) => {
+                      const centroid = polygonCentroid(p.vertices || []);
+                      return (
+                        <React.Fragment key={`path-${i}`}>
+                          <Path
+                            d={p.pathData}
+                            stroke={p.color}
+                            strokeWidth={3}
+                            fill={p.color + "25"}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          {p.roomType ? (
+                            <>
+                              <SvgText
+                                x={centroid.x}
+                                y={centroid.y + 4}
+                                textAnchor="middle"
+                                fontSize="13"
+                                fontWeight="700"
+                                fill="#fff"
+                                stroke="rgba(0,0,0,0.55)"
+                                strokeWidth="3"
+                                paintOrder="stroke"
+                              >
+                                {p.roomType}
+                              </SvgText>
+                            </>
+                          ) : null}
+                        </React.Fragment>
+                      );
+                    })}
+
                     {/* Current drawing preview path */}
-                    {(vertices.length > 0) && (
+                    {vertices.length > 0 && (
                       <Path
                         d={buildPathFromVertices(
                           vertices,
@@ -1053,7 +1313,7 @@ export default function PlanEditor() {
                         strokeDasharray="6,3"
                       />
                     )}
-                    
+
                     {/* Segment midpoint handles (drag to adjust curvature) */}
                     {vertices.length >= 2 &&
                       vertices.slice(0, vertices.length - 1).map((_, i) => {
@@ -1071,7 +1331,7 @@ export default function PlanEditor() {
                             key={`mid-${i}`}
                             cx={mx}
                             cy={my}
-                            r={isActive ? 7 : 5}
+                            r={isActive ? 8 : 6}
                             fill={COLORS.primaryDark}
                             opacity={opacity}
                             stroke="#fff"
@@ -1080,18 +1340,65 @@ export default function PlanEditor() {
                         );
                       })}
 
+                    {/* Snap halo around first vertex when finger is near it */}
+                    {vertices.length > 2 && nearFirstVertex && (
+                      <>
+                        <Circle
+                          cx={vertices[0].x}
+                          cy={vertices[0].y}
+                          r={SNAP_RADIUS}
+                          fill={COLORS.primaryDark + "22"}
+                          stroke={COLORS.primaryDark}
+                          strokeWidth={1.5}
+                          strokeDasharray="4,3"
+                        />
+                        <Circle
+                          cx={vertices[0].x}
+                          cy={vertices[0].y}
+                          r={10}
+                          fill={COLORS.primaryDark}
+                          stroke="#fff"
+                          strokeWidth={2}
+                        />
+                      </>
+                    )}
+
                     {/* Vertices */}
                     {vertices.map((v, i) => (
                       <Circle
                         key={`v-${i}`}
                         cx={v.x}
                         cy={v.y}
-                        r={i === 0 && vertices.length > 2 ? 8 : 4}
+                        r={i === 0 && vertices.length > 2 ? 9 : 5}
                         fill={i === 0 ? COLORS.primaryDark : nextColor}
                         stroke="#fff"
-                        strokeWidth={1.5}
+                        strokeWidth={2}
                       />
                     ))}
+
+                    {/* Live crosshair — shows exactly where a new vertex will
+                        drop if the user lifts now, so they can fine-tune. */}
+                    {liveTouch && (
+                      <>
+                        <Circle
+                          cx={liveTouch.x}
+                          cy={liveTouch.y}
+                          r={18}
+                          fill="none"
+                          stroke={nextColor}
+                          strokeWidth={1.5}
+                          opacity={0.75}
+                        />
+                        <Circle
+                          cx={liveTouch.x}
+                          cy={liveTouch.y}
+                          r={3}
+                          fill={nextColor}
+                          stroke="#fff"
+                          strokeWidth={1.2}
+                        />
+                      </>
+                    )}
                   </Svg>
                 </View>
               </View>

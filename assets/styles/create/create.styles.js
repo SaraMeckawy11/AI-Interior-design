@@ -826,6 +826,72 @@ customPromptInput: {
     fontSize: moderateScale(14),
     fontWeight: "600",
   },
+
+  // ── Step indicator ──
+  planStepsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: moderateScale(4),
+    marginBottom: verticalScale(18),
+  },
+  planStepItem: {
+    alignItems: "center",
+    flexDirection: "column",
+    flexShrink: 1,
+  },
+  planStepBadge: {
+    width: moderateScale(26),
+    height: moderateScale(26),
+    borderRadius: moderateScale(13),
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: verticalScale(4),
+  },
+  planStepBadgeActive: {
+    backgroundColor: "#fff",
+    borderColor: COLORS.primaryDark,
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  planStepBadgeDone: {
+    backgroundColor: COLORS.primaryDark,
+    borderColor: COLORS.primaryDark,
+  },
+  planStepBadgeText: {
+    fontSize: moderateScale(12),
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  planStepBadgeTextActive: {
+    color: COLORS.primaryDark,
+  },
+  planStepLabel: {
+    fontSize: moderateScale(11),
+    color: COLORS.textSecondary,
+    fontWeight: "600",
+  },
+  planStepLabelActive: {
+    color: COLORS.primaryDark,
+    fontWeight: "700",
+  },
+  planStepConnector: {
+    flex: 1,
+    height: 2,
+    backgroundColor: COLORS.border,
+    marginHorizontal: moderateScale(8),
+    marginBottom: verticalScale(16),
+    borderRadius: 1,
+  },
+  planStepConnectorDone: {
+    backgroundColor: COLORS.primaryDark,
+  },
 });
 
 export default styles;

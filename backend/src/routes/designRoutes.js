@@ -16,7 +16,19 @@ async function getImageBase64FromUrl(url) {
 
 router.post("/", isAuthenticated, async (req, res) => {
   try {
-    const { roomType, designStyle, colorTone, customPrompt, image } = req.body;
+    const {
+      roomType,
+      designStyle,
+      colorTone,
+      customPrompt,
+      image,
+      // Guided-mode payload (drawn room polygons + canvas info). Used by the
+      // inference worker to rasterize an ADE20K semantic mask and feed it as
+      // ControlNet-Seg conditioning so each room lands exactly where drawn.
+      rooms,
+      canvas,
+      mode,
+    } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
       console.log("Missing required fields:", { roomType, designStyle, colorTone, image });
@@ -72,6 +84,11 @@ router.post("/", isAuthenticated, async (req, res) => {
       design_style: designStyle,
       color_tone: colorTone,
       custom_prompt: customPrompt || "",
+      // Guided-mode spatial fields (optional, only populated by plan.jsx
+      // when the user drew room outlines).
+      rooms: Array.isArray(rooms) ? rooms : null,
+      canvas: canvas && typeof canvas === "object" ? canvas : null,
+      mode: typeof mode === "string" ? mode : "",
     };
 
     console.log("Submitting job to Modal endpoint");
