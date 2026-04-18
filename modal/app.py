@@ -367,7 +367,7 @@ def _room_furniture_shapes(rtype, bbox):
     return shapes
 
 
-def _rasterize_rooms_mask(rooms, size_wh):
+def _rasterize_rooms_mask(rooms, size_wh, user_doors=None):
     """
     Build a clean ADE20K-style semantic mask from drawn room polygons, with
     automatic geometry repair.
@@ -569,6 +569,34 @@ def _rasterize_rooms_mask(rooms, size_wh):
             if paint.any():
                 out[paint] = ADE_DOOR
                 is_wall[paint] = False  # so next door pair doesn't re-hit
+
+    # ---- 7) USER-DRAWN doors: coordinates come normalized [0, 1]. We
+    # paint them on top of wall pixels with a slightly larger thickness
+    # so they extend onto exterior walls too (apartment entrance doors).
+    if user_doors:
+        for d in user_doors:
+            try:
+                x1 = max(0.0, min(1.0, float(d.get("x1", 0)))) * (w - 1)
+                y1 = max(0.0, min(1.0, float(d.get("y1", 0)))) * (h - 1)
+                x2 = max(0.0, min(1.0, float(d.get("x2", 0)))) * (w - 1)
+                y2 = max(0.0, min(1.0, float(d.get("y2", 0)))) * (h - 1)
+            except (TypeError, ValueError):
+                continue
+            if (x1 - x2) ** 2 + (y1 - y2) ** 2 < 4.0:
+                continue
+            scratch = np.zeros((h, w), dtype=np.uint8)
+            cv2.line(
+                scratch,
+                (int(x1), int(y1)), (int(x2), int(y2)),
+                255,
+                thickness=door_thickness + 2,
+            )
+            # Paint ONLY where we actually have a wall -- doors never bleed
+            # into floor or furniture territory.
+            paint = (scratch > 0) & is_wall
+            if paint.any():
+                out[paint] = ADE_DOOR
+                is_wall[paint] = False
 
     return Image.fromarray(out)
 
@@ -845,6 +873,7 @@ class InteriorAI:
         rooms: list = None,
         canvas: dict = None,
         mode: str = "",
+        doors: list = None,
     ):
         """Pure-python callable version. Can be invoked from other Modal apps."""
         image_bgr = self._decode_base64_image(image)
@@ -865,22 +894,21 @@ class InteriorAI:
             # - Synthesize depth from that SAME mask (skip DPT on the noisy
             #   architectural drawing — Arabic labels / dimensions / electrical
             #   symbols were being interpreted as real 3D geometry).
-            seg_img = _rasterize_rooms_mask(rooms, size_wh)
+            seg_img = _rasterize_rooms_mask(rooms, size_wh, user_doors=doors)
             depth_img = _synthesize_depth_from_mask(seg_img)
             has_window = any(
                 (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
                 for r in rooms
                 if r
             )
-            # DEPTH-DOMINANT balance, tuned very close to quick mode's
-            # [0.5, 0.1] so the render keeps the photorealistic AI look
-            # instead of collapsing into a schematic/isometric aesthetic.
-            # seg_cn at 0.28 is just strong enough to anchor rooms to their
-            # drawn locations + hint at furniture types, while leaving SD
-            # enough freedom to paint real materials, shadows, and staging.
-            # Depth (walls, furniture elevations, window wells) carries the
-            # heavy layout signal.
-            cn_scales = [0.55, 0.28]
+            # Mirror interior.jsx (quick mode) EXACTLY at [0.5, 0.1]. Higher
+            # seg values (we tried 0.28, 0.45) collapsed the render into a
+            # schematic/isometric look. The drawn layout is already encoded
+            # in the DEPTH map (wall elevations + per-furniture heights),
+            # so seg can be a very soft hint of furniture types without
+            # losing placement. This gives the same photorealistic AI feel
+            # that interior.jsx produces.
+            cn_scales = [0.5, 0.1]
             guidance_scale = 7.5
         else:
             depth_img = self._get_depth_image(image_bgr, size_wh)
@@ -979,6 +1007,7 @@ class InteriorAI:
                 rooms=body.get("rooms") or None,
                 canvas=body.get("canvas") or None,
                 mode=(body.get("mode") or "").strip(),
+                doors=body.get("doors") or None,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

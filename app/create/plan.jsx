@@ -238,6 +238,15 @@ export default function PlanEditor() {
   const [segmentCurvatures, setSegmentCurvatures] = useState([]); // one per segment (between vertices)
   const [curveEditSegmentIndex, setCurveEditSegmentIndex] = useState(null);
   const [previewPoint, setPreviewPoint] = useState(null);
+  // Drawing tool: 'room' (default) = tap to place vertices; 'door' = tap a
+  // wall to punch an opening there (tap an existing door to remove it).
+  const [tool, setTool] = useState("room");
+  // User-placed door openings, stored in canvas pixel space:
+  //   { x1, y1, x2, y2 }  — a segment lying on a wall.
+  const [doors, setDoors] = useState([]);
+  // Preview line while the user is hovering in door mode (shows where the
+  // door will land on the nearest wall).
+  const [doorPreview, setDoorPreview] = useState(null);
 
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [showRoomAssign, setShowRoomAssign] = useState(false);
@@ -263,6 +272,8 @@ export default function PlanEditor() {
   const verticesRef = useRef([]);
   const segmentCurvaturesRef = useRef([]);
   const modeRef = useRef("quick");
+  const toolRef = useRef("room");
+  const doorsRef = useRef([]);
   const drawGestureRef = useRef({
     startX: 0,
     startY: 0,
@@ -289,6 +300,12 @@ export default function PlanEditor() {
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+  useEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
+  useEffect(() => {
+    doorsRef.current = doors;
+  }, [doors]);
 
 
   // ── Canvas display size ──
@@ -334,6 +351,101 @@ export default function PlanEditor() {
     const signedDist = (touchX - mx) * nx + (touchY - my) * ny;
     const curvature = signedDist / (len * 0.25);
     return Math.max(-1, Math.min(1, curvature));
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // DOOR TOOL — find nearest wall, place/remove doors
+  // ═══════════════════════════════════════════════════════════════
+  const DOOR_SNAP_RADIUS = 40;   // finger must be within this many px of a wall
+  const DOOR_REMOVE_RADIUS = 18; // tap on an existing door within this to delete
+  const DOOR_LENGTH_FRAC = 0.30; // door spans this fraction of the wall length
+  const DOOR_MAX_LENGTH = 58;    // but never longer than this (px)
+  const DOOR_MIN_LENGTH = 22;
+
+  // Find the closest polygon edge across all completed rooms. Returns
+  // { pathIndex, edgeIndex, a, b, proj } or null if no edge is within
+  // DOOR_SNAP_RADIUS of (x, y).
+  const findNearestWall = (x, y) => {
+    const pts = pathsRef.current;
+    let best = null;
+    for (let pi = 0; pi < pts.length; pi++) {
+      const verts = pts[pi].vertices || [];
+      if (verts.length < 2) continue;
+      for (let i = 0; i < verts.length; i++) {
+        const a = verts[i];
+        const b = verts[(i + 1) % verts.length];
+        const proj = projectPointOnSegment(x, y, a, b);
+        if (!best || proj.dist < best.proj.dist) {
+          best = { pathIndex: pi, edgeIndex: i, a, b, proj };
+        }
+      }
+    }
+    if (!best || best.proj.dist > DOOR_SNAP_RADIUS) return null;
+    return best;
+  };
+
+  // Find an existing door near (x, y). Returns its index or -1.
+  const findDoorIndexAt = (x, y) => {
+    const ds = doorsRef.current;
+    for (let i = 0; i < ds.length; i++) {
+      const d = ds[i];
+      const proj = projectPointOnSegment(
+        x, y, { x: d.x1, y: d.y1 }, { x: d.x2, y: d.y2 }
+      );
+      if (proj.dist < DOOR_REMOVE_RADIUS) return i;
+    }
+    return -1;
+  };
+
+  // Given a wall hit, build a door segment CENTERED on the projected point
+  // and oriented along the wall.
+  const buildDoorFromWall = (wall) => {
+    const { a, b, proj } = wall;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1) return null;
+    const ux = dx / L;
+    const uy = dy / L;
+    const doorLen = Math.max(
+      DOOR_MIN_LENGTH,
+      Math.min(DOOR_MAX_LENGTH, L * DOOR_LENGTH_FRAC)
+    );
+    // Keep the door inside the wall even if projection sits near an end.
+    const maxOffset = Math.max(0, (L - doorLen) / 2);
+    // Project hit onto param t ∈ [0, 1] along a→b
+    const t = Math.max(0, Math.min(1, ((proj.pt.x - a.x) * dx + (proj.pt.y - a.y) * dy) / (L * L)));
+    const centerT = Math.max(
+      doorLen / (2 * L),
+      Math.min(1 - doorLen / (2 * L), t)
+    );
+    const cx = a.x + centerT * dx;
+    const cy = a.y + centerT * dy;
+    return {
+      x1: cx - ux * doorLen / 2,
+      y1: cy - uy * doorLen / 2,
+      x2: cx + ux * doorLen / 2,
+      y2: cy + uy * doorLen / 2,
+      // metadata only (not sent to backend)
+      _pathIndex: wall.pathIndex,
+      _edgeIndex: wall.edgeIndex,
+      // unused but kept for potential future max-offset clamping
+      _maxOffset: maxOffset,
+    };
+  };
+
+  // Commit or remove a door based on a tap at (x, y).
+  const placeOrRemoveDoorAt = (x, y) => {
+    const existing = findDoorIndexAt(x, y);
+    if (existing >= 0) {
+      setDoors((prev) => prev.filter((_, i) => i !== existing));
+      return;
+    }
+    const wall = findNearestWall(x, y);
+    if (!wall) return;
+    const door = buildDoorFromWall(wall);
+    if (!door) return;
+    setDoors((prev) => [...prev, door]);
   };
 
   // Adjust a raw touch point into a precise commit point. SNAPPING PHILOSOPHY:
@@ -495,6 +607,35 @@ export default function PlanEditor() {
 
         onPanResponderGrant: (evt) => {
           const { locationX: x, locationY: y } = evt.nativeEvent;
+
+          // DOOR TOOL — totally separate flow: no vertex/curve logic,
+          // just preview the door on the nearest wall.
+          if (toolRef.current === "door") {
+            drawGestureRef.current = {
+              startX: x,
+              startY: y,
+              startedAt: Date.now(),
+              moved: false,
+              intent: "door-tap",
+              curveSegIndex: null,
+              draggedVertexIndex: null,
+            };
+            const existing = findDoorIndexAt(x, y);
+            if (existing >= 0) {
+              setDoorPreview({ type: "remove", index: existing });
+            } else {
+              const wall = findNearestWall(x, y);
+              if (wall) {
+                const door = buildDoorFromWall(wall);
+                if (door) setDoorPreview({ type: "place", door });
+              } else {
+                setDoorPreview(null);
+              }
+            }
+            setScrollEnabled(false);
+            return;
+          }
+
           const verts = verticesRef.current;
 
           let intent = "tap";
@@ -567,6 +708,24 @@ export default function PlanEditor() {
         onPanResponderMove: (evt) => {
           const { locationX: rawX, locationY: rawY } = evt.nativeEvent;
           const g = drawGestureRef.current;
+
+          // DOOR TOOL — live-preview the door as the finger moves.
+          if (toolRef.current === "door" && g.intent === "door-tap") {
+            const existing = findDoorIndexAt(rawX, rawY);
+            if (existing >= 0) {
+              setDoorPreview({ type: "remove", index: existing });
+              return;
+            }
+            const wall = findNearestWall(rawX, rawY);
+            if (wall) {
+              const door = buildDoorFromWall(wall);
+              if (door) setDoorPreview({ type: "place", door });
+            } else {
+              setDoorPreview(null);
+            }
+            return;
+          }
+
           const dx = rawX - g.startX;
           const dy = rawY - g.startY;
           if (Math.hypot(dx, dy) > TAP_MOVE_THRESHOLD) g.moved = true;
@@ -631,6 +790,15 @@ export default function PlanEditor() {
           // Always clear transient visuals
           setLiveTouch(null);
           setNearFirstVertex(false);
+
+          // DOOR TOOL — commit on release.
+          if (toolRef.current === "door" && g.intent === "door-tap") {
+            placeOrRemoveDoorAt(rawX, rawY);
+            setDoorPreview(null);
+            setScrollEnabled(true);
+            drawGestureRef.current.intent = "idle";
+            return;
+          }
 
           // Curve adjust — release only.
           if (g.intent === "curve") {
@@ -708,6 +876,7 @@ export default function PlanEditor() {
           setPreviewPoint(null);
           setLiveTouch(null);
           setNearFirstVertex(false);
+          setDoorPreview(null);
           setScrollEnabled(true);
           drawGestureRef.current.intent = "idle";
         },
@@ -941,6 +1110,8 @@ export default function PlanEditor() {
     setSegmentCurvatures([]);
     setCurveEditSegmentIndex(null);
     setPreviewPoint(null);
+    setDoors([]);
+    setDoorPreview(null);
     pathsRef.current = [];
   };
 
@@ -1040,8 +1211,9 @@ export default function PlanEditor() {
 
     if (assigned.length === 0) {
       return (
-        `architectural 3d render, isometric interior, fully furnished apartment, ` +
-        `${style} ${tone}, photorealistic, warm lighting, 8k`
+        `professional interior photography, fully furnished apartment, ` +
+        `staged and styled, ${style} style, ${tone} palette, ` +
+        `photorealistic, sharp detail, soft natural lighting, 8k`
       );
     }
 
@@ -1075,11 +1247,14 @@ export default function PlanEditor() {
       phrases.push(`${label}${withPart} at ${uniquePositions.join(" & ")}`);
     }
 
+    // Match interior.jsx (quick mode) prompt DNA so guided output reads as
+    // "AI-generated interior photography", not architectural diagram.
+    // Only the per-room phrases differ (they anchor the drawn layout).
     return (
-      `architectural visualization, fully furnished modern apartment, top-down 3D, ` +
+      `professional interior photography, fully furnished apartment, ` +
       `${phrases.join(", ")}, ` +
-      `${style} style, ${tone} palette, ` +
-      `photorealistic, detailed textures, soft natural lighting, 8k`
+      `staged and styled, ${style} style, ${tone} palette, ` +
+      `photorealistic, sharp detail, soft natural lighting, 8k`
     );
   };
 
@@ -1097,6 +1272,21 @@ export default function PlanEditor() {
         x: Math.max(0, Math.min(1, v.x / w)),
         y: Math.max(0, Math.min(1, v.y / h)),
       })),
+    }));
+  };
+
+  // Build the doors payload — each door is a segment in normalized canvas
+  // coords so the backend can paint it over the rasterized wall pixels.
+  const buildDoorsPayload = () => {
+    if (mode !== "guided" || doors.length === 0) return [];
+    const w = canvasSize?.width || 1;
+    const h = canvasSize?.height || 1;
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    return doors.map((d) => ({
+      x1: clamp(d.x1 / w),
+      y1: clamp(d.y1 / h),
+      x2: clamp(d.x2 / w),
+      y2: clamp(d.y2 / h),
     }));
   };
 
@@ -1146,6 +1336,7 @@ export default function PlanEditor() {
 
       const customPrompt = buildPrompt();
       const rooms = buildRoomsPayload();
+      const doorsPayload = buildDoorsPayload();
 
       const requestBody = {
         roomType: mode === "quick" ? roomType : "Floor Plan",
@@ -1157,6 +1348,7 @@ export default function PlanEditor() {
         // ControlNet segmentation mask so rooms land in their drawn positions.
         mode,
         rooms,
+        doors: doorsPayload,
         canvas:
           mode === "guided"
             ? { width: canvasSize.width, height: canvasSize.height }
@@ -1447,17 +1639,18 @@ export default function PlanEditor() {
             {image && imageDims && (
               <View style={styles.formGroup}>
                 <View style={styles.labelRow}>
-                  <Text style={styles.label}>Draw Room Outlines</Text>
+                  <Text style={styles.label}>
+                    {tool === "door" ? "Place Door Openings" : "Draw Room Outlines"}
+                  </Text>
                   <View style={styles.planCanvasToolbar}>
-                    <View style={styles.planDrawToolPill}>
-                      <Ionicons name="create-outline" size={18} color={COLORS.primaryDark} />
-                      <Text style={styles.planDrawToolPillText}>Draw & Curve</Text>
-                    </View>
-
                     <TouchableOpacity
                       style={styles.planToolBtn}
                       onPress={handleUndo}
-                      disabled={paths.length === 0 && vertices.length === 0}
+                      disabled={
+                        tool === "room" &&
+                        paths.length === 0 &&
+                        vertices.length === 0
+                      }
                     >
                       <Ionicons
                         name="arrow-undo-outline"
@@ -1470,7 +1663,7 @@ export default function PlanEditor() {
                       />
                     </TouchableOpacity>
 
-                    {vertices.length > 2 && (
+                    {tool === "room" && vertices.length > 2 && (
                       <TouchableOpacity
                         style={styles.planToolBtn}
                         onPress={closeShape}
@@ -1482,17 +1675,87 @@ export default function PlanEditor() {
                     <TouchableOpacity
                       style={styles.planToolBtn}
                       onPress={handleClearAll}
-                      disabled={paths.length === 0 && vertices.length === 0}
+                      disabled={
+                        paths.length === 0 &&
+                        vertices.length === 0 &&
+                        doors.length === 0
+                      }
                     >
                       <Ionicons
                         name="trash-outline"
                         size={18}
                         color={
-                          paths.length === 0 && vertices.length === 0 ? COLORS.disabled : COLORS.error
+                          paths.length === 0 &&
+                          vertices.length === 0 &&
+                          doors.length === 0
+                            ? COLORS.disabled
+                            : COLORS.error
                         }
                       />
                     </TouchableOpacity>
                   </View>
+                </View>
+
+                {/* Room / Door tool toggle — segmented control */}
+                <View style={styles.planToolToggleRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.planToolToggleBtn,
+                      tool === "room" && styles.planToolToggleBtnActive,
+                    ]}
+                    onPress={() => {
+                      setTool("room");
+                      setDoorPreview(null);
+                    }}
+                  >
+                    <Ionicons
+                      name="square-outline"
+                      size={16}
+                      color={tool === "room" ? "#fff" : COLORS.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.planToolToggleBtnText,
+                        tool === "room" && styles.planToolToggleBtnTextActive,
+                      ]}
+                    >
+                      Rooms
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.planToolToggleBtn,
+                      tool === "door" && styles.planToolToggleBtnActive,
+                      paths.length === 0 && styles.planToolToggleBtnDisabled,
+                    ]}
+                    disabled={paths.length === 0}
+                    onPress={() => {
+                      setTool("door");
+                      setPreviewPoint(null);
+                      setLiveTouch(null);
+                    }}
+                  >
+                    <Ionicons
+                      name="log-in-outline"
+                      size={16}
+                      color={
+                        paths.length === 0
+                          ? COLORS.disabled
+                          : tool === "door"
+                            ? "#fff"
+                            : COLORS.textSecondary
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.planToolToggleBtnText,
+                        tool === "door" && styles.planToolToggleBtnTextActive,
+                        paths.length === 0 && { color: COLORS.disabled },
+                      ]}
+                    >
+                      Doors {doors.length > 0 ? `(${doors.length})` : ""}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.planCanvasHintContainer}>
@@ -1502,9 +1765,9 @@ export default function PlanEditor() {
                     color={COLORS.textSecondary}
                   />
                   <Text style={styles.planCanvasHint}>
-                    Tap exactly where you want a point — placement is 1:1,
-                    no magnet. Tap directly on an existing point to grab
-                    and slide it. Tap the first point to close the room.
+                    {tool === "door"
+                      ? "Tap a wall to drop a door opening. Tap an existing door to remove it. Doors between rooms are also placed automatically."
+                      : "Tap exactly where you want a point — placement is 1:1, no magnet. Tap directly on an existing point to grab and slide it. Tap the first point to close the room."}
                   </Text>
                 </View>
 
@@ -1563,6 +1826,54 @@ export default function PlanEditor() {
                         </React.Fragment>
                       );
                     })}
+
+                    {/* Committed doors — small green openings on walls */}
+                    {doors.map((d, i) => {
+                      const isPendingRemove =
+                        doorPreview &&
+                        doorPreview.type === "remove" &&
+                        doorPreview.index === i;
+                      return (
+                        <React.Fragment key={`door-${i}`}>
+                          <SvgLine
+                            x1={d.x1}
+                            y1={d.y1}
+                            x2={d.x2}
+                            y2={d.y2}
+                            stroke={isPendingRemove ? "#EF4444" : "#22C55E"}
+                            strokeWidth={8}
+                            strokeLinecap="round"
+                            opacity={isPendingRemove ? 0.55 : 0.95}
+                          />
+                          <SvgLine
+                            x1={d.x1}
+                            y1={d.y1}
+                            x2={d.x2}
+                            y2={d.y2}
+                            stroke="#fff"
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                            opacity={0.85}
+                          />
+                        </React.Fragment>
+                      );
+                    })}
+
+                    {/* Door placement preview (while finger is down in door mode) */}
+                    {doorPreview && doorPreview.type === "place" &&
+                      doorPreview.door && (
+                        <SvgLine
+                          x1={doorPreview.door.x1}
+                          y1={doorPreview.door.y1}
+                          x2={doorPreview.door.x2}
+                          y2={doorPreview.door.y2}
+                          stroke="#22C55E"
+                          strokeWidth={8}
+                          strokeLinecap="round"
+                          strokeDasharray="4,4"
+                          opacity={0.75}
+                        />
+                      )}
 
                     {/* Current drawing preview path */}
                     {vertices.length > 0 && (

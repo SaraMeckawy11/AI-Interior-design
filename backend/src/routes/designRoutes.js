@@ -28,6 +28,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       rooms,
       canvas,
       mode,
+      doors,
     } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
@@ -87,6 +88,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       // Guided-mode spatial fields (optional, only populated by plan.jsx
       // when the user drew room outlines).
       rooms: Array.isArray(rooms) ? rooms : null,
+      doors: Array.isArray(doors) ? doors : null,
       canvas: canvas && typeof canvas === "object" ? canvas : null,
       mode: typeof mode === "string" ? mode : "",
     };

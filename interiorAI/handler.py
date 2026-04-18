@@ -338,7 +338,7 @@ def room_furniture_shapes(rtype, bbox):
     return shapes
 
 
-def rasterize_rooms_mask(rooms, size_wh):
+def rasterize_rooms_mask(rooms, size_wh, user_doors=None):
     """
     Clean ADE20K semantic mask with auto geometry repair. See modal/app.py
     for the full rationale. Summary:
@@ -502,6 +502,31 @@ def rasterize_rooms_mask(rooms, size_wh):
                 out[paint] = ADE_DOOR
                 is_wall[paint] = False
 
+    # User-drawn doors (normalized coords) painted on top of wall pixels.
+    # Supports exterior walls too, so users can mark the apartment entrance.
+    if user_doors:
+        for d in user_doors:
+            try:
+                x1 = max(0.0, min(1.0, float(d.get("x1", 0)))) * (w - 1)
+                y1 = max(0.0, min(1.0, float(d.get("y1", 0)))) * (h - 1)
+                x2 = max(0.0, min(1.0, float(d.get("x2", 0)))) * (w - 1)
+                y2 = max(0.0, min(1.0, float(d.get("y2", 0)))) * (h - 1)
+            except (TypeError, ValueError):
+                continue
+            if (x1 - x2) ** 2 + (y1 - y2) ** 2 < 4.0:
+                continue
+            scratch = np.zeros((h, w), dtype=np.uint8)
+            cv2.line(
+                scratch,
+                (int(x1), int(y1)), (int(x2), int(y2)),
+                255,
+                thickness=door_thickness + 2,
+            )
+            paint = (scratch > 0) & is_wall
+            if paint.any():
+                out[paint] = ADE_DOOR
+                is_wall[paint] = False
+
     return Image.fromarray(out)
 
 
@@ -647,6 +672,7 @@ def handler(event):
 
         # Guided-mode fields (optional)
         rooms = body.get("rooms")
+        user_doors = body.get("doors")
         mode = (body.get("mode") or "").strip().lower()
 
         if not base64_image:
@@ -670,19 +696,18 @@ def handler(event):
             #   outlines -- no whole-room furniture flood)
             # - depth synthesized FROM that mask (skip DPT on the noisy
             #   architectural plan)
-            seg_img = rasterize_rooms_mask(rooms, size_wh)
+            seg_img = rasterize_rooms_mask(rooms, size_wh, user_doors=user_doors)
             depth_img = synthesize_depth_from_mask(seg_img)
             has_window = any(
                 (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
                 for r in rooms
                 if r
             )
-            # Depth-dominant balance, close to quick mode's [0.5, 0.1] so
-            # the output keeps quick-mode photorealism. seg at 0.28 only
-            # ANCHORS rooms to their drawn places + hints furniture types;
-            # higher seg turns the render schematic. Depth still holds
-            # layout via wall elevations and per-furniture heights.
-            cn_scales = [0.55, 0.28]
+            # Mirror interior.jsx (quick) at EXACTLY [0.5, 0.1]. Layout is
+            # already carried by the synthesized DEPTH map (wall elevations
+            # + furniture heights); seg is a soft hint of furniture types.
+            # This keeps quick-mode photorealism in guided mode.
+            cn_scales = [0.5, 0.1]
             guidance_scale = 7.5
         else:
             depth_img = get_depth_image(image_bgr, size_wh)
