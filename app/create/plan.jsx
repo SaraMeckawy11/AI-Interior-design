@@ -775,11 +775,10 @@ export default function PlanEditor() {
 
     if (mode === "quick") {
       return (
-        `2D floor plan to 3D furnished ${roomType.toLowerCase()} interior, ` +
-        `strictly respect all inner walls and room partitions from the plan, ` +
+        `photorealistic 3D interior of a ${roomType.toLowerCase()}, ` +
         `${style} style, ${tone} color palette, ` +
-        `convert architectural floor plan to realistic 3D room visualization with furniture, ` +
-        `preserve interior wall layout and room boundaries`
+        `furnished with appropriate furniture, cohesive layout, ` +
+        `soft natural lighting, 8k render, high detail`
       );
     }
 
@@ -788,31 +787,47 @@ export default function PlanEditor() {
 
     if (assigned.length === 0) {
       return (
-        `2D floor plan to 3D furnished interior, ` +
-        `strictly respect all inner walls and room partitions from the plan, ` +
+        `photorealistic 3D furnished apartment interior, ` +
         `${style} style, ${tone} color palette, ` +
-        `convert architectural floor plan to realistic 3D visualization with furniture, ` +
-        `preserve interior wall layout`
+        `cohesive layout, soft natural lighting, 8k render`
       );
     }
 
-    const layoutParts = assigned.map(
-      (p) => `${p.roomType.toLowerCase()} in the ${describeRoomPosition(p)}`
-    );
-    const layoutPhrase = layoutParts.join(", ");
-    const uniqueRooms = [
-      ...new Set(assigned.map((p) => p.roomType.toLowerCase())),
-    ];
-    const roomList = uniqueRooms.join(", ");
+    // Group rooms by type with count + position list (one phrase per type)
+    // so SD sees each room type ONCE, not duplicated across "room list" and
+    // "layout list" (that was making the model hallucinate multiple rooms).
+    const plural = (type, n) => {
+      if (n <= 1) return type;
+      if (type.endsWith("y")) return type.slice(0, -1) + "ies";
+      if (type.endsWith("s")) return type;
+      return type + "s";
+    };
+
+    const byType = new Map();
+    for (const p of assigned) {
+      const t = p.roomType.toLowerCase();
+      const pos = describeRoomPosition(p);
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t).push(pos);
+    }
+
+    const phrases = [];
+    for (const [type, positions] of byType) {
+      const n = positions.length;
+      const label = `${n === 1 ? "a" : n} ${plural(type, n)}`;
+      // dedupe positions while preserving order
+      const uniquePositions = [...new Set(positions)];
+      phrases.push(`${label} in the ${uniquePositions.join(" and ")}`);
+    }
+
+    const layoutPhrase = phrases.join(", ");
 
     return (
-      `2D floor plan to 3D furnished interior with ${roomList}, ` +
-      `layout: ${layoutPhrase}, ` +
-      `place each room EXACTLY in its mapped position, ` +
-      `strictly respect all inner walls and room partitions separating each room, ` +
+      `photorealistic 3D furnished apartment interior, ` +
+      `top-down isometric view, ${layoutPhrase}, ` +
+      `each room in its exact drawn location, clear wall separations, ` +
       `${style} style, ${tone} color palette, ` +
-      `convert architectural floor plan to realistic 3D visualization with furniture, ` +
-      `preserve the exact interior wall layout and room boundaries as drawn`
+      `cohesive furniture, soft natural lighting, 8k render`
     );
   };
 

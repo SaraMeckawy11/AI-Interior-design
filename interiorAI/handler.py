@@ -226,36 +226,42 @@ ADE_CEILING = (120, 120, 80)
 ADE_WINDOW = (230, 230, 230)
 ADE_DOOR = (8, 255, 51)
 
+# Furniture-anchor colors -- RGB triples from the standard ADE20K palette.
+# These are ONE SMALL BLOB per room, NOT a whole-room fill (that was making
+# SD tile giant furniture across entire rooms).
 ROOM_ANCHOR_COLORS = {
-    "living room":    (11, 102, 255),   # sofa
-    "bedroom":        (204, 5, 255),    # bed
-    "kitchen":        (255, 122, 8),    # cabinet/countertop family
-    "bathroom":       (0, 194, 255),    # bathtub
-    "dining room":    (255, 6, 82),     # dining table
-    "office":         (143, 255, 140),  # desk
-    "hallway":        (80, 50, 50),     # floor (corridor = floor-dominant)
-    "closet":         (255, 112, 0),    # wardrobe
-    "laundry room":   (10, 255, 71),    # washer-ish
-    "entryway":       (8, 255, 51),     # door
-    "balcony":        (230, 230, 230),  # windowpane / outside-adjacent
-    "basement":       (133, 133, 80),   # ceiling-ish
-    "kids room":      (204, 100, 255),  # bed-ish, lighter hue
-    "studio":         (11, 150, 255),   # sofa-ish
-    "full apartment": (80, 50, 50),     # floor base
-    "attic":          (120, 120, 80),   # ceiling
-    "sunroom":        (230, 230, 230),  # windowpane
+    "living room":    (11, 102, 255),   # sofa        (ADE class 23)
+    "bedroom":        (204, 5, 255),    # bed         (ADE class 7)
+    "kitchen":        (224, 5, 255),    # cabinet     (ADE class 10)
+    "bathroom":       (0, 102, 200),    # bathtub     (ADE class 37)
+    "dining room":    (255, 6, 82),     # table       (ADE class 15)
+    "office":         (8, 255, 214),    # desk        (ADE class 33)
+    "hallway":        None,             # no furniture anchor
+    "closet":         (0, 163, 255),    # wardrobe    (ADE class 35)
+    "laundry room":   (255, 224, 0),
+    "entryway":       (8, 255, 51),     # door        (ADE class 14)
+    "balcony":        (11, 102, 255),
+    "basement":       (11, 102, 255),
+    "kids room":      (204, 5, 255),
+    "studio":         (11, 102, 255),
+    "full apartment": None,
+    "attic":          (11, 102, 255),
+    "sunroom":        (11, 102, 255),
 }
 
 
 def rasterize_rooms_mask(rooms, size_wh):
     """
-    Build an ADE20K-style semantic mask from drawn room polygons.
-    See modal/app.py for full documentation.
+    Clean ADE20K semantic mask from drawn polygons. See modal/app.py for the
+    full rationale. Summary: floor base + small centered furniture anchor
+    blob per room + thick wall outlines. NEVER flood whole rooms with
+    furniture color -- that tiles giant beds/sofas in the output.
     """
+    import math
     from PIL import Image, ImageDraw
 
     w, h = size_wh
-    img = Image.new("RGB", (w, h), ADE_FLOOR)
+    img = Image.new("RGB", (w, h), (0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     def _poly_points(poly):
@@ -269,20 +275,78 @@ def rasterize_rooms_mask(rooms, size_wh):
                 continue
         return pts
 
+    # 1) Fill each polygon interior with floor.
     for r in rooms or []:
-        rtype = (r.get("type") or "").strip().lower()
-        color = ROOM_ANCHOR_COLORS.get(rtype, ADE_FLOOR)
         pts = _poly_points(r.get("polygon"))
         if len(pts) >= 3:
-            draw.polygon(pts, fill=color)
+            draw.polygon(pts, fill=ADE_FLOOR)
 
-    wall_thickness = max(6, int(min(w, h) * 0.012))
+    # 2) Small centered furniture anchor blob per room.
+    for r in rooms or []:
+        rtype = (r.get("type") or "").strip().lower()
+        color = ROOM_ANCHOR_COLORS.get(rtype)
+        pts = _poly_points(r.get("polygon"))
+        if color is None or len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        extent = min(max(xs) - min(xs), max(ys) - min(ys))
+        r_blob = max(10.0, extent * 0.18)
+        draw.ellipse(
+            [cx - r_blob, cy - r_blob, cx + r_blob, cy + r_blob],
+            fill=color,
+        )
+        if rtype in ("balcony", "sunroom"):
+            best = (0.0, 0, 1)
+            for i in range(len(pts)):
+                a = pts[i]
+                b = pts[(i + 1) % len(pts)]
+                L = math.hypot(b[0] - a[0], b[1] - a[1])
+                if L > best[0]:
+                    best = (L, i, (i + 1) % len(pts))
+            a = pts[best[1]]
+            b = pts[best[2]]
+            window_w = max(8, int(min(w, h) * 0.018))
+            draw.line([a, b], fill=ADE_WINDOW, width=window_w)
+
+    # 3) Thick wall outlines over the polygon borders.
+    wall_thickness = max(8, int(min(w, h) * 0.016))
     for r in rooms or []:
         pts = _poly_points(r.get("polygon"))
         if len(pts) >= 3:
             draw.line(pts + [pts[0]], fill=ADE_WALL, width=wall_thickness, joint="curve")
 
     return img
+
+
+def synthesize_depth_from_mask(seg_img):
+    """
+    Clean ControlNet-Depth image built from the semantic mask. Skips DPT on
+    the noisy floor plan in guided mode (Arabic labels / dimensions /
+    electrical symbols were being read as 3D geometry -> hallucinations).
+    Convention: bright = close. walls 230, floor/anchors 110, windows 60,
+    background 0.
+    """
+    arr = np.array(seg_img).astype(np.int32)
+    h, w = arr.shape[:2]
+
+    def _match(color):
+        c = np.array(color, dtype=np.int32)
+        return np.all(arr == c, axis=-1)
+
+    depth = np.zeros((h, w), dtype=np.uint8)
+    depth[_match(ADE_FLOOR)] = 110
+    for color in ROOM_ANCHOR_COLORS.values():
+        if color is not None:
+            depth[_match(color)] = 110
+    depth[_match(ADE_WINDOW)] = 60
+    depth[_match(ADE_WALL)] = 230
+
+    depth = cv2.GaussianBlur(depth, (7, 7), 0)
+    depth_rgb = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
+    return Image.fromarray(depth_rgb)
 
 # ---------------------------------------------------------------------------
 # UTILITIES
@@ -401,8 +465,6 @@ def handler(event):
         image_bgr = decode_base64_image(base64_image)
         size_wh = resize_orientation(image_bgr)
 
-        depth_img = get_depth_image(image_bgr, size_wh)
-
         use_room_mask = (
             mode == "guided"
             and isinstance(rooms, list)
@@ -410,20 +472,27 @@ def handler(event):
         )
 
         if use_room_mask:
-            # Build the semantic mask from drawn polygons and use it as the
-            # ControlNet-Seg input. Boost seg weight, lower depth weight.
+            # GUIDED MODE
+            # - mask from the drawn polygons (small furniture anchors, wall
+            #   outlines -- no whole-room furniture flood)
+            # - depth synthesized FROM that mask (skip DPT on the noisy
+            #   architectural plan)
             seg_img = rasterize_rooms_mask(rooms, size_wh)
+            depth_img = synthesize_depth_from_mask(seg_img)
             has_window = any(
                 (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
                 for r in rooms
                 if r
             )
-            cn_scales = [0.25, 0.95]
+            cn_scales = [0.4, 0.75]
+            guidance_scale = 5.5
         else:
+            depth_img = get_depth_image(image_bgr, size_wh)
             seg_map = get_segmentation_map(image_bgr)
             seg_img = get_segmentation_image(seg_map, size_wh)
             has_window = detect_window(seg_map)
             cn_scales = [0.5, 0.1]
+            guidance_scale = 7.5
 
         # --- PROMPTS ---
         custom_prompt = body.get("custom_prompt")  # user-sent prompt (may be empty)
@@ -470,13 +539,19 @@ def handler(event):
             # add to negative prompt instead of prompt
             pass
 
-        negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+        negative = (
+            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective, "
+            "low quality, deformed, watermark, text"
+        )
         if not has_window:
             negative += ", no window"
         if use_room_mask:
             negative += (
-                ", mixed rooms, wrong room in wrong place, mismatched layout, "
-                "rooms outside their boundaries, overlapping room areas"
+                ", duplicate rooms, repeated furniture, tiled pattern, multiple beds, "
+                "multiple sofas, mixed rooms, wrong room in wrong place, mismatched layout, "
+                "rooms outside their boundaries, overlapping room areas, fragmented layout, "
+                "2D floor plan, technical drawing, architectural drafting, dimension lines, "
+                "labels, arabic text, symbols, door swing arcs, plan annotations"
             )
 
         # --- Generate ---
@@ -484,7 +559,7 @@ def handler(event):
             prompt=prompt,
             image=[depth_img, seg_img],
             num_inference_steps=30,
-            guidance_scale=7.5,
+            guidance_scale=guidance_scale,
             controlnet_conditioning_scale=cn_scales,
             negative_prompt=negative,
             generator=torch.manual_seed(42)

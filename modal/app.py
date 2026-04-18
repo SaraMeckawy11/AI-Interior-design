@@ -240,30 +240,46 @@ ADE_CEILING = (120, 120, 80)
 ADE_WINDOW = (230, 230, 230)
 ADE_DOOR = (8, 255, 51)
 
+# Furniture-anchor colors -- RGB triples from the standard ADE20K palette so
+# ControlNet-Seg (lllyasviel/control_v11p_sd15_seg) recognizes them as the
+# intended object class. These are ONE SMALL BLOB per room, NOT a whole-room
+# fill (that was making SD tile giant furniture across entire rooms).
 ROOM_ANCHOR_COLORS = {
-    "living room":    (11, 102, 255),   # sofa
-    "bedroom":        (204, 5, 255),    # bed
-    "kitchen":        (255, 122, 8),    # cabinet/countertop family
-    "bathroom":       (0, 194, 255),    # bathtub
-    "dining room":    (255, 6, 82),     # dining table
-    "office":         (143, 255, 140),  # desk
-    "hallway":        (80, 50, 50),     # floor (corridor = floor-dominant)
-    "closet":         (255, 112, 0),    # wardrobe
-    "laundry room":   (10, 255, 71),    # washer-ish
-    "entryway":       (8, 255, 51),     # door
-    "balcony":        (230, 230, 230),  # windowpane / outside-adjacent
-    "basement":       (133, 133, 80),   # ceiling-ish
-    "kids room":      (204, 100, 255),  # bed-ish, lighter hue
-    "studio":         (11, 150, 255),   # sofa-ish
-    "full apartment": (80, 50, 50),     # floor base
-    "attic":          (120, 120, 80),   # ceiling
-    "sunroom":        (230, 230, 230),  # windowpane
+    "living room":    (11, 102, 255),   # sofa        (ADE class 23)
+    "bedroom":        (204, 5, 255),    # bed         (ADE class 7)
+    "kitchen":        (224, 5, 255),    # cabinet     (ADE class 10)
+    "bathroom":       (0, 102, 200),    # bathtub     (ADE class 37)
+    "dining room":    (255, 6, 82),     # table       (ADE class 15)
+    "office":         (8, 255, 214),    # desk        (ADE class 33)
+    "hallway":        None,             # corridor = no furniture anchor
+    "closet":         (0, 163, 255),    # wardrobe    (ADE class 35)
+    "laundry room":   (255, 224, 0),    # washer-ish
+    "entryway":       (8, 255, 51),     # door        (ADE class 14)
+    "balcony":        (11, 102, 255),   # sofa on balcony
+    "basement":       (11, 102, 255),   # sofa
+    "kids room":      (204, 5, 255),    # bed
+    "studio":         (11, 102, 255),   # sofa
+    "full apartment": None,
+    "attic":          (11, 102, 255),
+    "sunroom":        (11, 102, 255),
 }
 
 
 def _rasterize_rooms_mask(rooms, size_wh):
     """
-    Build an ADE20K-style semantic mask from drawn room polygons.
+    Build a clean ADE20K-style semantic mask from drawn room polygons.
+
+    Strategy (crucial — do NOT flood the polygon with furniture color; that's
+    what was causing giant tiled beds/sofas in the output):
+
+      1. Background = black (anything outside the drawn rooms).
+      2. Each polygon interior = ADE_FLOOR (floor pixels).
+      3. A SMALL centered blob of the room's anchor color (bed / sofa /
+         bathtub / ...), ~18% of the polygon's shorter extent. This tells
+         SD "put ONE of these here" instead of "tile this whole area".
+      4. Polygon borders = thick ADE_WALL pixels so room divisions stay sharp.
+      5. Balcony / sunroom → a thin ADE_WINDOW strip along its longest edge
+         (outer wall).
 
     Args:
       rooms:  list of {"type": str, "polygon": [{"x": 0..1, "y": 0..1}, ...]}
@@ -272,10 +288,11 @@ def _rasterize_rooms_mask(rooms, size_wh):
     Returns:
       PIL.Image in RGB at `size_wh`, ready to be fed as ControlNet-Seg input.
     """
+    import math
     from PIL import Image, ImageDraw
 
     w, h = size_wh
-    img = Image.new("RGB", (w, h), ADE_FLOOR)
+    img = Image.new("RGB", (w, h), (0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     def _poly_points(poly):
@@ -289,23 +306,92 @@ def _rasterize_rooms_mask(rooms, size_wh):
                 continue
         return pts
 
-    # 1) Fill each polygon with the ADE anchor color of its room type.
+    # 1) Fill each polygon interior with floor.
     for r in rooms or []:
-        rtype = (r.get("type") or "").strip().lower()
-        color = ROOM_ANCHOR_COLORS.get(rtype, ADE_FLOOR)
         pts = _poly_points(r.get("polygon"))
         if len(pts) >= 3:
-            draw.polygon(pts, fill=color)
+            draw.polygon(pts, fill=ADE_FLOOR)
 
-    # 2) Repaint polygon boundaries as thick ADE "wall" pixels so the
-    #    generator keeps the user's room divisions sharp.
-    wall_thickness = max(6, int(min(w, h) * 0.012))
+    # 2) Small centered furniture anchor blob per room.
+    for r in rooms or []:
+        rtype = (r.get("type") or "").strip().lower()
+        color = ROOM_ANCHOR_COLORS.get(rtype)
+        pts = _poly_points(r.get("polygon"))
+        if color is None or len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        extent = min(max(xs) - min(xs), max(ys) - min(ys))
+        r_blob = max(10.0, extent * 0.18)
+        draw.ellipse(
+            [cx - r_blob, cy - r_blob, cx + r_blob, cy + r_blob],
+            fill=color,
+        )
+        # balcony / sunroom get a window strip along the longest edge
+        if rtype in ("balcony", "sunroom"):
+            best = (0.0, 0, 1)
+            for i in range(len(pts)):
+                a = pts[i]
+                b = pts[(i + 1) % len(pts)]
+                L = math.hypot(b[0] - a[0], b[1] - a[1])
+                if L > best[0]:
+                    best = (L, i, (i + 1) % len(pts))
+            a = pts[best[1]]
+            b = pts[best[2]]
+            window_w = max(8, int(min(w, h) * 0.018))
+            draw.line([a, b], fill=ADE_WINDOW, width=window_w)
+
+    # 3) Thick wall outlines over the polygon borders.
+    wall_thickness = max(8, int(min(w, h) * 0.016))
     for r in rooms or []:
         pts = _poly_points(r.get("polygon"))
         if len(pts) >= 3:
             draw.line(pts + [pts[0]], fill=ADE_WALL, width=wall_thickness, joint="curve")
 
     return img
+
+
+def _synthesize_depth_from_mask(seg_img):
+    """
+    Build a clean ControlNet-Depth conditioning image directly from the
+    rasterized semantic mask. This REPLACES running DPT on the noisy 2D
+    floor plan in guided mode, eliminating the #1 source of hallucinated
+    walls and drafting artifacts (Arabic labels, dimensions, electrical
+    symbols, hatching, door arcs were being read as fake 3D geometry).
+
+    Convention (ControlNet-Depth expects: bright = close to camera):
+      - walls           -> 230  (closest structures)
+      - floor + anchors -> 110  (mid)
+      - windows         -> 60   (farther)
+      - outside         -> 0    (background)
+    """
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    arr = np.array(seg_img).astype(np.int32)
+    h, w = arr.shape[:2]
+
+    def _match(color):
+        c = np.array(color, dtype=np.int32)
+        return np.all(arr == c, axis=-1)
+
+    depth = np.zeros((h, w), dtype=np.uint8)
+    # floor fills first
+    depth[_match(ADE_FLOOR)] = 110
+    # furniture anchor blobs sit at floor level (same plane)
+    for color in ROOM_ANCHOR_COLORS.values():
+        if color is not None:
+            depth[_match(color)] = 110
+    depth[_match(ADE_WINDOW)] = 60
+    depth[_match(ADE_WALL)] = 230
+
+    # soften transitions so depth-net doesn't see step edges
+    depth = cv2.GaussianBlur(depth, (7, 7), 0)
+    depth_rgb = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
+    return Image.fromarray(depth_rgb)
 
 
 # ---------------------------------------------------------------------------
@@ -543,47 +629,55 @@ class InteriorAI:
             and any(r and r.get("polygon") for r in rooms)
         )
 
-        depth_img = self._get_depth_image(image_bgr, size_wh)
-
         if use_room_mask:
+            # GUIDED MODE
+            # - Build the clean ADE20K mask from the drawn polygons.
+            # - Synthesize depth from that SAME mask (skip DPT on the noisy
+            #   architectural drawing — Arabic labels / dimensions / electrical
+            #   symbols were being interpreted as real 3D geometry).
             seg_img = _rasterize_rooms_mask(rooms, size_wh)
-            # Windows are driven by room type in guided mode (balcony/sunroom
-            # rooms imply a window in the scene).
+            depth_img = _synthesize_depth_from_mask(seg_img)
             has_window = any(
                 (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
                 for r in rooms
                 if r
             )
-            # Mask-driven: let seg ControlNet dominate placement. Depth from a
-            # line-art floor plan is noisy, so we keep a minimal depth weight
-            # only to anchor a plausible interior perspective.
-            cn_scales = [0.25, 0.95]
+            # Balanced conditioning: both nets get trustworthy, synthesized
+            # inputs so we can dial them to moderate strength without collapse.
+            cn_scales = [0.4, 0.75]
+            guidance_scale = 5.5
         else:
+            depth_img = self._get_depth_image(image_bgr, size_wh)
             seg_map = self._get_segmentation_map(image_bgr)
             seg_img = self._get_segmentation_image(seg_map, size_wh)
             has_window = self._detect_window(seg_map)
             cn_scales = [0.5, 0.1]
+            guidance_scale = 7.5
 
         prompt = self._build_prompt(room_type, design_style, color_tone, custom_prompt)
         if has_window:
             prompt = prompt + ", window in place"
 
         negative = (
-            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
+            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective, "
+            "low quality, deformed, watermark, text"
         )
         if not has_window:
             negative += ", no window"
         if use_room_mask:
             negative += (
-                ", mixed rooms, wrong room in wrong place, mismatched layout, "
-                "rooms outside their boundaries, overlapping room areas"
+                ", duplicate rooms, repeated furniture, tiled pattern, multiple beds, "
+                "multiple sofas, mixed rooms, wrong room in wrong place, mismatched layout, "
+                "rooms outside their boundaries, overlapping room areas, fragmented layout, "
+                "2D floor plan, technical drawing, architectural drafting, dimension lines, "
+                "labels, arabic text, symbols, door swing arcs, plan annotations"
             )
 
         result = self.pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
             num_inference_steps=30,
-            guidance_scale=7.5,
+            guidance_scale=guidance_scale,
             controlnet_conditioning_scale=cn_scales,
             negative_prompt=negative,
             generator=self.torch.manual_seed(42),
