@@ -658,15 +658,19 @@ class InteriorAI:
         if has_window:
             prompt = prompt + ", window in place"
 
+        # Keep the base negative IDENTICAL to the pre-fix version so the
+        # interior.jsx / exterior.jsx / quick-mode flows behave exactly as
+        # they did before. Extra drafting- and duplication-blockers only
+        # apply to plan.jsx guided mode (use_room_mask).
         negative = (
-            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective, "
-            "low quality, deformed, watermark, text"
+            "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
         )
         if not has_window:
             negative += ", no window"
         if use_room_mask:
             negative += (
-                ", duplicate rooms, repeated furniture, tiled pattern, multiple beds, "
+                ", low quality, deformed, watermark, text, "
+                "duplicate rooms, repeated furniture, tiled pattern, multiple beds, "
                 "multiple sofas, mixed rooms, wrong room in wrong place, mismatched layout, "
                 "rooms outside their boundaries, overlapping room areas, fragmented layout, "
                 "2D floor plan, technical drawing, architectural drafting, dimension lines, "
