@@ -19,8 +19,7 @@ Two inference paths live in this app, and the HTTP layer routes between them:
   its prompts from the shared `prompt_engine` too.
 
 Deploy:
-    modal secret create livinai-api-key   API_KEY=<your api key>
-    modal secret create livinai-hf-token  HF_TOKEN=<huggingface token>
+    modal secret create livinai-api-key API_KEY=<your api key>
     modal deploy app.py
 
 Endpoints produced:
@@ -94,26 +93,42 @@ controlnet_image = (
     .add_local_python_source("prompt_engine")
 )
 
+def _prefetch_flux():
+    """Pull the FLUX.2 [klein] snapshot into the cache volume at build time.
+
+    Doing this during the image build rather than on first request matters: the
+    checkpoint is roughly 16 GB, and a cold container downloading it inline can
+    outrun the caller's HTTP timeout. After this runs once the weights live on
+    the volume and every later container starts from cache.
+    """
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(FLUX_MODEL_ID, cache_dir=CACHE_DIR, max_workers=8)
+
+
 flux_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("libgl1", "libglib2.0-0")
     .pip_install(
-        "torch==2.6.0",
-        "diffusers>=0.36.0",
-        "transformers>=4.57.0",
-        "accelerate>=1.4.0",
+        # Flux2KleinPipeline, Flux2Transformer2DModel and AutoencoderKLFlux2
+        # landed in diffusers 0.37; the text encoder is Qwen3ForCausalLM, which
+        # needs a recent transformers. Ranges rather than exact pins so the
+        # resolver can find a mutually compatible torch build.
+        "torch>=2.6,<3",
+        "diffusers>=0.37,<1",
+        "transformers>=4.57,<5",
+        "accelerate>=1.4",
         "safetensors>=0.4.5",
         "sentencepiece",
         "protobuf",
-        "Pillow==10.4.0",
-        "numpy<2",
-        "huggingface_hub[hf_transfer]>=0.30.0",
+        "Pillow>=10.4,<12",
+        "huggingface_hub[hf_transfer]>=0.30",
         "fastapi[standard]==0.115.0",
     )
     .env({
         "HF_HOME": CACHE_DIR,
         "TRANSFORMERS_CACHE": CACHE_DIR,
-        # Saturates the network on cold start; the 4B checkpoint is ~16 GB.
+        # Saturates the network while pulling the ~16 GB checkpoint.
         "HF_HUB_ENABLE_HF_TRANSFER": "1",
     })
     .add_local_python_source("prompt_engine")
@@ -131,8 +146,15 @@ hf_cache_vol = modal.Volume.from_name("livinai-hf-cache", create_if_missing=True
 # Bearer-token auth: modal secret create livinai-api-key API_KEY=...
 api_key_secret = modal.Secret.from_name("livinai-api-key", required_keys=["API_KEY"])
 
-# FLUX.2 [klein] is a gated repo: modal secret create livinai-hf-token HF_TOKEN=...
-hf_token_secret = modal.Secret.from_name("livinai-hf-token", required_keys=["HF_TOKEN"])
+# The weights are fetched during the image build so the first real request does
+# not have to wait for a 16 GB download. FLUX.2 [klein] 4B is Apache-2.0 and not
+# gated, so no Hugging Face token is needed — an earlier revision required one
+# and that alone made `modal deploy` fail.
+flux_image = flux_image.run_function(
+    _prefetch_flux,
+    volumes={"/cache": hf_cache_vol},
+    timeout=60 * 60,
+)
 
 WINDOW_KEYWORDS = ["window", "windowpane"]
 
@@ -306,7 +328,7 @@ def _decode_base64_image_bytes(base64_str):
     image=flux_image,
     gpu="L40S",                 # 48 GB — the 4B transformer + Qwen3 encoder fit in bf16
     volumes={"/cache": hf_cache_vol},
-    secrets=[api_key_secret, hf_token_secret],
+    secrets=[api_key_secret],
     scaledown_window=120,
     min_containers=0,
     max_containers=3,
@@ -318,24 +340,32 @@ class GenKlein:
     @modal.enter()
     def load(self):
         import torch
-        from diffusers import Flux2KleinPipeline
+
+        try:
+            from diffusers import Flux2KleinPipeline
+        except ImportError as error:  # pragma: no cover - surfaces a bad image
+            raise RuntimeError(
+                "Flux2KleinPipeline is missing. It requires diffusers >= 0.37; "
+                "check the pins in flux_image."
+            ) from error
 
         self.torch = torch
         self.pipe = Flux2KleinPipeline.from_pretrained(
             FLUX_MODEL_ID,
             torch_dtype=torch.bfloat16,
             cache_dir=CACHE_DIR,
-            token=os.environ.get("HF_TOKEN"),
         )
         self.pipe.to("cuda")
-        # Keeps peak VRAM well under the card even for 1024x1024 outputs, at a
-        # negligible cost for a 4-step schedule.
-        try:
-            self.pipe.enable_attention_slicing()
-            self.pipe.vae.enable_tiling()
-        except Exception:
-            pass
-        hf_cache_vol.commit()
+        # Cheap insurance on peak VRAM for 1024px output; both are no-ops on
+        # pipelines that do not implement them.
+        for enable in (
+            lambda: self.pipe.enable_attention_slicing(),
+            lambda: self.pipe.vae.enable_tiling(),
+        ):
+            try:
+                enable()
+            except Exception:
+                pass
 
     @staticmethod
     def _target_size(image):

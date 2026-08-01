@@ -25,17 +25,16 @@ them:
   plans** (`mode: "guided"`), because that path depends on ControlNet
   conditioning that FLUX.2 [klein] does not have.
 
-### 1a. Create the Hugging Face token secret (new, required)
+### 1a. Secrets
 
-`black-forest-labs/FLUX.2-klein-4B` is a gated repository. Accept the licence on
-the model page with the same Hugging Face account, then:
+Only one, and it already exists:
 
 ```bash
-modal secret create livinai-hf-token HF_TOKEN=hf_your_token_here
+modal secret create livinai-api-key API_KEY=<your api key>
 ```
 
-If this secret is missing the deploy will fail. The existing
-`livinai-api-key` secret is unchanged.
+No Hugging Face token is needed. `black-forest-labs/FLUX.2-klein-4B` is
+Apache-2.0 and not gated.
 
 ### 1b. Deploy
 
@@ -60,16 +59,17 @@ decide where to send the request. Switch `MODAL_ENDPOINT_URL` to the router:
 MODAL_ENDPOINT_URL=https://sara123meckawy--livinai-interior-generate.modal.run
 ```
 
-### 1d. Expect a slow first request
+### 1d. Expect a slow first *build*, not a slow first request
 
-The FLUX.2 [klein] checkpoint is roughly 16 GB and downloads once into the
-`livinai-hf-cache` volume. The first call after deploy can take several minutes;
-every call after that is a normal cold start. Warm it before a demo:
+The FLUX.2 [klein] checkpoint is roughly 16 GB. It is downloaded into the
+`livinai-hf-cache` volume **during the image build**, so the first deploy takes
+a while (10–20 minutes on a cold cache) and every request after that starts from
+cached weights. Later deploys reuse the layer and finish in seconds.
+
+Smoke-test end to end once it is up:
 
 ```bash
-curl -X POST https://sara123meckawy--livinai-interior-generate.modal.run \
-  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-  -d '{"image":"<base64 jpeg>","room_type":"Living Room","design_style":"Japandi","color_tone":"Warm neutral"}'
+modal run app.py --image-path ./test.jpg --room-type "living room"
 ```
 
 If Gen‑Klein is unavailable for any reason — gated-model access, an OOM, a cold
@@ -115,6 +115,20 @@ Nothing new to install — the 3D walkthrough uses `react-native-webview`,
 npx expo start --dev-client     # verify locally
 eas build --platform android    # or ios
 ```
+
+### Furniture catalogue
+
+The walkthrough uses the web studio's own furniture meshes. The `.glb` files
+live in `assets/models/`, and `lib/furnitureCatalog.js` is generated from them:
+
+```bash
+node scripts/build-furniture-catalog.mjs
+```
+
+Re-run that after changing anything in `assets/models/` and commit the result.
+The generated module holds baked geometry as typed arrays, so the WebView needs
+no glTF loader — three.js dropped its UMD loader builds at r148, and shipping an
+import map would have meant a hard failure on older WebViews.
 
 ### One runtime dependency to know about
 

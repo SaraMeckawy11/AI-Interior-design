@@ -78,16 +78,8 @@ echo "Save this key: $KEY"
 
 Copy the printed key into your **backend** `.env` as `MODAL_API_KEY=...`.
 
-### 3b. Create the Hugging Face token secret (required)
-
-`black-forest-labs/FLUX.2-klein-4B` is gated. Accept the licence on the model
-page with the same Hugging Face account, then store a read token:
-
-```bash
-modal secret create livinai-hf-token HF_TOKEN=hf_your_token_here
-```
-
-Without this secret `modal deploy` fails.
+No Hugging Face token is required: `black-forest-labs/FLUX.2-klein-4B` is
+Apache-2.0 and not gated.
 
 ### 4. Deploy
 

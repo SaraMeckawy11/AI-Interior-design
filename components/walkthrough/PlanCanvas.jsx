@@ -135,10 +135,13 @@ export default function PlanCanvas({
   onAddOpening,
   onRemoveOpening,
   onSelectRoom,
+  onMoveRoom,
+  onMoveVertex,
+  onMoveOpening,
 }) {
   const [pointer, setPointer] = useState(null);
   const [rectDraft, setRectDraft] = useState(null);
-  const gesture = useRef({ x: 0, y: 0, moved: 0, startedAt: 0 });
+  const gesture = useRef({ x: 0, y: 0, moved: 0, startedAt: 0, drag: null, lastX: 0, lastY: 0 });
 
   const pixelsPerMeter = width / PLAN_WIDTH_METERS;
   const gridStep = pixelsPerMeter * GRID_METERS;
@@ -181,31 +184,86 @@ export default function PlanCanvas({
     if (placed) onAddOpening?.({ kind: tool, points: placed });
   };
 
+  /**
+   * What is under the finger, in priority order. A vertex handle beats the room
+   * it belongs to, and an opening beats the room it is cut into — otherwise
+   * neither would ever be grabbable, since both sit inside a room's area.
+   */
+  const hitTest = (point) => {
+    const room = rooms[selectedRoom];
+    if (room) {
+      const vertex = room.findIndex((corner) => Math.hypot(corner[0] - point[0], corner[1] - point[1]) <= gridStep * 0.7);
+      if (vertex >= 0) return { kind: "vertex", room: selectedRoom, index: vertex };
+    }
+    const opening = openings.findIndex(
+      (item) => projectOnSegment(point, item.points[0], item.points[1]).distance < gridStep * 0.6,
+    );
+    if (opening >= 0) return { kind: "opening", index: opening };
+    const inside = rooms.findIndex((candidate) => pointInPolygon(point, candidate));
+    if (inside >= 0) return { kind: "room", index: inside };
+    return null;
+  };
+
   const responder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: (_event, state) => Math.abs(state.dx) + Math.abs(state.dy) > 4,
+
         onPanResponderGrant: (event) => {
           const { locationX, locationY } = event.nativeEvent;
-          gesture.current = { x: locationX, y: locationY, moved: 0, startedAt: Date.now() };
-          setPointer([clampX(locationX), clampY(locationY)]);
-          if (tool === "rect") setRectDraft({ from: snapPoint([locationX, locationY]), to: snapPoint([locationX, locationY]) });
+          const point = [clampX(locationX), clampY(locationY)];
+          gesture.current = {
+            x: locationX, y: locationY, moved: 0, startedAt: Date.now(),
+            drag: null, lastX: locationX, lastY: locationY,
+          };
+          setPointer(point);
+
+          if (tool === "rect") {
+            setRectDraft({ from: snapPoint(point), to: snapPoint(point) });
+            return;
+          }
+          if (tool === "select") {
+            const hit = hitTest(point);
+            gesture.current.drag = hit;
+            if (hit?.kind === "room" && hit.index !== selectedRoom) onSelectRoom?.(hit.index);
+          }
         },
+
         onPanResponderMove: (event, state) => {
           gesture.current.moved = Math.abs(state.dx) + Math.abs(state.dy);
           const { locationX, locationY } = event.nativeEvent;
-          setPointer([clampX(locationX), clampY(locationY)]);
+          const point = [clampX(locationX), clampY(locationY)];
+          setPointer(point);
+
           if (tool === "rect") {
-            setRectDraft((current) => (current ? { ...current, to: snapPoint([locationX, locationY]) } : current));
+            setRectDraft((current) => (current ? { ...current, to: snapPoint(point) } : current));
+            return;
           }
+
+          const drag = gesture.current.drag;
+          if (tool !== "select" || !drag || gesture.current.moved < 8) return;
+
+          if (drag.kind === "vertex") {
+            onMoveVertex?.(drag.room, drag.index, snapPoint(point));
+          } else if (drag.kind === "opening") {
+            onMoveOpening?.(drag.index, point);
+          } else if (drag.kind === "room") {
+            // Deltas rather than absolute positions: the room keeps its shape
+            // and does not jump to centre itself under the finger.
+            onMoveRoom?.(drag.index, locationX - gesture.current.lastX, locationY - gesture.current.lastY);
+          }
+          gesture.current.lastX = locationX;
+          gesture.current.lastY = locationY;
         },
+
         onPanResponderRelease: (event) => {
           const { locationX, locationY } = event.nativeEvent;
           const quick = Date.now() - gesture.current.startedAt < 700;
+
           if (tool === "rect" && rectDraft && gesture.current.moved >= 10) {
             const [x1, y1] = rectDraft.from;
-            const [x2, y2] = snapPoint([locationX, locationY]);
+            const [x2, y2] = snapPoint([clampX(locationX), clampY(locationY)]);
             const minSide = gridStep * 1.5;
             if (Math.abs(x2 - x1) >= minSide && Math.abs(y2 - y1) >= minSide) {
               onAddRoom?.([
@@ -218,10 +276,14 @@ export default function PlanCanvas({
           } else if (gesture.current.moved < 10 && quick) {
             handleTap(locationX, locationY);
           }
+
+          gesture.current.drag = null;
           setRectDraft(null);
           setPointer(null);
         },
+
         onPanResponderTerminate: () => {
+          gesture.current.drag = null;
           setRectDraft(null);
           setPointer(null);
         },
@@ -229,7 +291,7 @@ export default function PlanCanvas({
     // Recreated whenever the drawing context changes so the closure never
     // captures stale rooms/draft state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tool, rooms, openings, draft, snapToGrid, width, height, rectDraft],
+    [tool, rooms, openings, draft, snapToGrid, width, height, rectDraft, selectedRoom],
   );
 
   const gridLines = useMemo(() => {
@@ -321,6 +383,24 @@ export default function PlanCanvas({
             </G>
           );
         })}
+
+        {/* Edit handles: only on the selected room, and only while the select
+            tool is active, so they never clutter the drawing tools. */}
+        {tool === "select" && rooms[selectedRoom] && (
+          <G>
+            {rooms[selectedRoom].map((corner, index) => (
+              <Circle
+                key={`handle-${index}`}
+                cx={corner[0]}
+                cy={corner[1]}
+                r={7}
+                fill={COLORS.surface}
+                stroke={COLORS.accent}
+                strokeWidth={2.5}
+              />
+            ))}
+          </G>
+        )}
 
         {rectPreview && (
           <G>

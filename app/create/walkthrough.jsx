@@ -18,9 +18,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import PlanCanvas, {
+  GRID_METERS,
+  OPENING_SPECS,
   PLAN_WIDTH_METERS,
   ROOM_TINTS,
+  openingOnNearestWall,
   polygonArea,
 } from "../../components/walkthrough/PlanCanvas";
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
@@ -69,6 +74,7 @@ const STAGES = [
 ];
 
 const CANVAS_RATIO = 1.0;
+const STORAGE_KEY = "livinai-walkthrough-plan";
 
 /** Ready-made layouts in metres, so a first-time user can reach 3D in one tap. */
 const TEMPLATES = [
@@ -111,7 +117,7 @@ const TOOLS = [
   { key: "door", icon: "log-in-outline", label: "Door" },
   { key: "window", icon: "browsers-outline", label: "Window" },
   { key: "balcony", icon: "sunny-outline", label: "Balcony" },
-  { key: "select", icon: "hand-left-outline", label: "Select" },
+  { key: "select", icon: "move-outline", label: "Edit" },
 ];
 
 const TOOL_HINTS = {
@@ -120,7 +126,7 @@ const TOOL_HINTS = {
   door: "Tap a wall to cut a 0.9 m doorway. Tap an existing one to remove it.",
   window: "Tap a wall to place a 1.2 m window.",
   balcony: "Tap an outside wall to place a full-height balcony opening.",
-  select: "Tap a room to select it.",
+  select: "Tap a room to select it, then drag it, drag a corner handle, or drag an opening along its wall.",
 };
 
 const VIEW_MODES = [
@@ -190,6 +196,52 @@ export default function WalkthroughScreen() {
   const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
   const currentRender = aiRenders[aiKey];
 
+  // ── Autosave ─────────────────────────────────────────────────────────────
+  // Drawing a home takes real effort; losing it to a back-swipe or a
+  // backgrounded app would be the worst thing this screen could do. Geometry is
+  // stored in metres so a restore onto a different screen width still lands in
+  // the right place.
+  const restored = useRef(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          const toPixels = (point) => [point[0] * pixelsPerMeter, point[1] * pixelsPerMeter];
+          if (saved.rooms?.length) {
+            setRooms(saved.rooms.map((room) => room.map(toPixels)));
+            setRoomConfigs(saved.roomConfigs || []);
+            setOpenings((saved.openings || []).map((o) => ({ kind: o.kind, points: o.points.map(toPixels) })));
+            setSettings({ ...DEFAULT_WALKTHROUGH_SETTINGS, ...(saved.settings || {}) });
+          }
+        }
+      } catch {}
+      restored.current = true;
+    })();
+    // Runs once; pixelsPerMeter is fixed for the life of the screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!restored.current) return undefined;
+    const timer = setTimeout(() => {
+      const toMetres = (point) => [point[0] / pixelsPerMeter, point[1] / pixelsPerMeter];
+      AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          rooms: rooms.map((room) => room.map(toMetres)),
+          roomConfigs,
+          openings: openings.map((o) => ({ kind: o.kind, points: o.points.map(toMetres) })),
+          settings,
+          savedAt: Date.now(),
+        }),
+      ).catch(() => {});
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [openings, pixelsPerMeter, roomConfigs, rooms, settings]);
+
   // ── Plan editing ─────────────────────────────────────────────────────────
   const configFor = (index) => ({
     name: `Room ${index + 1}`,
@@ -215,6 +267,54 @@ export default function WalkthroughScreen() {
     setRoomConfigs((current) => current.filter((_, i) => i !== index));
     setSelectedRoom((current) => Math.max(0, Math.min(current, rooms.length - 2)));
   }, [rooms.length]);
+
+  // ── Editing ──────────────────────────────────────────────────────────────
+  const moveRoom = useCallback(
+    (index, dx, dy) => {
+      setRooms((current) =>
+        current.map((room, i) => {
+          if (i !== index) return room;
+          // Clamp as a whole so a room slides along the edge of the canvas
+          // instead of deforming when one corner reaches the boundary.
+          const minX = Math.min(...room.map((p) => p[0]));
+          const maxX = Math.max(...room.map((p) => p[0]));
+          const minY = Math.min(...room.map((p) => p[1]));
+          const maxY = Math.max(...room.map((p) => p[1]));
+          const clampedDx = Math.max(-minX, Math.min(canvasWidth - maxX, dx));
+          const clampedDy = Math.max(-minY, Math.min(canvasHeight - maxY, dy));
+          return room.map(([x, y]) => [x + clampedDx, y + clampedDy]);
+        }),
+      );
+    },
+    [canvasHeight, canvasWidth],
+  );
+
+  const moveVertex = useCallback((index, vertexIndex, point) => {
+    setRooms((current) =>
+      current.map((room, i) => (i === index ? room.map((corner, c) => (c === vertexIndex ? point : corner)) : room)),
+    );
+  }, []);
+
+  const moveOpening = useCallback(
+    (index, point) => {
+      setOpenings((current) =>
+        current.map((opening, i) => {
+          if (i !== index) return opening;
+          const spec = OPENING_SPECS[opening.kind] || OPENING_SPECS.door;
+          // Re-snap to the nearest wall so a dragged opening can never end up
+          // floating in the middle of a room.
+          const placed = openingOnNearestWall(
+            point,
+            rooms,
+            spec.meters * pixelsPerMeter,
+            (pixelsPerMeter * GRID_METERS) * 3,
+          );
+          return placed ? { ...opening, points: placed } : opening;
+        }),
+      );
+    },
+    [pixelsPerMeter, rooms],
+  );
 
   const undo = useCallback(() => {
     if (draft.length) return setDraft((current) => current.slice(0, -1));
@@ -576,7 +676,23 @@ export default function WalkthroughScreen() {
                 onAddOpening={(opening) => setOpenings((current) => [...current, opening])}
                 onRemoveOpening={(index) => setOpenings((current) => current.filter((_, i) => i !== index))}
                 onSelectRoom={setSelectedRoom}
+                onMoveRoom={moveRoom}
+                onMoveVertex={moveVertex}
+                onMoveOpening={moveOpening}
               />
+
+              {tool === "select" && rooms[selectedRoom] && (
+                <View style={styles.selectionBar}>
+                  <View style={[styles.roomSwatch, { backgroundColor: ROOM_TINTS[selectedRoom % ROOM_TINTS.length].stroke }]} />
+                  <Text style={styles.selectionName} numberOfLines={1}>
+                    {roomConfigs[selectedRoom]?.name || `Room ${selectedRoom + 1}`}
+                  </Text>
+                  <Pressable style={styles.selectionAction} onPress={() => removeRoom(selectedRoom)}>
+                    <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
+                    <Text style={[styles.selectionActionText, { color: COLORS.danger }]}>Delete</Text>
+                  </Pressable>
+                </View>
+              )}
 
               <View style={styles.canvasActions}>
                 <GhostButton icon="grid-outline" label={snapToGrid ? "Snap on" : "Snap off"} active={snapToGrid} onPress={() => setSnapToGrid((v) => !v)} />
@@ -856,16 +972,35 @@ function WalkthroughStage({
           </View>
           <Text style={styles.inspectorMeta}>{inspected.material}</Text>
           <Text style={styles.inspectorBody}>{inspected.detail}</Text>
+
           <View style={styles.inspectorActions}>
-            <Pressable style={styles.inspectorAction} onPress={() => viewerRef.current?.rotateSelected(-Math.PI / 12)}>
-              <Ionicons name="return-up-back-outline" size={15} color={COLORS.textPrimary} />
-              <Text style={styles.inspectorActionText}>Rotate</Text>
+            <Pressable style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(-Math.PI / 12)}>
+              <Ionicons name="return-up-back-outline" size={16} color={COLORS.textPrimary} />
             </Pressable>
-            <Pressable style={styles.inspectorAction} onPress={() => viewerRef.current?.rotateSelected(Math.PI / 12)}>
-              <Ionicons name="return-up-forward-outline" size={15} color={COLORS.textPrimary} />
-              <Text style={styles.inspectorActionText}>Rotate</Text>
+            <Pressable style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(Math.PI / 12)}>
+              <Ionicons name="return-up-forward-outline" size={16} color={COLORS.textPrimary} />
+            </Pressable>
+            <View style={styles.inspectorDivider} />
+            {[
+              { direction: "left", icon: "chevron-back" },
+              { direction: "forward", icon: "chevron-up" },
+              { direction: "back", icon: "chevron-down" },
+              { direction: "right", icon: "chevron-forward" },
+            ].map((item) => (
+              <Pressable
+                key={item.direction}
+                style={styles.inspectorIcon}
+                onPress={() => viewerRef.current?.moveSelected(item.direction)}
+              >
+                <Ionicons name={item.icon} size={16} color={COLORS.textPrimary} />
+              </Pressable>
+            ))}
+            <View style={styles.inspectorDivider} />
+            <Pressable style={styles.inspectorIcon} onPress={() => viewerRef.current?.resetSelected()}>
+              <Ionicons name="refresh-outline" size={16} color={COLORS.textSecondary} />
             </Pressable>
           </View>
+          <Text style={styles.inspectorHint}>Rotate, nudge, or reset to the designer&rsquo;s placement.</Text>
         </View>
       )}
 
@@ -1151,6 +1286,16 @@ const styles = StyleSheet.create({
   },
   cardHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.xs },
   roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
+
+  selectionBar: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.md,
+    padding: SPACING.sm, paddingHorizontal: SPACING.md,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.md,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  selectionName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  selectionAction: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.dangerSoft },
+  selectionActionText: { ...TYPE.caption },
   roomName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 4 },
   roomArea: { ...TYPE.caption, color: COLORS.textTertiary },
 
@@ -1230,9 +1375,13 @@ const styles = StyleSheet.create({
   inspectorTitle: { ...TYPE.h3, color: COLORS.textPrimary, flex: 1, textTransform: "capitalize" },
   inspectorMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: 2 },
   inspectorBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: SPACING.xs },
-  inspectorActions: { flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md },
-  inspectorAction: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
-  inspectorActionText: { ...TYPE.caption, color: COLORS.textPrimary },
+  inspectorActions: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: SPACING.md },
+  inspectorIcon: {
+    width: ms(34), height: ms(34), borderRadius: RADIUS.sm,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  },
+  inspectorDivider: { width: 1, height: ms(20), backgroundColor: COLORS.border, marginHorizontal: 3 },
+  inspectorHint: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: SPACING.sm },
 
   // AI
   aiLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.surfaceInverse },

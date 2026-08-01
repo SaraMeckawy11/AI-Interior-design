@@ -62,6 +62,9 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     setRoom: (index) => run(`window.LivinaiScene.setRoom(${index})`),
     setFreeExplore: (value) => run(`window.LivinaiScene.setFreeExplore(${value ? "true" : "false"})`),
     rotateSelected: (delta) => run(`window.LivinaiScene.rotateSelected(${delta})`),
+    moveSelected: (direction, amount) =>
+      run(`window.LivinaiScene.moveSelected(${JSON.stringify(direction)},${amount || 0.12})`),
+    resetSelected: () => run("window.LivinaiScene.resetSelected()"),
     clearSelection: () => run("window.LivinaiScene.clearSelection()"),
     frameRoom: (index) => run(`window.LivinaiScene.frameRoom(${index})`),
     capture: (purpose = "photo", designerCamera = false) =>
