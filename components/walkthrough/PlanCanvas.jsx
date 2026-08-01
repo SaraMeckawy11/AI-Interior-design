@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
-import { PanResponder, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, PanResponder, StyleSheet, Text, View } from "react-native";
 import Svg, {
   Circle,
   G,
@@ -16,11 +16,9 @@ import { RADIUS, TYPE } from "../../constants/theme";
 /**
  * Measured floor-plan canvas.
  *
- * The web studio detects rooms in an uploaded plan and estimates
- * pixels-per-metre from the median room area. On a phone, drawing on a *metric
- * grid* is both easier and more accurate: every cell is a fixed 0.5 m, so the
- * geometry handed to the 3D renderer is already correctly scaled and openings
- * come out at believable widths with no estimation step.
+ * Uploaded plans use the detector's estimated pixels-per-metre scale; blank
+ * plans use a fixed 0.5 m grid. Both paths therefore hand measured geometry to
+ * the 3D renderer and share the same room/opening editing controls.
  *
  * Coordinates are stored in canvas pixels (what the renderer expects) and
  * converted to metres only for on-screen labels.
@@ -30,9 +28,9 @@ export const PLAN_WIDTH_METERS = 12;
 export const GRID_METERS = 0.5;
 
 export const OPENING_SPECS = {
-  door: { meters: 0.9, color: "#AE6740", label: "Door" },
-  window: { meters: 1.2, color: "#2C6089", label: "Window" },
-  balcony: { meters: 1.8, color: "#2E7350", label: "Balcony" },
+  door: { meters: 0.9, minimumMeters: 0.9, color: "#AE6740", label: "Door" },
+  window: { meters: 1.2, minimumMeters: 0.7, color: "#2C6089", label: "Window" },
+  balcony: { meters: 1.8, minimumMeters: 0.9, color: "#2E7350", label: "Balcony" },
 };
 
 export const ROOM_TINTS = [
@@ -119,9 +117,67 @@ export function openingOnNearestWall(tap, rooms, widthPx, maxDistance) {
   ];
 }
 
+/**
+ * Project a user-drawn opening onto one wall while preserving its requested
+ * length. This is the mobile equivalent of the web studio's opening editor:
+ * a short stroke becomes the minimum valid opening, while a long stroke can
+ * create a double door, wide opening, window wall, or balcony slider.
+ */
+export function snapOpeningToNearestWall(opening, rooms, kind, pixelsPerMeter) {
+  if (!opening?.[0] || !opening?.[1] || !rooms?.length) return null;
+  const [start, end] = opening;
+  const midpoint = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+  const drawn = [end[0] - start[0], end[1] - start[1]];
+  const drawnLength = Math.max(0.001, Math.hypot(drawn[0], drawn[1]));
+  const spec = OPENING_SPECS[kind] || OPENING_SPECS.door;
+  const margin = Math.max(2, pixelsPerMeter * 0.05);
+  let best = null;
+
+  rooms.forEach((room) => room.forEach((edgeStart, index) => {
+    const edgeEnd = room[(index + 1) % room.length];
+    const edge = [edgeEnd[0] - edgeStart[0], edgeEnd[1] - edgeStart[1]];
+    const length = Math.hypot(edge[0], edge[1]);
+    if (length < margin * 2 + 1) return;
+    const direction = [edge[0] / length, edge[1] / length];
+    const midpointT = Math.max(0, Math.min(
+      length,
+      (midpoint[0] - edgeStart[0]) * direction[0] + (midpoint[1] - edgeStart[1]) * direction[1],
+    ));
+    const nearest = [edgeStart[0] + direction[0] * midpointT, edgeStart[1] + direction[1] * midpointT];
+    const distance = Math.hypot(midpoint[0] - nearest[0], midpoint[1] - nearest[1]);
+    const alignment = Math.abs((drawn[0] * direction[0] + drawn[1] * direction[1]) / drawnLength);
+    const score = distance + (1 - alignment) * pixelsPerMeter * 0.45;
+    if (!best || score < best.score) best = { edgeStart, direction, length, midpointT, score };
+  }));
+
+  if (!best || best.score > pixelsPerMeter * 1.25) return null;
+  const projectedStart = (start[0] - best.edgeStart[0]) * best.direction[0]
+    + (start[1] - best.edgeStart[1]) * best.direction[1];
+  const projectedEnd = (end[0] - best.edgeStart[0]) * best.direction[0]
+    + (end[1] - best.edgeStart[1]) * best.direction[1];
+  const requestedLength = Math.max(
+    Math.abs(projectedEnd - projectedStart),
+    spec.minimumMeters * pixelsPerMeter,
+  );
+  const openingLength = Math.min(requestedLength, Math.max(1, best.length - margin * 2));
+  const centre = Math.max(
+    margin + openingLength / 2,
+    Math.min(best.length - margin - openingLength / 2, best.midpointT),
+  );
+  const from = centre - openingLength / 2;
+  const to = centre + openingLength / 2;
+  return [
+    [best.edgeStart[0] + best.direction[0] * from, best.edgeStart[1] + best.direction[1] * from],
+    [best.edgeStart[0] + best.direction[0] * to, best.edgeStart[1] + best.direction[1] * to],
+  ];
+}
+
 export default function PlanCanvas({
   width,
   height,
+  pixelsPerMeter: suppliedPixelsPerMeter,
+  imageUri,
+  detecting = false,
   tool,
   rooms,
   roomLabels = [],
@@ -129,6 +185,7 @@ export default function PlanCanvas({
   draft,
   snapToGrid = true,
   selectedRoom,
+  selection,
   onAddVertex,
   onCloseRoom,
   onAddRoom,
@@ -137,13 +194,18 @@ export default function PlanCanvas({
   onSelectRoom,
   onMoveRoom,
   onMoveVertex,
+  onInsertVertex,
   onMoveOpening,
+  onMoveOpeningPoint,
+  onSelectShape,
+  onBeginEdit,
 }) {
   const [pointer, setPointer] = useState(null);
   const [rectDraft, setRectDraft] = useState(null);
-  const gesture = useRef({ x: 0, y: 0, moved: 0, startedAt: 0, drag: null, lastX: 0, lastY: 0 });
+  const [openingDraft, setOpeningDraft] = useState(null);
+  const gesture = useRef({ x: 0, y: 0, moved: 0, startedAt: 0, drag: null, lastX: 0, lastY: 0, historyStarted: false });
 
-  const pixelsPerMeter = width / PLAN_WIDTH_METERS;
+  const pixelsPerMeter = suppliedPixelsPerMeter || width / PLAN_WIDTH_METERS;
   const gridStep = pixelsPerMeter * GRID_METERS;
 
   const snap = (value) => (snapToGrid ? Math.round(value / gridStep) * gridStep : value);
@@ -166,9 +228,29 @@ export default function PlanCanvas({
       onAddVertex?.(point);
       return;
     }
-    if (tool === "select" || tool === "rect") {
+    if (tool === "select") {
+      const target = hitTest(raw);
+      if (target?.kind === "room") {
+        onSelectRoom?.(target.index);
+        onSelectShape?.("room", target.index);
+      } else if (target?.kind === "vertex" || target?.kind === "insertVertex") {
+        onSelectRoom?.(target.room);
+        onSelectShape?.("room", target.room);
+      } else if (target?.kind === "opening" || target?.kind === "openingEndpoint") {
+        onSelectShape?.("opening", target.index);
+      } else {
+        onSelectShape?.(null, -1);
+      }
+      return;
+    }
+    if (tool === "rect") {
       const hit = rooms.findIndex((room) => pointInPolygon(raw, room));
-      if (hit >= 0) onSelectRoom?.(hit);
+      if (hit >= 0) {
+        onSelectRoom?.(hit);
+        onSelectShape?.("room", hit);
+      } else {
+        onSelectShape?.(null, -1);
+      }
       return;
     }
     const spec = OPENING_SPECS[tool];
@@ -190,10 +272,31 @@ export default function PlanCanvas({
    * neither would ever be grabbable, since both sit inside a room's area.
    */
   const hitTest = (point) => {
+    if (selection?.kind === "opening" && openings[selection.index]) {
+      const endpoint = openings[selection.index].points.findIndex(
+        (value) => Math.hypot(value[0] - point[0], value[1] - point[1]) <= gridStep * 0.72,
+      );
+      if (endpoint >= 0) return { kind: "openingEndpoint", index: selection.index, pointIndex: endpoint };
+    }
     const room = rooms[selectedRoom];
     if (room) {
       const vertex = room.findIndex((corner) => Math.hypot(corner[0] - point[0], corner[1] - point[1]) <= gridStep * 0.7);
       if (vertex >= 0) return { kind: "vertex", room: selectedRoom, index: vertex };
+      const edge = room.findIndex((corner, index) => {
+        const next = room[(index + 1) % room.length];
+        const midpoint = [(corner[0] + next[0]) / 2, (corner[1] + next[1]) / 2];
+        return Math.hypot(midpoint[0] - point[0], midpoint[1] - point[1]) <= gridStep * 0.48;
+      });
+      if (edge >= 0) {
+        const start = room[edge];
+        const end = room[(edge + 1) % room.length];
+        return {
+          kind: "insertVertex",
+          room: selectedRoom,
+          index: edge + 1,
+          point: [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2],
+        };
+      }
     }
     const opening = openings.findIndex(
       (item) => projectOnSegment(point, item.points[0], item.points[1]).distance < gridStep * 0.6,
@@ -216,6 +319,7 @@ export default function PlanCanvas({
           gesture.current = {
             x: locationX, y: locationY, moved: 0, startedAt: Date.now(),
             drag: null, lastX: locationX, lastY: locationY,
+            historyStarted: false,
           };
           setPointer(point);
 
@@ -226,7 +330,26 @@ export default function PlanCanvas({
           if (tool === "select") {
             const hit = hitTest(point);
             gesture.current.drag = hit;
-            if (hit?.kind === "room" && hit.index !== selectedRoom) onSelectRoom?.(hit.index);
+            if (hit?.kind === "room") {
+              if (hit.index !== selectedRoom) onSelectRoom?.(hit.index);
+              onSelectShape?.("room", hit.index);
+            } else if (hit?.kind === "vertex") {
+              onSelectShape?.("room", hit.room);
+            } else if (hit?.kind === "insertVertex") {
+              onSelectShape?.("room", hit.room);
+              onBeginEdit?.();
+              gesture.current.historyStarted = true;
+              onInsertVertex?.(hit.room, hit.index, hit.point);
+              gesture.current.drag = { kind: "vertex", room: hit.room, index: hit.index };
+            } else if (hit?.kind === "opening" || hit?.kind === "openingEndpoint") {
+              onSelectShape?.("opening", hit.index);
+            } else {
+              onSelectShape?.(null, -1);
+            }
+            return;
+          }
+          if (OPENING_SPECS[tool]) {
+            setOpeningDraft({ from: point, to: point, kind: tool });
           }
         },
 
@@ -241,13 +364,25 @@ export default function PlanCanvas({
             return;
           }
 
+          if (OPENING_SPECS[tool]) {
+            setOpeningDraft((current) => (current ? { ...current, to: point } : current));
+            return;
+          }
+
           const drag = gesture.current.drag;
           if (tool !== "select" || !drag || gesture.current.moved < 8) return;
+
+          if (!gesture.current.historyStarted) {
+            gesture.current.historyStarted = true;
+            onBeginEdit?.();
+          }
 
           if (drag.kind === "vertex") {
             onMoveVertex?.(drag.room, drag.index, snapPoint(point));
           } else if (drag.kind === "opening") {
             onMoveOpening?.(drag.index, point);
+          } else if (drag.kind === "openingEndpoint") {
+            onMoveOpeningPoint?.(drag.index, drag.pointIndex, point);
           } else if (drag.kind === "room") {
             // Deltas rather than absolute positions: the room keeps its shape
             // and does not jump to centre itself under the finger.
@@ -273,25 +408,35 @@ export default function PlanCanvas({
                 [Math.min(x1, x2), Math.max(y1, y2)],
               ]);
             }
+          } else if (OPENING_SPECS[tool] && openingDraft && gesture.current.moved >= 10) {
+            const placed = snapOpeningToNearestWall(
+              [openingDraft.from, [clampX(locationX), clampY(locationY)]],
+              rooms,
+              tool,
+              pixelsPerMeter,
+            );
+            if (placed) onAddOpening?.({ kind: tool, points: placed });
           } else if (gesture.current.moved < 10 && quick) {
             handleTap(locationX, locationY);
           }
 
           gesture.current.drag = null;
           setRectDraft(null);
+          setOpeningDraft(null);
           setPointer(null);
         },
 
         onPanResponderTerminate: () => {
           gesture.current.drag = null;
           setRectDraft(null);
+          setOpeningDraft(null);
           setPointer(null);
         },
       }),
     // Recreated whenever the drawing context changes so the closure never
     // captures stale rooms/draft state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tool, rooms, openings, draft, snapToGrid, width, height, rectDraft, selectedRoom],
+    [tool, rooms, openings, draft, snapToGrid, width, height, suppliedPixelsPerMeter, rectDraft, openingDraft, selectedRoom, selection],
   );
 
   const gridLines = useMemo(() => {
@@ -318,9 +463,10 @@ export default function PlanCanvas({
 
   return (
     <View style={[styles.canvas, { width, height }]} {...responder.panHandlers}>
+      {imageUri ? <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} resizeMode="stretch" /> : null}
       <Svg width={width} height={height}>
-        <Rect x={0} y={0} width={width} height={height} fill={COLORS.surface} />
-        <G opacity={0.6}>
+        <Rect x={0} y={0} width={width} height={height} fill={imageUri ? "rgba(255,255,255,0.08)" : COLORS.surface} />
+        <G opacity={imageUri ? 0.18 : 0.6}>
           {gridLines.map((line) => (
             <Line
               key={line.key}
@@ -338,12 +484,12 @@ export default function PlanCanvas({
           const centroid = polygonCentroid(room);
           const areaMeters = polygonArea(room) / (pixelsPerMeter * pixelsPerMeter);
           const tint = ROOM_TINTS[index % ROOM_TINTS.length];
-          const active = selectedRoom === index;
+          const active = selection?.kind === "room" ? selection.index === index : selectedRoom === index;
           return (
             <G key={`room-${index}`}>
               <Polygon
                 points={room.map((point) => point.join(",")).join(" ")}
-                fill={tint.fill}
+                fill={imageUri ? tint.fill.replace(/0\.(1[68]|22)/, "0.10") : tint.fill}
                 stroke={tint.stroke}
                 strokeWidth={active ? 4 : 2.5}
                 strokeLinejoin="round"
@@ -360,6 +506,7 @@ export default function PlanCanvas({
 
         {openings.map((opening, index) => {
           const spec = OPENING_SPECS[opening.kind] || OPENING_SPECS.door;
+          const active = selection?.kind === "opening" && selection.index === index;
           return (
             <G key={`opening-${index}`}>
               <Line
@@ -377,7 +524,7 @@ export default function PlanCanvas({
                 x2={opening.points[1][0]}
                 y2={opening.points[1][1]}
                 stroke={spec.color}
-                strokeWidth={5}
+                strokeWidth={active ? 7 : 5}
                 strokeLinecap="round"
               />
             </G>
@@ -386,8 +533,22 @@ export default function PlanCanvas({
 
         {/* Edit handles: only on the selected room, and only while the select
             tool is active, so they never clutter the drawing tools. */}
-        {tool === "select" && rooms[selectedRoom] && (
+        {tool === "select" && selection?.kind !== "opening" && rooms[selectedRoom] && (
           <G>
+            {rooms[selectedRoom].map((corner, index) => {
+              const next = rooms[selectedRoom][(index + 1) % rooms[selectedRoom].length];
+              return (
+                <Circle
+                  key={`midpoint-${index}`}
+                  cx={(corner[0] + next[0]) / 2}
+                  cy={(corner[1] + next[1]) / 2}
+                  r={4.5}
+                  fill={COLORS.primaryTint}
+                  stroke={COLORS.primary}
+                  strokeWidth={1.5}
+                />
+              );
+            })}
             {rooms[selectedRoom].map((corner, index) => (
               <Circle
                 key={`handle-${index}`}
@@ -400,6 +561,27 @@ export default function PlanCanvas({
               />
             ))}
           </G>
+        )}
+
+        {tool === "select" && selection?.kind === "opening" && openings[selection.index] && (
+          <G>
+            {openings[selection.index].points.map((point, index) => (
+              <Circle key={`opening-handle-${index}`} cx={point[0]} cy={point[1]} r={8} fill={COLORS.surface} stroke={COLORS.accent} strokeWidth={2.5} />
+            ))}
+          </G>
+        )}
+
+        {openingDraft && (
+          <Line
+            x1={openingDraft.from[0]}
+            y1={openingDraft.from[1]}
+            x2={openingDraft.to[0]}
+            y2={openingDraft.to[1]}
+            stroke={(OPENING_SPECS[openingDraft.kind] || OPENING_SPECS.door).color}
+            strokeWidth={6}
+            strokeLinecap="round"
+            strokeDasharray="8 5"
+          />
         )}
 
         {rectPreview && (
@@ -476,12 +658,20 @@ export default function PlanCanvas({
         )}
       </Svg>
 
-      {rooms.length === 0 && draft.length === 0 && !rectDraft && (
+      {rooms.length === 0 && draft.length === 0 && !rectDraft && !imageUri && (
         <View style={styles.empty} pointerEvents="none">
           <Text style={styles.emptyTitle}>
             {tool === "rect" ? "Drag to draw a room" : "Tap to place each corner"}
           </Text>
           <Text style={styles.emptyBody}>Each square is half a metre</Text>
+        </View>
+      )}
+
+
+      {detecting && (
+        <View style={styles.detecting} pointerEvents="none">
+          <ActivityIndicator color={COLORS.white} />
+          <Text style={styles.detectingText}>Detecting editable rooms and openings…</Text>
         </View>
       )}
 
@@ -523,4 +713,12 @@ const styles = StyleSheet.create({
   },
   scaleBar: { height: 3, backgroundColor: COLORS.textSecondary, borderRadius: 2 },
   scaleLabel: { ...TYPE.caption, color: COLORS.textSecondary },
+  detecting: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "rgba(24,35,31,0.62)",
+  },
+  detectingText: { ...TYPE.small, color: COLORS.white },
 });

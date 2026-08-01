@@ -6,13 +6,12 @@ import designRoutes from "./routes/designRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import floorplanRoutes from "./routes/floorplanRoutes.js";
 import job from "./lib/cron.js";
 
 
 import { connectDB } from "./lib/db.js";
 import { isAuthenticated } from "./middleware/auth.middleware.js";
-import axios from "axios";
-
 dotenv.config();
 
 const app = express();
@@ -27,6 +26,7 @@ app.use("/api/designs", designRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/floorplans", floorplanRoutes);
 
 app.get("/me", isAuthenticated, async (req, res, next) => {
   try {

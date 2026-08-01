@@ -136,8 +136,12 @@ flux_image = (
 
 router_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("fastapi[standard]==0.115.0")
-    .add_local_python_source("prompt_engine")
+    .pip_install(
+        "fastapi[standard]==0.115.0",
+        "opencv-python-headless==4.10.0.84",
+        "numpy==1.26.4",
+    )
+    .add_local_python_source("prompt_engine", "floorplan_detector")
 )
 
 # Persistent HF cache volume — weights download once, reused across containers.
@@ -924,6 +928,77 @@ def generate(payload: dict, authorization: str = Header(default="") if Header el
     """Preferred entry point for the Livinai backend."""
     _require_token(authorization)
     return _dispatch(payload or {})
+
+
+def _estimate_plan_scale(rooms, doors, fallback=40.0):
+    """Match the measured-scale heuristic used by the web walkthrough."""
+    import math
+    import statistics
+
+    areas = []
+    for room in rooms or []:
+        if len(room) < 3:
+            continue
+        twice = sum(
+            room[index][0] * room[(index + 1) % len(room)][1]
+            - room[(index + 1) % len(room)][0] * room[index][1]
+            for index in range(len(room))
+        )
+        if abs(twice) > 1:
+            areas.append(abs(twice) / 2)
+
+    area_scale = math.sqrt(statistics.median(areas) / 14.0) if areas else None
+    door_lengths = [
+        math.hypot(door[1][0] - door[0][0], door[1][1] - door[0][1])
+        for door in (doors or [])
+        if len(door) >= 2
+    ]
+    door_scale = statistics.median(door_lengths) / 0.9 if door_lengths else None
+    if area_scale and door_scale:
+        ratio = door_scale / area_scale
+        return door_scale if 0.8 <= ratio <= 1.25 else area_scale
+    return door_scale or area_scale or fallback
+
+
+@app.function(image=router_image, secrets=[api_key_secret], timeout=90)
+@modal.fastapi_endpoint(method="POST", docs=True)
+def detect_floorplan(payload: dict, authorization: str = Header(default="") if Header else ""):
+    """Convert a raster plan into the web-compatible editable layout contract."""
+    _require_token(authorization)
+    import cv2
+    import numpy as np
+    from floorplan_detector import detect_rooms_and_doors
+
+    encoded = str((payload or {}).get("image") or "")
+    if encoded.startswith("data:image"):
+        encoded = encoded.split(",", 1)[-1]
+    if not encoded or len(encoded) > 22_000_000:
+        raise HTTPException(status_code=413, detail="The floor plan must be between 1 byte and 15 MB.")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        decoded = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail="The floor plan image could not be read.") from error
+    if decoded is None:
+        raise HTTPException(status_code=400, detail="The floor plan image could not be read.")
+
+    rooms, doors = detect_rooms_and_doors(decoded)
+    if not rooms:
+        raise HTTPException(
+            status_code=422,
+            detail="No enclosed rooms were detected. Use a high-contrast plan or trace the rooms manually.",
+        )
+    height, width = decoded.shape[:2]
+    return {
+        "success": True,
+        "width": width,
+        "height": height,
+        "pixelsPerMeter": _estimate_plan_scale(rooms, doors),
+        "rooms": rooms,
+        "doors": doors,
+        "windows": [],
+        "balconies": [],
+    }
 
 
 @app.function(image=router_image)
