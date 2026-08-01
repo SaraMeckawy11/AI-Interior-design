@@ -6,7 +6,8 @@
       "Bash(git commit -m ':*)",
       "Bash(git push:*)",
       "Bash(git pull:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(ls -la \"D:/App_Development/Livinai\" 2>/dev/null | head -50; echo \"---PARENT---\"; ls -la \"D:/App_Development\" 2>/dev/null | head -50)"
     ]
   }
 }

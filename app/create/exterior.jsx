@@ -292,6 +292,12 @@ export default function Exterior() {
         designStyle,
         colorTone,
         customPrompt: prompt,
+        // Gen-Klein fields — see the matching block in interior.jsx.
+        mode: "exterior",
+        material: "Natural stone",
+        lighting: "Natural daylight",
+        preserveGeometry: true,
+        creativity: 42,
       };
 
       if (imageDataUrl) {
@@ -462,7 +468,7 @@ export default function Exterior() {
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
               {loading ? (
                 <LinearGradient
-                  colors={[COLORS.primary, COLORS.primary]}
+                  colors={[COLORS.disabled, COLORS.disabled]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
@@ -471,7 +477,7 @@ export default function Exterior() {
                 </LinearGradient>
               ) : (
                 <LinearGradient
-                  colors={[COLORS.primaryDark, COLORS.primary]}
+                  colors={COLORS.gradientBrand}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}

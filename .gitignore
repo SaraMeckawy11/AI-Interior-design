@@ -86,3 +86,7 @@ yarn-error.*
 # Expo/EAS credentials
 credentials.json
 credentials/
+
+# Python bytecode from the AI services
+__pycache__/
+*.py[cod]

@@ -2085,7 +2085,7 @@ export default function PlanEditor() {
         >
           {loading ? (
             <LinearGradient
-              colors={[COLORS.primary, COLORS.primary]}
+              colors={[COLORS.disabled, COLORS.disabled]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.planGenerateBtnInner}
@@ -2097,7 +2097,7 @@ export default function PlanEditor() {
             </LinearGradient>
           ) : (
             <LinearGradient
-              colors={[COLORS.primaryDark, COLORS.primary]}
+              colors={COLORS.gradientBrand}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.planGenerateBtnInner}

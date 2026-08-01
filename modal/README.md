@@ -1,7 +1,18 @@
-# Livinai Interior AI — Modal deployment
+# Livinai AI — Modal deployment
 
-Serverless GPU inference for the SD 1.5 + dual-ControlNet interior design
-pipeline, hosted on [Modal](https://modal.com).
+Serverless GPU inference hosted on [Modal](https://modal.com).
+
+> **Two engines live here.** `GenKlein` runs
+> `black-forest-labs/FLUX.2-klein-4B` and handles every interior and exterior
+> photo redesign — same model and same prompt architecture as the Livinai web
+> studio. `InteriorAI` keeps the SD 1.5 + depth/seg ControlNet pipeline for
+> **guided floor plans**, which depend on ControlNet conditioning that
+> FLUX.2 [klein] does not provide. A cheap CPU router (`generate`) picks between
+> them and falls back to `InteriorAI` if Gen‑Klein is unavailable.
+>
+> Deploying this version **requires a new secret** — see step 3b. Full
+> instructions, including which URL the backend should point at, are in
+> [`../DEPLOYMENT.md`](../DEPLOYMENT.md).
 
 - **Modal workspace**: `sara123meckawy`
 - **App name**: `livinai-interior`
@@ -67,6 +78,17 @@ echo "Save this key: $KEY"
 
 Copy the printed key into your **backend** `.env` as `MODAL_API_KEY=...`.
 
+### 3b. Create the Hugging Face token secret (required)
+
+`black-forest-labs/FLUX.2-klein-4B` is gated. Accept the licence on the model
+page with the same Hugging Face account, then store a read token:
+
+```bash
+modal secret create livinai-hf-token HF_TOKEN=hf_your_token_here
+```
+
+Without this secret `modal deploy` fails.
+
 ### 4. Deploy
 
 ```bash
@@ -76,13 +98,20 @@ modal deploy app.py
 First deploy builds the image (~4–6 min, one-time).
 Subsequent deploys are ~20 seconds.
 
-At the end of deploy, Modal prints a URL that looks like:
+At the end of deploy, Modal prints three URLs:
 
 ```
-https://sara123meckawy--livinai-interior-interiorai-generate.modal.run
+https://sara123meckawy--livinai-interior-generate.modal.run             <- use this one
+https://sara123meckawy--livinai-interior-health.modal.run
+https://sara123meckawy--livinai-interior-interiorai-generate.modal.run  <- legacy, still works
 ```
 
-Copy it into your backend `.env` as `MODAL_ENDPOINT_URL=...`.
+Copy the first into your backend `.env` as `MODAL_ENDPOINT_URL=...`. The legacy
+class endpoint is kept so an already-deployed backend keeps working, but it
+wakes a GPU container just to route the request.
+
+**The first request after deploy is slow.** The FLUX.2 [klein] checkpoint is
+~16 GB and downloads once into the `livinai-hf-cache` volume.
 
 ---
 

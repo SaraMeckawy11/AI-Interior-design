@@ -29,6 +29,13 @@ router.post("/", isAuthenticated, async (req, res) => {
       canvas,
       mode,
       doors,
+      // Gen-Klein (FLUX.2 [klein]) controls. Optional — the Modal service
+      // applies the same defaults when they are absent, so older app builds
+      // keep working unchanged.
+      material,
+      lighting,
+      preserveGeometry,
+      creativity,
     } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
@@ -91,6 +98,11 @@ router.post("/", isAuthenticated, async (req, res) => {
       doors: Array.isArray(doors) ? doors : null,
       canvas: canvas && typeof canvas === "object" ? canvas : null,
       mode: typeof mode === "string" ? mode : "",
+      // Gen-Klein brief controls.
+      material: typeof material === "string" ? material : "",
+      lighting: typeof lighting === "string" ? lighting : "",
+      preserve_geometry: preserveGeometry !== false,
+      creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
     };
 
     console.log("Submitting job to Modal endpoint");
@@ -178,6 +190,64 @@ router.post("/", isAuthenticated, async (req, res) => {
   } catch (error) {
     console.error("POST /designs error:", error);
     res.status(500).json({ message: error.message || "Something went wrong" });
+  }
+});
+
+/**
+ * Save a captured frame from the client-side 3D walkthrough.
+ *
+ * The walkthrough renders entirely on the device (three.js in a WebView), so no
+ * inference happens here and no design credits or coins are consumed — this
+ * route only persists the captured view so it shows up in the user's
+ * collection alongside their generated designs.
+ */
+router.post("/walkthrough", isAuthenticated, async (req, res) => {
+  try {
+    const { image, roomType, designStyle, colorTone, notes } = req.body;
+
+    if (!image) {
+      return res.status(400).json({ message: "Please provide the captured walkthrough view" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const dataUri = image.startsWith("data:image") ? image : `data:image/jpeg;base64,${image}`;
+    const uploaded = await cloudinary.uploader.upload(dataUri, {
+      folder: "walkthrough_views",
+    });
+
+    const design = new Design({
+      roomType: roomType || "3D Walkthrough",
+      designStyle: designStyle || "Modern",
+      colorTone: colorTone || "Neutral",
+      customPrompt: notes || "",
+      // A walkthrough capture has no separate "before" image; the rendered view
+      // is both the source and the result.
+      image: uploaded.secure_url,
+      imagePublicId: uploaded.public_id,
+      generatedImage: uploaded.secure_url,
+      generatedImagePublicId: uploaded.public_id,
+      user: req.user._id,
+      username: user.username,
+    });
+    await design.save();
+
+    user.activeDesigns = (user.activeDesigns || 0) + 1;
+    await user.save();
+
+    res.status(201).json({
+      image: design.image,
+      generatedImage: design.generatedImage,
+      roomType: design.roomType,
+      designStyle: design.designStyle,
+      colorTone: design.colorTone,
+    });
+  } catch (error) {
+    console.error("POST /designs/walkthrough error:", error);
+    res.status(500).json({ message: error.message || "Could not save this walkthrough view" });
   }
 });
 

@@ -4,7 +4,8 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 
 ## 🚀 Features
 
-- **AI Room Generation:** Redesign interiors (bedrooms, living rooms, kitchens, etc.) and exteriors with different architectural styles (modern, minimalist, industrial, etc.).
+- **AI Room Generation:** Redesign interiors (bedrooms, living rooms, kitchens, etc.) and exteriors with different architectural styles (modern, minimalist, industrial, etc.), powered by `black-forest-labs/FLUX.2-klein-4B` with the Gen‑Klein prompt architecture shared with the Livinai web studio.
+- **3D Walkthrough:** Trace a floor plan on a metric grid, assign a type and style to each room, then walk through the furnished result in real time. The scene — walls, openings, materials, lighting and furniture — is generated entirely on the device.
 - **Smart Image Processing:** Advanced AI models seamlessly apply requested color tones and styles to the user's provided baseline images.
 - **Virtual Coins System:** A flexible monetization system where users consume virtual coins to generate designs.
 - **Rewarded Content:** Integration with Google AdMob allows free users to earn coins by watching rewarded video ads.
@@ -24,7 +25,9 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ### Backend Services
 
 - **Main API (Node.js):** Handles authentication, subscription syncing, coin balance updates, and saving generated designs to collections.
-- **AI Processing (Python):** Python-based microservices (`Interior/app.py`, `interiorAI/handler.py`) handle image diffusion model pipelines to process image generation requests.
+- **AI Processing (Python):** `modal/app.py` is the live service. It runs two engines behind one router — FLUX.2 [klein] for photo redesigns, and SD 1.5 + depth/seg ControlNets for guided floor plans, where the drawn room polygons are rasterised into the conditioning mask. `interiorAI/handler.py` and `interio/handler.py` are the older RunPod equivalents, kept in sync via the shared `prompt_engine.py`.
+
+See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for what to redeploy and in what order.
 
 ## 📦 Project Structure
 

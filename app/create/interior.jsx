@@ -318,6 +318,14 @@ export default function Interior() {
         designStyle,
         colorTone,
         customPrompt: prompt,
+        // Gen-Klein fields. `preserveGeometry` is what keeps the model from
+        // moving walls, windows and the camera; the rest feed the 60/30/10
+        // colour and hero-material clauses in the shared prompt engine.
+        mode: "interior",
+        material: "Natural oak",
+        lighting: "Natural daylight",
+        preserveGeometry: true,
+        creativity: 42,
       };
 
       if (imageDataUrl) {
@@ -557,7 +565,7 @@ export default function Interior() {
             <TouchableOpacity style={styles.buttonWrapper} onPress={handleSubmit} disabled={loading}>
               {loading ? (
                 <LinearGradient
-                  colors={[COLORS.primary, COLORS.primary]}
+                  colors={[COLORS.disabled, COLORS.disabled]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
@@ -566,7 +574,7 @@ export default function Interior() {
                 </LinearGradient>
               ) : (
                 <LinearGradient
-                  colors={[COLORS.primaryDark, COLORS.primary]}
+                  colors={COLORS.gradientBrand}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}

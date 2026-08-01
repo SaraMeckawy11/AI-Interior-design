@@ -8,6 +8,10 @@ from PIL import Image
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
 from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProcessor, UperNetForSemanticSegmentation
 
+# Shared with modal/app.py and the web studio so every surface produces the same
+# design brief. See prompt_engine.py for why the clauses are ordered as they are.
+from prompt_engine import NEGATIVE_PROMPT, build_short_prompt, resolve_mode
+
 # --- Device setup ---
 use_cuda = torch.cuda.is_available()
 dtype = torch.float16 if use_cuda else torch.float32
@@ -729,30 +733,25 @@ def handler(event):
         if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
             prompt = custom_prompt.strip()
 
-        # 2) If no custom prompt, try to pick a detailed template:
+        # 2) Otherwise build it from the shared Gen-Klein prompt engine, which
+        #    is the same architecture the web studio and the Modal service use.
+        #    `build_short_prompt` keeps the programme/style/60-30-10/light order
+        #    inside CLIP's 77-token budget instead of silently truncating it.
         if prompt is None:
-            # check interior room prompts first
-            if room_key in ROOM_PROMPTS:
-                template = ROOM_PROMPTS[room_key]
-                prompt = template.format(design_style=design_style or "Stylish", color_tone=color_tone or "neutral")
-            # check exterior prompts
-            elif room_key in EXTERIOR_PROMPTS:
-                template = EXTERIOR_PROMPTS[room_key]
-                prompt = template.format(design_style=design_style or "Stylish", color_tone=color_tone or "neutral")
-            else:
-                # fallback hybrid (C)
-                prompt = FALLBACK_PROMPT.format(
-                    design_style=design_style or "Stylish",
-                    room_type=room_type or "interior",
-                    color_tone=color_tone or "neutral"
-                )
+            prompt = build_short_prompt(
+                mode=resolve_mode(body.get("mode") or "", room_key),
+                space_type=room_type or "interior",
+                design_style=design_style or "Modern",
+                color_tone=color_tone or "neutral",
+            )
 
         # Make sure prompt is a string
         if not isinstance(prompt, str) or not prompt.strip():
-            prompt = FALLBACK_PROMPT.format(
-                design_style=design_style or "Stylish",
-                room_type=room_type or "space",
-                color_tone=color_tone or "neutral"
+            prompt = build_short_prompt(
+                mode="interior",
+                space_type=room_type or "space",
+                design_style=design_style or "Modern",
+                color_tone=color_tone or "neutral",
             )
 
         # WINDOW-aware modification

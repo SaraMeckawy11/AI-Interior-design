@@ -7,6 +7,9 @@ import numpy as np
 from PIL import Image
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
 
+# Shared Gen-Klein prompt architecture (see prompt_engine.py).
+from prompt_engine import NEGATIVE_PROMPT, build_short_prompt
+
 # --- Device setup ---
 use_cuda = torch.cuda.is_available()
 dtype = torch.float16 if use_cuda else torch.float32
@@ -79,15 +82,13 @@ def handler(event):
         canny_image, canny_edges = get_canny_image(room_image, target_size)
         controlnet_scale, seed = classify_room(canny_edges)
 
-        prompt = (
-            f"A {design_style} {room_type} interior with {color_tone} tones, soft ambient lighting, "
-            f"realistic textures, highly detailed, photorealistic, 8k, designed by an interior architect"
+        prompt = build_short_prompt(
+            mode=body.get("mode") or "",
+            space_type=room_type,
+            design_style=design_style,
+            color_tone=color_tone,
         )
-
-        negative_prompt = (
-            "blurry, low quality, low resolution, deformed furniture, distorted layout, cartoon, "
-            "floating objects, extra doors or windows, incorrect perspective, bad lighting"
-        )
+        negative_prompt = NEGATIVE_PROMPT
 
         result = pipe(
             prompt=prompt,

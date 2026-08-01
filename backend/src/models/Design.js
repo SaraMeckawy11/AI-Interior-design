@@ -10,6 +10,17 @@ const designSchema = new mongoose.Schema(
     generatedImage: {
       type: String, // AI-generated image URL (optional)
     },
+    // Cloudinary public IDs. The routes have always set these, but they were
+    // missing from the schema, so Mongoose's strict mode silently dropped them
+    // and deletion fell back to parsing the URL — which is wrong for assets in
+    // a folder (`generated_images/abc` parses as just `abc`, so the original
+    // was never actually removed).
+    imagePublicId: {
+      type: String,
+    },
+    generatedImagePublicId: {
+      type: String,
+    },
     roomType: {
       type: String,
       required: true,

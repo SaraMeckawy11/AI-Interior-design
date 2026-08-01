@@ -1,28 +1,28 @@
+import React, { useEffect, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
   Animated,
-  Pressable,
   Easing,
   Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
-import React, { useEffect, useState, useRef } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import COLORS from "../../constants/colors";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useAuthStore } from "../../authStore";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import COLORS from "../../constants/colors";
+import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, MOTION, ms } from "../../constants/theme";
+import { useAuthStore } from "../../authStore";
 import InteriorImg from "../../assets/images/onboarding/i2.png";
 
 // --- Google Mobile Ads (App Open) ---
-import {
-  AppOpenAd,
-  AdEventType,
-  TestIds,
-} from "react-native-google-mobile-ads";
+import { AppOpenAd, AdEventType, TestIds } from "react-native-google-mobile-ads";
 
 const APP_OPEN_AD_UNIT_ID = __DEV__
   ? TestIds.APP_OPEN
@@ -32,107 +32,90 @@ const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
   requestNonPersonalizedAdsOnly: false,
 });
 
+const CARDS = [
+  {
+    title: "Interior Design",
+    description: "Photograph a room and get a fully resolved interior concept.",
+    icon: "color-palette-outline",
+    route: "/create/interior",
+    tint: COLORS.brand100,
+    iconColor: COLORS.brand700,
+  },
+  {
+    title: "Exterior Makeover",
+    description: "Facades, gardens, balconies and every outdoor space.",
+    icon: "home-outline",
+    route: "/create/exterior",
+    tint: COLORS.accentSoft,
+    iconColor: COLORS.accentStrong,
+  },
+  {
+    title: "Floor Plan",
+    description: "Turn a drawn or uploaded plan into a furnished visualisation.",
+    icon: "grid-outline",
+    route: "/create/plan",
+    tint: COLORS.infoSoft,
+    iconColor: COLORS.info,
+  },
+  {
+    title: "3D Walkthrough",
+    description: "Trace your home to scale and walk through it in real time.",
+    icon: "cube-outline",
+    route: "/create/walkthrough",
+    tint: COLORS.successSoft,
+    iconColor: COLORS.success,
+    badge: "New",
+  },
+];
+
 export default function Create() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { token } = useAuthStore();
   const [isSubscribed, setIsSubscribed] = useState(null);
   const [isPremium, setIsPremium] = useState(null);
-  const { token } = useAuthStore();
 
-  // -----------------------------
-  // Cards
-  // -----------------------------
-  const cards = [
-    {
-      title: "Interior Design",
-      description: "Upload your room and get fresh interior styles instantly.",
-      icon: "color-palette-outline",
-      route: "/create/interior",
-    },
-    {
-      title: "Exterior Makeover",
-      description: "Transform facades, gardens, balconies and outdoor spaces.",
-      icon: "home-outline",
-      route: "/create/exterior",
-    },
-    {
-      title: "Floor Plan",
-      description: "Create and visualize detailed floor plans for your spaces.",
-      icon: "grid-outline",
-      route: "/create/plan",
-    },
-  ];
-
-  // -----------------------------
-  // Header animation
-  // -----------------------------
-  const headerOpacity = useRef(new Animated.Value(0)).current;
+  // ── Entrance animation ────────────────────────────────────────────────────
+  const reveal = useRef(new Animated.Value(0)).current;
+  const cardReveals = useRef(CARDS.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
-    Animated.timing(headerOpacity, {
+    Animated.timing(reveal, {
       toValue: 1,
-      duration: 550,
-      easing: Easing.out(Easing.ease),
+      duration: MOTION.reveal,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, []);
+    Animated.stagger(
+      70,
+      cardReveals.map((value) =>
+        Animated.timing(value, {
+          toValue: 1,
+          duration: MOTION.slow,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ),
+    ).start();
+  }, [cardReveals, reveal]);
 
-  // -----------------------------
-  // Cards animations
-  // -----------------------------
-  const scaleAnimations = useRef(cards.map(() => new Animated.Value(1))).current;
-  const opacityAnimations = useRef(cards.map(() => new Animated.Value(1))).current;
-  const parallaxAnimations = useRef(cards.map(() => new Animated.Value(0))).current;
+  const pressScales = useRef(CARDS.map(() => new Animated.Value(1))).current;
+  const pressIn = (index) =>
+    Animated.spring(pressScales[index], {
+      toValue: MOTION.pressScale,
+      useNativeDriver: true,
+      ...MOTION.spring,
+    }).start();
+  const pressOut = (index) =>
+    Animated.spring(pressScales[index], { toValue: 1, useNativeDriver: true, ...MOTION.spring }).start();
 
-  const animatePressIn = (index) => {
-    Animated.parallel([
-      Animated.spring(scaleAnimations[index], {
-        toValue: 0.97,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnimations[index], {
-        toValue: 0.87,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-      Animated.timing(parallaxAnimations[index], {
-        toValue: 6,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-
-  const animatePressOut = (index) => {
-    Animated.parallel([
-      Animated.spring(scaleAnimations[index], {
-        toValue: 1,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnimations[index], {
-        toValue: 1,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-      Animated.timing(parallaxAnimations[index], {
-        toValue: 0,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-
-  // -----------------------------
-  // Fetch subscription
-  // -----------------------------
+  // ── Subscription status ───────────────────────────────────────────────────
   useEffect(() => {
     const fetchUserStatus = async () => {
       if (!token) return;
       try {
         const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -143,219 +126,223 @@ export default function Create() {
     fetchUserStatus();
   }, [token]);
 
-  // -----------------------------
-  // Auto app-open ads
-  // -----------------------------
+  // ── App-open ads for free accounts ────────────────────────────────────────
   useEffect(() => {
     if (isSubscribed === null || isPremium === null) return;
+    if (isSubscribed || isPremium) return;
 
-    const showAd = async () => {
+    let unsubscribe;
+    (async () => {
       try {
-        if (isSubscribed || isPremium) return;
-
         const lastShown = await AsyncStorage.getItem("lastAppOpenAdTime");
         const now = Date.now();
-        if (lastShown && now - lastShown < 12 * 60 * 1000) return;
+        if (lastShown && now - Number(lastShown) < 12 * 60 * 1000) return;
 
+        unsubscribe = appOpenAd.addAdEventListener(AdEventType.LOADED, async () => {
+          appOpenAd.show();
+          await AsyncStorage.setItem("lastAppOpenAdTime", String(now));
+        });
         appOpenAd.load();
-
-        const loaded = appOpenAd.addAdEventListener(
-          AdEventType.LOADED,
-          async () => {
-            appOpenAd.show();
-            await AsyncStorage.setItem("lastAppOpenAdTime", now.toString());
-          }
-        );
-
-        return () => loaded();
       } catch {}
-    };
+    })();
 
-    showAd();
+    return () => unsubscribe?.();
   }, [isSubscribed, isPremium]);
 
-  // -----------------------------
-  // UI
-  // -----------------------------
+  const premium = isSubscribed || isPremium;
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: COLORS.background }}>
-      
-      {/* ⭐ HEADER */}
-      <Animated.View style={{ opacity: headerOpacity }}>
-        <LinearGradient
-          colors={[COLORS.primary, COLORS.primaryDark]}
-          style={{
-            paddingTop: 60,
-            paddingBottom: 40,
-            paddingHorizontal: 24,
-            borderBottomLeftRadius: 30,
-            borderBottomRightRadius: 30,
-            overflow: "hidden",
-          }}
-        >
-
-          {/* Soft inner glow */}
+    <View style={styles.screen}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        // Clears the floating tab bar (62pt pill + its bottom offset).
+        contentContainerStyle={{ paddingBottom: ms(110) }}
+      >
+        <Animated.View style={{ opacity: reveal }}>
           <LinearGradient
-            colors={["rgba(255,255,255,0.10)", "transparent"]}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              height: "100%",
-            }}
-          />
-
-          {/* 📸 Diagonal Interior Image */}
-          <Image
-            source={InteriorImg}
-            resizeMode="contain"
-            style={{
-              position: "absolute",
-              right: -30,
-              top: -5,
-              width: 260,
-              height: 260,
-              opacity: 0.18,
-            }}
-          />
-
-          <View
-            style={{
-              position: "absolute",
-              bottom: 0,
-              right: 0,
-              width: "60%",
-              height: 55,
-              backgroundColor: "rgba(0,0,0,0.06)",
-              opacity: 0.18,
-              borderBottomLeftRadius: 30,
-            }}
-          />
-          {/* Brand */}
-          <Text
-            style={{
-              fontSize: 28,
-              fontWeight: "800",
-              color: "white",
-              marginBottom: 6,
-              letterSpacing: 1.2,
-            }}
+            colors={COLORS.gradientBrandDeep}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.header, { paddingTop: insets.top + SPACING.xl }]}
           >
-            LIVINAI
-          </Text>
+            {/* Depth: a soft top highlight plus the interior photograph bled
+                into the corner at low opacity. */}
+            <LinearGradient colors={COLORS.gradientGlass} style={StyleSheet.absoluteFill} />
+            <Image source={InteriorImg} resizeMode="contain" style={styles.headerArt} />
 
-          {/* Title */}
-          <Text
-            style={{
-              fontSize: 24,
-              fontWeight: "700",
-              color: "white",
-              marginBottom: 8,
-              letterSpacing: -0.5,
-            }}
-          >
-            Design Your Space
-          </Text>
+            <View style={styles.brandRow}>
+              <Text style={styles.brand}>LIVINAI</Text>
+              {premium ? (
+                <View style={styles.planPill}>
+                  <Ionicons name="sparkles" size={11} color={COLORS.brand800} />
+                  <Text style={styles.planPillText}>Premium</Text>
+                </View>
+              ) : null}
+            </View>
 
-          {/* Subtitle */}
-          <Text
-            style={{
-              fontSize: 16,
-              color: "#f0f0f0",
-              opacity: 0.95,
-            }}
-          >
-            Start your design journey
-          </Text>
-        </LinearGradient>
-      </Animated.View>
+            <Text style={styles.headline}>Design your space</Text>
+            <Text style={styles.subhead}>
+              Four ways to go from what you have to what it could be.
+            </Text>
+          </LinearGradient>
+        </Animated.View>
 
-      {/* ⭐ CONTENT */}
-      <View style={{ padding: 24, paddingTop: 30 }}>
-        {cards.map((card, index) => (
-          <Pressable
-            key={index}
-            onPressIn={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              animatePressIn(index);
-            }}
-            onPressOut={() => animatePressOut(index)}
-            onPress={() => router.push(card.route)}
-          >
+        <View style={styles.content}>
+          {CARDS.map((card, index) => (
             <Animated.View
+              key={card.route}
               style={{
+                opacity: cardReveals[index],
                 transform: [
-                  { scale: scaleAnimations[index] },
-                  { translateY: parallaxAnimations[index] },
+                  { scale: pressScales[index] },
+                  {
+                    translateY: cardReveals[index].interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [18, 0],
+                    }),
+                  },
                 ],
-                opacity: opacityAnimations[index],
-                backgroundColor: "rgba(255,255,255,0.28)",
-                borderRadius: 20,
-                padding: 20,
-                marginBottom: 24,
-                height: 150,
-                flexDirection: "row",
-                alignItems: "center",
-                borderWidth: 1.2,
-                borderColor: "rgba(255,255,255,0.40)",
-                shadowColor: "#000",
-                shadowOpacity: 0.14,
-                shadowRadius: 16,
-                shadowOffset: { width: 0, height: 6 },
               }}
             >
-
-              {/* Icon */}
-              <View
-                style={{
-                  width: 60,
-                  height: 60,
-                  borderRadius: 18,
-                  backgroundColor: "rgba(255,255,255,0.32)",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  marginRight: 18,
+              <Pressable
+                style={styles.card}
+                onPressIn={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  pressIn(index);
                 }}
+                onPressOut={() => pressOut(index)}
+                onPress={() => router.push(card.route)}
+                accessibilityRole="button"
+                accessibilityLabel={`${card.title}. ${card.description}`}
               >
-                <Ionicons name={card.icon} size={30} color={COLORS.primary} />
-              </View>
+                <View style={[styles.cardIcon, { backgroundColor: card.tint }]}>
+                  <Ionicons name={card.icon} size={23} color={card.iconColor} />
+                </View>
 
-              {/* Text */}
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    fontSize: 18.5,
-                    fontWeight: "600",
-                    color: COLORS.textPrimary,
-                    letterSpacing: -0.3,
-                  }}
-                >
-                  {card.title}
-                </Text>
+                <View style={styles.cardCopy}>
+                  <View style={styles.cardTitleRow}>
+                    <Text style={styles.cardTitle}>{card.title}</Text>
+                    {card.badge ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{card.badge}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.cardBody}>{card.description}</Text>
+                </View>
 
-                <Text
-                  style={{
-                    fontSize: 14,
-                    marginTop: 6,
-                    color: COLORS.textSecondary,
-                    lineHeight: 20,
-                  }}
-                >
-                  {card.description}
-                </Text>
-              </View>
-
-              <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={COLORS.textSecondary}
-                style={{ marginLeft: 4 }}
-              />
+                <Ionicons name="chevron-forward" size={18} color={COLORS.textTertiary} />
+              </Pressable>
             </Animated.View>
-          </Pressable>
-        ))}
-      </View>
-    </ScrollView>
+          ))}
+
+          {!premium && (
+            <Pressable style={styles.upsell} onPress={() => router.push("/profile/upgrade")}>
+              <View style={styles.upsellIcon}>
+                <Ionicons name="diamond-outline" size={18} color={COLORS.accentStrong} />
+              </View>
+              <View style={styles.cardCopy}>
+                <Text style={styles.upsellTitle}>Unlimited designs</Text>
+                <Text style={styles.cardBody}>Remove ads and generate without limits.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={COLORS.accentStrong} />
+            </Pressable>
+          )}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+
+  header: {
+    paddingHorizontal: LAYOUT.gutter,
+    paddingBottom: SPACING.xxl,
+    borderBottomLeftRadius: RADIUS.xxl,
+    borderBottomRightRadius: RADIUS.xxl,
+    overflow: "hidden",
+  },
+  headerArt: {
+    position: "absolute",
+    right: ms(-34),
+    top: ms(-14),
+    width: ms(240),
+    height: ms(240),
+    opacity: 0.14,
+  },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
+  brand: { ...TYPE.overline, color: "rgba(255,255,255,0.82)", letterSpacing: 3 },
+  planPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.brand200,
+  },
+  planPillText: { ...TYPE.caption, color: COLORS.brand800, fontSize: 10 },
+
+  headline: { ...TYPE.display, color: COLORS.white, marginTop: SPACING.base },
+  subhead: {
+    ...TYPE.body,
+    color: "rgba(255,255,255,0.82)",
+    marginTop: SPACING.sm,
+    maxWidth: "88%",
+  },
+
+  content: { padding: LAYOUT.gutter, gap: SPACING.md },
+
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.base,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.base,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    ...SHADOW.sm,
+  },
+  cardIcon: {
+    width: ms(52),
+    height: ms(52),
+    borderRadius: RADIUS.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardCopy: { flex: 1, gap: 3 },
+  cardTitleRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  cardTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  cardBody: { ...TYPE.small, color: COLORS.textSecondary },
+  badge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accent,
+  },
+  badgeText: { ...TYPE.caption, color: COLORS.white, fontSize: 9.5 },
+
+  upsell: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.base,
+    backgroundColor: COLORS.accentTint,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.base,
+    borderWidth: 1,
+    borderColor: COLORS.accentSoft,
+    marginTop: SPACING.sm,
+  },
+  upsellIcon: {
+    width: ms(44),
+    height: ms(44),
+    borderRadius: RADIUS.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.accentSoft,
+  },
+  upsellTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+});

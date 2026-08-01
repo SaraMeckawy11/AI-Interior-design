@@ -1,38 +1,45 @@
 """
-Livinai Interior AI - Modal deployment
+Livinai AI — Modal deployment.
 
 Workspace: sara123meckawy
 App:       livinai-interior
 
-Replicates the RunPod handler.py behavior (SD 1.5 Dreamshaper + 2 ControlNets
-[depth + seg] with DPT depth and UperNet segmentation) as a synchronous HTTP
-endpoint hosted on Modal.
+Two inference paths live in this app, and the HTTP layer routes between them:
+
+* **Gen-Klein (`GenKlein`)** — `black-forest-labs/FLUX.2-klein-4B` image editing.
+  This is the same engine and the same prompt architecture the Livinai web
+  studio runs, and it is now the default for every interior and exterior photo
+  redesign. It preserves the source architecture far better than the old
+  SD 1.5 path and needs no depth/segmentation preprocessing.
+
+* **Guided floor plans (`InteriorAI`)** — SD 1.5 (Dreamshaper) with depth + seg
+  ControlNets, plus the per-room masked inpainting refine pass. FLUX.2 [klein]
+  has no ControlNet, so the guided plan mode — where a rasterised mask of the
+  user's drawn polygons is the whole point — stays on this path. It now builds
+  its prompts from the shared `prompt_engine` too.
 
 Deploy:
+    modal secret create livinai-api-key   API_KEY=<your api key>
+    modal secret create livinai-hf-token  HF_TOKEN=<huggingface token>
     modal deploy app.py
 
-After deploy you will get a public URL like:
-    https://sara123meckawy--livinai-interior-interiorai-generate.modal.run
+Endpoints produced:
+    POST https://<workspace>--livinai-interior-generate.modal.run          (preferred)
+    POST https://<workspace>--livinai-interior-interiorai-generate.modal.run  (legacy)
 
-Invoke:
-    POST {url}
-    Authorization: Bearer <MODAL_API_TOKEN>
-    Content-Type: application/json
-    body: {
+Both accept the same body:
+    {
       "image": "<base64 jpg/png>",
       "room_type": "living room",
       "design_style": "Scandinavian",
-      "color_tone": "warm",
-      "custom_prompt": "" // optional
-    }
-
-Response matches RunPod output:
-    {
-      "message": "...",
-      "generatedImage": "<base64 png>",
-      "prompt": "...",
-      "negative_prompt": "...",
-      "has_window": true/false
+      "color_tone": "warm neutral",
+      "mode": "interior" | "exterior" | "guided",
+      "material": "Natural oak",           // optional
+      "lighting": "Natural daylight",      // optional
+      "preserve_geometry": true,           // optional
+      "creativity": 42,                    // optional, 10-80
+      "custom_prompt": "",                 // optional
+      "rooms": [...], "doors": [...], "canvas": {...}   // guided mode only
     }
 """
 
@@ -42,23 +49,34 @@ import os
 
 import modal
 
-# fastapi is only present inside the container image; guard the import so
-# this file can still be parsed locally (for `modal deploy` / `modal run`).
+# fastapi is only present inside the container image; guard the import so this
+# file can still be parsed locally (for `modal deploy` / `modal run`).
 try:
     from fastapi import Header, HTTPException
 except ImportError:  # pragma: no cover
     Header = None
     HTTPException = None
 
+from prompt_engine import (
+    NEGATIVE_PROMPT,
+    build_prompt,
+    build_short_prompt,
+    resolve_mode,
+)
+
 # ---------------------------------------------------------------------------
-# MODAL APP + IMAGE
+# MODAL APP + IMAGES
 # ---------------------------------------------------------------------------
 
 app = modal.App("livinai-interior")
 
 CACHE_DIR = "/cache/huggingface"
+FLUX_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 
-image = (
+# The ControlNet stack is pinned to the versions the guided path was validated
+# on; FLUX.2 [klein] needs a much newer diffusers, so the two paths deliberately
+# do not share an image.
+controlnet_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("libgl1", "libglib2.0-0")
     .pip_install(
@@ -73,160 +91,59 @@ image = (
         "fastapi[standard]==0.115.0",
     )
     .env({"HF_HOME": CACHE_DIR, "TRANSFORMERS_CACHE": CACHE_DIR})
+    .add_local_python_source("prompt_engine")
 )
 
-# Persistent HF cache volume - weights download once, reused across all containers
+flux_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("libgl1", "libglib2.0-0")
+    .pip_install(
+        "torch==2.6.0",
+        "diffusers>=0.36.0",
+        "transformers>=4.57.0",
+        "accelerate>=1.4.0",
+        "safetensors>=0.4.5",
+        "sentencepiece",
+        "protobuf",
+        "Pillow==10.4.0",
+        "numpy<2",
+        "huggingface_hub[hf_transfer]>=0.30.0",
+        "fastapi[standard]==0.115.0",
+    )
+    .env({
+        "HF_HOME": CACHE_DIR,
+        "TRANSFORMERS_CACHE": CACHE_DIR,
+        # Saturates the network on cold start; the 4B checkpoint is ~16 GB.
+        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+    })
+    .add_local_python_source("prompt_engine")
+)
+
+router_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install("fastapi[standard]==0.115.0")
+    .add_local_python_source("prompt_engine")
+)
+
+# Persistent HF cache volume — weights download once, reused across containers.
 hf_cache_vol = modal.Volume.from_name("livinai-hf-cache", create_if_missing=True)
 
-# Simple bearer-token auth secret (create via: modal secret create livinai-api-key API_KEY=...)
-api_key_secret = modal.Secret.from_name(
-    "livinai-api-key",
-    required_keys=["API_KEY"],
-)
+# Bearer-token auth: modal secret create livinai-api-key API_KEY=...
+api_key_secret = modal.Secret.from_name("livinai-api-key", required_keys=["API_KEY"])
 
-# ---------------------------------------------------------------------------
-# PROMPT TEMPLATES (copied verbatim from interiorAI/handler.py)
-# ---------------------------------------------------------------------------
-
-ROOM_PROMPTS = {
-    "living room": (
-        "{design_style} living room interior, warm soft ambient lighting, "
-        "{color_tone} palette, professional interior designer style, "
-        "photorealistic 8k, high detail, natural shadows, "
-        "includes sofa sets, coffee tables, area rugs, wall art, curtains, "
-        "TV cabinets, indoor plants, bookshelves, accent lighting, "
-        "cohesive furniture arrangement matching the room layout"
-    ),
-    "bedroom": (
-        "{design_style} bedroom interior, cozy soft ambient lighting, "
-        "{color_tone} palette, professional interior designer style, "
-        "photorealistic 8k, high detail fabrics and materials, natural shadows, "
-        "includes beds with layered bedding, bedside tables with lamps, "
-        "wardrobes or built-in storage, textured rugs, decorative wall art, "
-        "balanced and restful room layout"
-    ),
-    "kitchen": (
-        "{design_style} kitchen interior, premium materials and fixtures, "
-        "{color_tone} palette with cohesive tones, photorealistic 8k, high detail, "
-        "natural reflections on countertops, includes cooking area, cabinetry, "
-        "kitchen island or breakfast bar, realistic appliances, pendant lighting, "
-        "functional layout with clear workflow"
-    ),
-    "bathroom": (
-        "{design_style} bathroom interior, soft indirect lighting, "
-        "{color_tone} tone palette, high detail tiles and stone surfaces, "
-        "photorealistic 8k, natural reflections, includes vanity mirrors, sinks, "
-        "shower areas or bathtubs, storage cabinets, clean minimalist finishes"
-    ),
-    "dining room": (
-        "{design_style} dining room interior, elegant warm lighting, "
-        "{color_tone} tones, photorealistic 8k, high detail shadows, "
-        "includes dining table with multiple chairs, sideboard or buffet, wall art, "
-        "textured or wooden flooring, centerpiece lighting, cohesive arrangement"
-    ),
-    "office": (
-        "{design_style} home office interior, ergonomic workspace, "
-        "{color_tone} palette, clean contemporary lighting, photorealistic 8k, high detail, "
-        "includes desk, office chair, bookshelves, storage units, task lighting, "
-        "organized functional layout"
-    ),
-    "entryway": (
-        "{design_style} entryway foyer interior, soft ambient lighting, "
-        "{color_tone} tone palette, photorealistic 8k, high detail decor, "
-        "includes console table, wall mirror, coat storage, indoor plants, welcoming layout"
-    ),
-    "basement": (
-        "{design_style} finished basement interior, warm ambient lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail textures, "
-        "includes seating or entertainment area, multipurpose layout, wall decor"
-    ),
-    "attic": (
-        "{design_style} attic interior with angled ceilings, warm lighting, "
-        "{color_tone} tones, photorealistic 8k, high detail wood textures, "
-        "includes seating, storage units, rugs, cozy ambient design"
-    ),
-    "laundry room": (
-        "{design_style} laundry room interior, bright clean lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail surfaces, "
-        "includes washer and dryer, storage cabinets, shelving, organized layout"
-    ),
-    "sunroom": (
-        "{design_style} sunroom interior, abundant natural daylight, "
-        "{color_tone} palette, photorealistic 8k, high detail, "
-        "includes comfortable seating sets, many plants, glass windows, airy fresh atmosphere"
-    ),
-    "closet": (
-        "{design_style} walk-in closet interior, soft diffused lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail, "
-        "includes wardrobe shelves, drawers, mirrors, organized storage"
-    ),
-    "balcony": (
-        "{design_style} balcony outdoor space, warm ambient lighting, "
-        "{color_tone} tones, photorealistic 8k, high detail textures, "
-        "includes outdoor seating, potted plants, railing, clean aesthetic, cohesive layout"
-    ),
-    "hallway": (
-        "{design_style} hallway corridor interior, soft lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail wall textures, "
-        "includes wall art, minimal clean decor, clear pathway layout"
-    ),
-}
-
-EXTERIOR_PROMPTS = {
-    "balcony": (
-        "{design_style} balcony exterior scene, warm ambient lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail, "
-        "includes outdoor seating, potted plants, railing, textured flooring, "
-        "cohesive terrace layout and natural background"
-    ),
-    "building": (
-        "{design_style} building exterior architectural visualization, natural daylight, "
-        "{color_tone} palette, photorealistic 8k, high detail facade textures, realistic shadows, "
-        "includes windows, entryway, landscaping elements, professional architectural composition"
-    ),
-    "terrace": (
-        "{design_style} terrace outdoor space, soft warm lighting, {color_tone} palette, "
-        "photorealistic 8k, high detail materials, includes seating areas, planters, pergola or canopy, "
-        "cohesive outdoor layout and realistic background"
-    ),
-    "garden": (
-        "{design_style} garden landscape, natural daylight, {color_tone} palette, photorealistic 8k, "
-        "high botanical detail, includes planting beds, pathways, seating niches, decorative lighting, "
-        "balanced landscape composition"
-    ),
-    "driveway": (
-        "{design_style} driveway exterior scene, natural daylight, {color_tone} palette, "
-        "photorealistic 8k, high detail paving and materials, includes vehicle parking area, landscaping, "
-        "clean structural elements and realistic shadows"
-    ),
-    "swimming pool area": (
-        "{design_style} swimming pool outdoor area, natural daylight, {color_tone} palette, "
-        "photorealistic 8k, high detail water reflections, poolside seating, landscaping, "
-        "decking materials, ambient outdoor lighting and cohesive layout"
-    ),
-    "garage": (
-        "{design_style} organized garage exterior, {color_tone} palette, "
-        "photorealistic 8k, high detail industrial textures, clean concrete floors, "
-        "includes shelving units, tool storage, vehicle parking space, functional layout"
-    ),
-}
-
-FALLBACK_PROMPT = (
-    "{design_style} {room_type} space, realistic lighting, {color_tone} palette, "
-    "professional design style, photorealistic 8k, high detail textures, natural shadows, "
-    "includes layout-appropriate furniture or structural elements, cohesive arrangement matching the space type"
-)
+# FLUX.2 [klein] is a gated repo: modal secret create livinai-hf-token HF_TOKEN=...
+hf_token_secret = modal.Secret.from_name("livinai-hf-token", required_keys=["HF_TOKEN"])
 
 WINDOW_KEYWORDS = ["window", "windowpane"]
 
 
 # ---------------------------------------------------------------------------
-# GUIDED-MODE SEGMENTATION (only addition on top of the original modal/app.py)
+# GUIDED-MODE SEGMENTATION
 #
 # When the frontend (plan.jsx, "guided" mode) sends drawn room polygons we
-# rasterize them into a clean ADE20K-style semantic mask and feed THAT into
-# the seg ControlNet, instead of the UperNet-extracted segmentation of the
-# uploaded floor-plan image. Everything else in this file is unchanged.
+# rasterize them into a clean ADE20K-style semantic mask and feed THAT into the
+# seg ControlNet, instead of the UperNet-extracted segmentation of the uploaded
+# floor-plan image.
 # ---------------------------------------------------------------------------
 
 # ADE20K palette colors (R, G, B) — wall, floor, ceiling, door, window.
@@ -238,11 +155,31 @@ ADE_WINDOW = (230, 230, 230)
 
 # Stable per-room-type fill colors picked from the ADE palette so SD's seg
 # ControlNet associates each colored region with the right space type.
-# Compact per-room prompts used during the guided-mode per-room inpainting
-# pass. Each one is intentionally short (so the CLIP budget has headroom for
-# style + tone tail) and enumerates the canonical furniture SD should paint
-# inside that polygon. This is what guarantees "kitchens look like kitchens,
-# bedrooms look like bedrooms" no matter how the base pass turned out.
+ROOM_ANCHOR_COLORS = {
+    "living room": (11, 102, 255),    # sofa class -> living-room cue
+    "bedroom": (255, 245, 0),         # bed
+    "kids room": (255, 245, 0),
+    "kitchen": (50, 50, 250),         # cabinet
+    "bathroom": (200, 100, 100),      # bathtub
+    "dining room": (255, 51, 7),      # table
+    "office": (255, 102, 0),          # desk
+    "closet": (102, 51, 0),           # wardrobe
+    "laundry room": (235, 12, 255),   # appliance
+    "entryway": (8, 255, 51),         # door
+    "balcony": (230, 230, 230),       # window
+    "sunroom": (230, 230, 230),
+    "studio": (11, 102, 255),
+    "basement": (11, 102, 255),
+    "attic": (11, 102, 255),
+    "hallway": ADE_FLOOR,
+    "full apartment": ADE_FLOOR,
+}
+
+# Compact per-room prompts for the guided-mode per-room inpainting pass. These
+# are intentionally short so the CLIP budget has headroom for the style + tone
+# tail, and each enumerates the canonical furniture SD should paint inside that
+# polygon. This is what guarantees "kitchens look like kitchens, bedrooms look
+# like bedrooms" no matter how the base pass turned out.
 ROOM_REFINE_PROMPTS = {
     "living room":  "photorealistic {style} living room interior, sofa, coffee table, rug, tv console, lamps, plants, {tone} palette, top-down 3d interior render, sharp detail",
     "bedroom":      "photorealistic {style} bedroom interior, bed with bedding, nightstands, lamps, wardrobe, rug, {tone} palette, top-down 3d interior render, sharp detail",
@@ -262,26 +199,6 @@ ROOM_REFINE_PROMPTS = {
     "studio":       "photorealistic {style} studio room, flexible furniture, sofa, desk, rug, {tone} palette, top-down 3d render",
 }
 
-ROOM_ANCHOR_COLORS = {
-    "living room":    (11, 102, 255),    # sofa class -> living-room cue
-    "bedroom":        (255, 245, 0),     # bed
-    "kids room":      (255, 245, 0),
-    "kitchen":        (50, 50, 250),     # cabinet
-    "bathroom":       (200, 100, 100),   # bathtub
-    "dining room":    (255, 51, 7),      # table
-    "office":         (255, 102, 0),     # desk
-    "closet":         (102, 51, 0),      # wardrobe
-    "laundry room":   (235, 12, 255),    # appliance
-    "entryway":       (8, 255, 51),      # door
-    "balcony":        (230, 230, 230),   # window
-    "sunroom":        (230, 230, 230),
-    "studio":         (11, 102, 255),
-    "basement":       (11, 102, 255),
-    "attic":          (11, 102, 255),
-    "hallway":        ADE_FLOOR,
-    "full apartment": ADE_FLOOR,
-}
-
 
 def _rasterize_rooms_mask(rooms, size_wh, doors=None):
     """Build a rich ADE20K mask from drawn polygons + doors.
@@ -291,14 +208,11 @@ def _rasterize_rooms_mask(rooms, size_wh, doors=None):
       - A "furniture anchor" blob of the room-type's ADE color is painted near
         the polygon centroid so the seg ControlNet has a strong per-room class
         cue for the diffusion prior to latch onto.
-      - Every polygon outline is stroked with ADE_WALL so there is a clear
-        hard boundary between adjacent rooms and the outside world.
+      - Every polygon outline is stroked with ADE_WALL so there is a clear hard
+        boundary between adjacent rooms and the outside world.
       - Each door segment is then stamped through the wall as ADE_FLOOR (the
-        opening) with a small ADE_DOOR core at its midpoint so the model
-        renders a proper door, in the right spot, between the right rooms.
-    The result: SD with the seg ControlNet at high conditioning scale will
-    faithfully reproduce the user's layout (rooms where drawn, walls between
-    them, doors where marked).
+        opening) with a small ADE_DOOR core at its midpoint so the model renders
+        a proper door, in the right spot, between the right rooms.
     """
     import cv2
     import numpy as np
@@ -324,51 +238,42 @@ def _rasterize_rooms_mask(rooms, size_wh, doors=None):
     if not parsed:
         return Image.new("RGB", (w, h), (0, 0, 0))
 
-    # Pass 1: fill every polygon with floor. Later passes paint anchor blobs
-    # on top so each room reads as "room with floor + that room's anchor".
+    # Pass 1: fill every polygon with floor.
     for _rtype, poly in parsed:
         cv2.fillPoly(out, [poly], ADE_FLOOR)
 
-    # Pass 2: paint a per-room anchor blob near each centroid, clipped to the
-    # polygon so it never bleeds into neighbouring rooms. A single strong cue
-    # per room beats many scattered ones and stays inside the SD 77-token budget
-    # because the ControlNet does the spatial work, not the prompt.
-    poly_mask_cache = {}
-    for idx, (rtype, poly) in enumerate(parsed):
+    # Pass 2: per-room anchor blob near each centroid, clipped to the polygon so
+    # it never bleeds into a neighbour. One strong cue per room beats many
+    # scattered ones, and it stays inside the 77-token budget because the
+    # ControlNet does the spatial work rather than the prompt.
+    for rtype, poly in parsed:
         anchor = ROOM_ANCHOR_COLORS.get(rtype)
         if anchor is None or anchor == ADE_FLOOR:
             continue
-        M = cv2.moments(poly)
-        if M["m00"] == 0:
+        moments = cv2.moments(poly)
+        if moments["m00"] == 0:
             continue
-        cx = int(M["m10"] / M["m00"])
-        cy = int(M["m01"] / M["m00"])
-        x, y, bw, bh = cv2.boundingRect(poly)
+        cx = int(moments["m10"] / moments["m00"])
+        cy = int(moments["m01"] / moments["m00"])
+        _x, _y, bw, bh = cv2.boundingRect(poly)
         r_blob = max(10, int(min(bw, bh) * 0.22))
 
         poly_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.fillPoly(poly_mask, [poly], 255)
-        poly_mask_cache[idx] = poly_mask
-
         blob_mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(blob_mask, (cx, cy), r_blob, 255, -1)
-
-        combined = cv2.bitwise_and(blob_mask, poly_mask)
-        out[combined > 0] = anchor
+        out[cv2.bitwise_and(blob_mask, poly_mask) > 0] = anchor
 
     # Pass 3: walls. Thick stroke so they survive downscaling inside the
     # ControlNet preprocessor and read as hard partitions between rooms.
     wall_thickness = max(7, int(min(w, h) * 0.018))
     for _rtype, poly in parsed:
-        cv2.polylines(out, [poly], isClosed=True,
-                      color=ADE_WALL, thickness=wall_thickness)
+        cv2.polylines(out, [poly], isClosed=True, color=ADE_WALL, thickness=wall_thickness)
 
-    # Pass 4: doors. Each door is a line segment along a wall — stamp it as
-    # floor (punches the opening) with a small ADE_DOOR core so the model
-    # paints an actual door frame there rather than a plain gap.
+    # Pass 4: doors — stamp the opening as floor with a small door-class core so
+    # the model paints an actual door frame rather than a plain gap.
     if doors:
-        door_thickness = max(wall_thickness + 2,
-                             int(min(w, h) * 0.028))
+        door_thickness = max(wall_thickness + 2, int(min(w, h) * 0.028))
         door_core_thickness = max(4, int(min(w, h) * 0.010))
         for d in doors:
             try:
@@ -378,27 +283,145 @@ def _rasterize_rooms_mask(rooms, size_wh, doors=None):
                 y2 = int(max(0.0, min(1.0, float(d.get("y2", 0)))) * (h - 1))
             except (TypeError, ValueError):
                 continue
-            # Punch the opening through the wall.
             cv2.line(out, (x1, y1), (x2, y2), ADE_FLOOR, door_thickness)
-            # Paint a door-class core at the midpoint so SD renders a frame.
             cv2.line(out, (x1, y1), (x2, y2), ADE_DOOR, door_core_thickness)
 
     return Image.fromarray(out)
 
 
+def _decode_base64_image_bytes(base64_str):
+    if not isinstance(base64_str, str):
+        raise ValueError("Image must be a base64 string")
+    if base64_str.startswith("data:image"):
+        base64_str = base64_str.split(",", 1)[1]
+    base64_str += "=" * (-len(base64_str) % 4)
+    return base64.b64decode(base64_str)
+
+
 # ---------------------------------------------------------------------------
-# INFERENCE CLASS
+# GEN-KLEIN — FLUX.2 [klein] image editing (default path)
 # ---------------------------------------------------------------------------
 
 @app.cls(
-    image=image,
-    gpu="L40S",                 # 48 GB, ~3-4x faster than T4 at fp16, best price/perf for SD1.5
+    image=flux_image,
+    gpu="L40S",                 # 48 GB — the 4B transformer + Qwen3 encoder fit in bf16
+    volumes={"/cache": hf_cache_vol},
+    secrets=[api_key_secret, hf_token_secret],
+    scaledown_window=120,
+    min_containers=0,
+    max_containers=3,
+    timeout=900,
+)
+class GenKlein:
+    """FLUX.2 [klein] 4B image-to-image redesign, matching the web studio."""
+
+    @modal.enter()
+    def load(self):
+        import torch
+        from diffusers import Flux2KleinPipeline
+
+        self.torch = torch
+        self.pipe = Flux2KleinPipeline.from_pretrained(
+            FLUX_MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            cache_dir=CACHE_DIR,
+            token=os.environ.get("HF_TOKEN"),
+        )
+        self.pipe.to("cuda")
+        # Keeps peak VRAM well under the card even for 1024x1024 outputs, at a
+        # negligible cost for a 4-step schedule.
+        try:
+            self.pipe.enable_attention_slicing()
+            self.pipe.vae.enable_tiling()
+        except Exception:
+            pass
+        hf_cache_vol.commit()
+
+    @staticmethod
+    def _target_size(image):
+        """FLUX likes multiples of 16; keep the source aspect, cap the long edge."""
+        landscape = image.width >= image.height
+        return (1024, 768) if landscape else (768, 1024)
+
+    @modal.method()
+    def run(
+        self,
+        image: str,
+        room_type: str = "",
+        design_style: str = "",
+        color_tone: str = "",
+        custom_prompt: str = "",
+        mode: str = "interior",
+        material: str = "Natural oak",
+        lighting: str = "Natural daylight",
+        preserve_geometry: bool = True,
+        creativity: int = 42,
+    ):
+        from PIL import Image, ImageEnhance, ImageOps
+
+        source = ImageOps.exif_transpose(
+            Image.open(io.BytesIO(_decode_base64_image_bytes(image)))
+        ).convert("RGB")
+        width, height = self._target_size(source)
+
+        resolved_mode = resolve_mode(mode, room_type)
+        prompt = build_prompt(
+            mode=resolved_mode,
+            space_type=room_type or ("Building" if resolved_mode == "exterior" else "Living Room"),
+            design_style=design_style or "Modern",
+            color_tone=color_tone or "Neutral",
+            material=material or "Natural oak",
+            lighting=lighting or "Natural daylight",
+            preserve_geometry=bool(preserve_geometry),
+            creativity=int(creativity or 42),
+            custom_prompt=(custom_prompt or "")[:280],
+        )
+
+        # A stable base seed with a controlled creativity offset keeps repeat
+        # runs comparable while letting the creative-freedom control matter.
+        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
+        result = self.pipe(
+            prompt=prompt,
+            image=[source],
+            width=width,
+            height=height,
+            num_inference_steps=4,
+            guidance_scale=1.0,
+            generator=self.torch.Generator(device="cuda").manual_seed(seed),
+        ).images[0].convert("RGB")
+
+        # Conservative finishing pass — improves delivery without changing
+        # geometry or inventing detail.
+        result = ImageEnhance.Contrast(result).enhance(1.025)
+        result = ImageEnhance.Sharpness(result).enhance(1.08)
+
+        buf = io.BytesIO()
+        result.save(buf, format="PNG", optimize=True)
+        return {
+            "message": "Image generated successfully",
+            "generatedImage": base64.b64encode(buf.getvalue()).decode(),
+            "prompt": prompt,
+            "negative_prompt": "",
+            "engine": "gen-klein",
+            "model": FLUX_MODEL_ID,
+            "mode": resolved_mode,
+            "has_window": True,
+        }
+
+
+# ---------------------------------------------------------------------------
+# GUIDED FLOOR PLANS — SD 1.5 + depth/seg ControlNets
+# ---------------------------------------------------------------------------
+
+@app.cls(
+    image=controlnet_image,
+    gpu="L40S",                 # 48 GB, ~3-4x faster than T4 at fp16
     volumes={"/cache": hf_cache_vol},
     secrets=[api_key_secret],
-    scaledown_window=60,        # keep container warm 60s after last request
-    min_containers=0,           # set to 1 for zero-cold-start (adds cost)
-    max_containers=3,           # concurrent scale-out
-    timeout=600,                # 10 min per-request max
+    scaledown_window=60,
+    min_containers=0,
+    max_containers=3,
+    timeout=600,
 )
 class InteriorAI:
 
@@ -423,31 +446,21 @@ class InteriorAI:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
 
-        self.dpt_processor = DPTImageProcessor.from_pretrained(
-            "Intel/dpt-large", cache_dir=CACHE_DIR
-        )
+        self.dpt_processor = DPTImageProcessor.from_pretrained("Intel/dpt-large", cache_dir=CACHE_DIR)
         self.dpt_model = DPTForDepthEstimation.from_pretrained(
             "Intel/dpt-large", torch_dtype=self.dtype, cache_dir=CACHE_DIR
         ).to(self.device)
 
-        self.seg_processor = AutoImageProcessor.from_pretrained(
-            "openmmlab/upernet-convnext-small", cache_dir=CACHE_DIR
-        )
+        self.seg_processor = AutoImageProcessor.from_pretrained("openmmlab/upernet-convnext-small", cache_dir=CACHE_DIR)
         self.seg_model = UperNetForSemanticSegmentation.from_pretrained(
-            "openmmlab/upernet-convnext-small",
-            torch_dtype=self.dtype,
-            cache_dir=CACHE_DIR,
+            "openmmlab/upernet-convnext-small", torch_dtype=self.dtype, cache_dir=CACHE_DIR
         ).to(self.device)
 
         depth_cn = ControlNetModel.from_pretrained(
-            "lllyasviel/sd-controlnet-depth",
-            torch_dtype=self.dtype,
-            cache_dir=CACHE_DIR,
+            "lllyasviel/sd-controlnet-depth", torch_dtype=self.dtype, cache_dir=CACHE_DIR
         )
         seg_cn = ControlNetModel.from_pretrained(
-            "lllyasviel/control_v11p_sd15_seg",
-            torch_dtype=self.dtype,
-            cache_dir=CACHE_DIR,
+            "lllyasviel/control_v11p_sd15_seg", torch_dtype=self.dtype, cache_dir=CACHE_DIR
         )
 
         self.pipe = StableDiffusionControlNetPipeline.from_pretrained(
@@ -457,18 +470,15 @@ class InteriorAI:
             safety_checker=None,
             cache_dir=CACHE_DIR,
         ).to(self.device)
-
-        self.pipe.scheduler = UniPCMultistepScheduler.from_config(
-            self.pipe.scheduler.config
-        )
+        self.pipe.scheduler = UniPCMultistepScheduler.from_config(self.pipe.scheduler.config)
 
         # ── Per-room inpainting pipeline ──
         # Shares the UNet/VAE/TextEncoder weights with the base pipe and reuses
-        # the same depth+seg ControlNets. We use this in guided mode to do a
-        # second pass where each drawn polygon is inpainted with furniture
-        # specific to its assigned room type, while a tight mask prevents the
-        # geometry from drifting. This is how we guarantee "exact placement +
-        # room-specific furniture" without needing a separate inpaint checkpoint.
+        # the same depth+seg ControlNets. In guided mode we run a second pass
+        # where each drawn polygon is inpainted with furniture specific to its
+        # assigned room type, while a tight mask prevents the geometry from
+        # drifting. That is how we get exact placement + room-specific furniture
+        # without a separate inpaint checkpoint.
         self.inpaint_pipe = StableDiffusionControlNetInpaintPipeline(
             vae=self.pipe.vae,
             text_encoder=self.pipe.text_encoder,
@@ -481,7 +491,6 @@ class InteriorAI:
             requires_safety_checker=False,
         ).to(self.device)
 
-        # Memory-efficient flags so pipeline fits in 16 GB with room to spare
         try:
             self.pipe.enable_xformers_memory_efficient_attention()
             self.inpaint_pipe.enable_xformers_memory_efficient_attention()
@@ -492,7 +501,6 @@ class InteriorAI:
         self.inpaint_pipe.enable_vae_tiling()
         self.inpaint_pipe.enable_attention_slicing()
 
-        # Persist any newly downloaded weights to the volume for next cold start
         hf_cache_vol.commit()
 
     # --------------------- helper methods ---------------------
@@ -501,13 +509,9 @@ class InteriorAI:
         import cv2
         import numpy as np
 
-        if not isinstance(base64_str, str):
-            raise ValueError("Image must be a base64 string")
-        if base64_str.startswith("data:image"):
-            base64_str = base64_str.split(",")[1]
-        base64_str += "=" * (-len(base64_str) % 4)
-        img_bytes = base64.b64decode(base64_str)
-        img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+        img = cv2.imdecode(
+            np.frombuffer(_decode_base64_image_bytes(base64_str), np.uint8), cv2.IMREAD_COLOR
+        )
         if img is None:
             raise ValueError("Invalid image provided")
         return img
@@ -525,9 +529,7 @@ class InteriorAI:
         resized = cv2.resize(image_bgr, (width, height), interpolation=cv2.INTER_CUBIC)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
 
-        inputs = self.dpt_processor(
-            images=Image.fromarray(rgb), return_tensors="pt"
-        ).to(self.device)
+        inputs = self.dpt_processor(images=Image.fromarray(rgb), return_tensors="pt").to(self.device)
         inputs = {k: v.to(dtype=self.dtype) for k, v in inputs.items()}
 
         with self.torch.no_grad():
@@ -535,22 +537,17 @@ class InteriorAI:
 
         depth_resized = (
             self.torch.nn.functional.interpolate(
-                depth.unsqueeze(1),
-                size=(height, width),
-                mode="bicubic",
-                align_corners=False,
+                depth.unsqueeze(1), size=(height, width), mode="bicubic", align_corners=False
             )
             .squeeze()
             .cpu()
             .numpy()
         )
-
         depth_norm = (
             (depth_resized - depth_resized.min())
             / (depth_resized.max() - depth_resized.min())
             * 255
         ).astype(np.uint8)
-
         return Image.fromarray(depth_norm).convert("RGB")
 
     def _get_segmentation_map(self, image_bgr):
@@ -562,9 +559,7 @@ class InteriorAI:
         resized = cv2.resize(image_bgr, (width, height), interpolation=cv2.INTER_CUBIC)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
 
-        inputs = self.seg_processor(
-            images=Image.fromarray(rgb), return_tensors="pt"
-        ).to(self.device)
+        inputs = self.seg_processor(images=Image.fromarray(rgb), return_tensors="pt").to(self.device)
         inputs = {k: v.to(dtype=self.dtype) for k, v in inputs.items()}
 
         with self.torch.no_grad():
@@ -574,16 +569,12 @@ class InteriorAI:
 
     def _get_segmentation_image(self, seg_map, size_wh):
         import cv2
-        import numpy as np
         from PIL import Image
 
         w, h = size_wh
-        seg_color = cv2.applyColorMap(
-            (seg_map * 10).astype(np.uint8), cv2.COLORMAP_JET
-        )
+        seg_color = cv2.applyColorMap((seg_map * 10).astype("uint8"), cv2.COLORMAP_JET)
         seg_color = cv2.resize(seg_color, (w, h), interpolation=cv2.INTER_NEAREST)
-        seg_rgb = cv2.cvtColor(seg_color, cv2.COLOR_BGR2RGB)
-        return Image.fromarray(seg_rgb)
+        return Image.fromarray(cv2.cvtColor(seg_color, cv2.COLOR_BGR2RGB))
 
     def _detect_window(self, seg_map):
         import numpy as np
@@ -596,33 +587,23 @@ class InteriorAI:
         return False
 
     def _refine_rooms_in_place(
-        self,
-        base_image,
-        rooms,
-        size_wh,
-        depth_img,
-        seg_img,
-        design_style,
-        color_tone,
+        self, base_image, rooms, size_wh, depth_img, seg_img, design_style, color_tone
     ):
         """Per-room masked inpainting pass.
 
         For every drawn polygon we:
-          1. Build a tight binary mask of that polygon (padded a few pixels
-             inward so we don't touch the walls — this is what guarantees
-             the room stays exactly where drawn).
-          2. Feather the mask's inner edge so inpainted furniture blends
-             seamlessly with the surrounding walls/doors from the base pass.
-          3. Run the inpaint ControlNet pipe with a room-specific prompt
-             (kitchen furniture for kitchens, beds for bedrooms, etc.) while
+          1. Build a tight binary mask of that polygon, eroded a few pixels
+             inward so we never touch the walls — this is what guarantees the
+             room stays exactly where it was drawn.
+          2. Feather the mask so inpainted furniture blends into the walls and
+             doors produced by the base pass.
+          3. Run the inpaint ControlNet pipe with a room-specific prompt while
              the same depth+seg ControlNets hold the architecture steady.
-          4. Composite the result back into the running canvas using the
-             blurred mask so seams vanish.
+          4. Composite back into the running canvas using the blurred mask.
 
-        Doing it per-room instead of globally is what fixes the two problems
-        the user hit: rooms can't shift (mask locks them to their polygon)
-        and each room gets furniture matching its *assigned* type (prompt
-        changes per polygon).
+        Doing this per room rather than globally is what fixes both classic
+        failure modes: rooms cannot shift (the mask locks them to their polygon)
+        and each room gets furniture matching its *assigned* type.
         """
         import cv2
         import numpy as np
@@ -636,18 +617,14 @@ class InteriorAI:
         style = (design_style or "modern").strip().lower() or "modern"
         tone = (color_tone or "neutral").strip().lower() or "neutral"
 
-        # Small inward shrink so the furniture doesn't paint over walls.
         inset_px = max(4, int(min(w, h) * 0.012))
         feather_px = max(6, int(min(w, h) * 0.018))
 
         for r in rooms:
             rtype = (r.get("type") or "").strip().lower()
-            if not rtype:
-                continue
             template = ROOM_REFINE_PROMPTS.get(rtype)
             if not template:
-                # Unknown room type — skip; the base pass already handled it.
-                continue
+                continue  # Unknown room type — the base pass already handled it.
 
             pts = []
             for p in r.get("polygon") or []:
@@ -663,72 +640,46 @@ class InteriorAI:
 
             hard_mask = np.zeros((h, w), dtype=np.uint8)
             cv2.fillPoly(hard_mask, [poly], 255)
-
-            # Erode so we stay safely inside the room (don't overwrite walls).
-            kernel = cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE, (inset_px * 2 + 1, inset_px * 2 + 1)
-            )
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (inset_px * 2 + 1, inset_px * 2 + 1))
             inner_mask = cv2.erode(hard_mask, kernel)
             if inner_mask.max() == 0:
-                continue  # Polygon too small to refine — skip.
+                continue  # Polygon too small to refine.
 
-            # Feathered mask for smooth compositing back into the canvas.
-            feather = cv2.GaussianBlur(
-                inner_mask, (feather_px * 2 + 1, feather_px * 2 + 1), 0
-            )
-
-            prompt = template.format(style=style, tone=tone)
-            negative = (
-                "blurry, lowres, distorted, warped geometry, wrong furniture, "
-                "mismatched room type, floating objects, bad lighting, artifacts, "
-                "merged walls, duplicated furniture"
-            )
+            feather = cv2.GaussianBlur(inner_mask, (feather_px * 2 + 1, feather_px * 2 + 1), 0)
 
             try:
-                # Use the same current-canvas image as the source so
-                # previously-refined rooms stay intact when the next room runs.
-                source_pil = Image.fromarray(canvas)
-                mask_pil = Image.fromarray(inner_mask).convert("L")
-
                 result = self.inpaint_pipe(
-                    prompt=prompt,
-                    negative_prompt=negative,
-                    image=source_pil,
-                    mask_image=mask_pil,
+                    prompt=template.format(style=style, tone=tone),
+                    negative_prompt=NEGATIVE_PROMPT,
+                    image=Image.fromarray(canvas),
+                    mask_image=Image.fromarray(inner_mask).convert("L"),
                     control_image=[depth_img, seg_img],
                     num_inference_steps=22,
                     guidance_scale=7.0,
-                    strength=0.85,                      # strong enough to paint fresh furniture
+                    strength=0.85,
                     controlnet_conditioning_scale=[0.45, 0.9],
                     generator=self.torch.manual_seed(17 + len(pts)),
                 ).images[0]
-            except Exception as e:
-                # If a single room fails, keep the base canvas rather than
-                # failing the whole generation.
-                print(f"[refine] skipped room '{rtype}': {e}")
+            except Exception as error:
+                # A single failed room must never fail the whole generation.
+                print(f"[refine] skipped room '{rtype}': {error}")
                 continue
 
-            refined = np.array(result.convert("RGB")).astype(np.float32)
-            current = canvas.astype(np.float32)
             alpha = (feather.astype(np.float32) / 255.0)[..., None]
-            blended = current * (1 - alpha) + refined * alpha
+            blended = canvas.astype(np.float32) * (1 - alpha) + np.array(result.convert("RGB")).astype(np.float32) * alpha
             canvas = np.clip(blended, 0, 255).astype(np.uint8)
 
         return Image.fromarray(canvas)
 
     def _build_guided_prompt(self, rooms, design_style, color_tone, custom_prompt):
-        """Interior-designer-grade prompt that enumerates each room + its
-        grid position so SD places each space where the user drew it.
+        """Layout-aware prompt that names each room and its grid position.
 
         Stays under CLIP's 77-token limit: at most one short clause per room,
-        with room names abbreviated, and a shared photoreal/style tail.
+        with a shared photoreal/style tail from the common prompt engine.
         """
         if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
-            # Frontend already builds a rich layout-aware prompt; prefer it.
+            # The frontend already builds a rich layout-aware prompt; prefer it.
             return custom_prompt.strip()
-
-        style = (design_style or "Modern").strip().lower() or "modern"
-        tone = (color_tone or "neutral").strip().lower() or "neutral"
 
         clauses = []
         seen_types = set()
@@ -738,43 +689,30 @@ class InteriorAI:
                 continue
             seen_types.add(rtype)
             pos = (r.get("position") or "").strip().lower()
-            if pos:
-                clauses.append(f"{rtype} {pos}")
-            else:
-                clauses.append(rtype)
+            clauses.append(f"{rtype} {pos}".strip())
             if len(clauses) >= 6:  # token budget guard
                 break
 
         layout = ", ".join(clauses) if clauses else "multi-room interior"
-
+        tail = build_short_prompt(
+            mode="interior",
+            space_type="Floor Plan",
+            design_style=design_style or "Modern",
+            color_tone=color_tone or "neutral",
+        )
         return (
-            f"professional interior designer 3D visualization of a floor plan, "
-            f"multi-room home with {layout}, "
-            f"each room in its exact mapped position, solid walls between rooms, "
-            f"doors only where drawn, complete furnishings fitting each room type, "
-            f"{style} style, {tone} palette, photorealistic 8k, "
-            f"soft natural daylight, cohesive interior design, sharp architectural lines"
+            f"3D visualization of a furnished floor plan, {layout}, "
+            f"each room in its exact mapped position, solid walls between rooms, doors only where drawn, "
+            f"{tail}"
         )
 
-    def _build_prompt(self, room_type, design_style, color_tone, custom_prompt):
-        room_key = (room_type or "").strip().lower()
-
+    def _build_prompt(self, room_type, design_style, color_tone, custom_prompt, mode="interior"):
         if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
             return custom_prompt.strip()
-
-        if room_key in ROOM_PROMPTS:
-            return ROOM_PROMPTS[room_key].format(
-                design_style=design_style or "Stylish",
-                color_tone=color_tone or "neutral",
-            )
-        if room_key in EXTERIOR_PROMPTS:
-            return EXTERIOR_PROMPTS[room_key].format(
-                design_style=design_style or "Stylish",
-                color_tone=color_tone or "neutral",
-            )
-        return FALLBACK_PROMPT.format(
-            design_style=design_style or "Stylish",
-            room_type=room_type or "interior",
+        return build_short_prompt(
+            mode=mode,
+            space_type=room_type or "interior",
+            design_style=design_style or "Modern",
             color_tone=color_tone or "neutral",
         )
 
@@ -804,46 +742,34 @@ class InteriorAI:
 
         is_guided = (mode or "").strip().lower() == "guided" and bool(rooms)
 
-        # Guided-mode override: replace the auto-extracted UperNet seg map with
-        # a rasterized version of the user's drawn layout (rooms + doors). This
-        # is the signal SD needs to 100 % respect the user's plan.
+        # Guided-mode override: replace the auto-extracted UperNet seg map with a
+        # rasterized version of the user's drawn layout (rooms + doors). This is
+        # the signal SD needs to respect the plan exactly.
         if is_guided:
             try:
                 seg_img = _rasterize_rooms_mask(rooms, size_wh, doors=doors)
             except Exception:
                 pass
 
-        # ── Prompt ──
         if is_guided:
-            prompt = self._build_guided_prompt(
-                rooms, design_style, color_tone, custom_prompt
-            )
+            prompt = self._build_guided_prompt(rooms, design_style, color_tone, custom_prompt)
         else:
             prompt = self._build_prompt(
-                room_type, design_style, color_tone, custom_prompt
+                room_type, design_style, color_tone, custom_prompt, resolve_mode(mode, room_type)
             )
         if has_window and "window" not in prompt.lower():
             prompt = prompt + ", window in place"
 
-        negative = (
-            "blurry, lowres, distorted, floating furniture, bad lighting, "
-            "wrong perspective, merged rooms, missing walls, warped geometry, "
-            "inconsistent room layout, deformed architecture, artifacts"
-        )
+        negative = NEGATIVE_PROMPT
         if not has_window:
             negative += ", no window"
 
         # Guided: lean heavily on the seg ControlNet so the model cannot
-        # rearrange rooms or drop walls between them. Quick: keep the
-        # original balance that works well for single-room photos.
-        if is_guided:
-            cn_scale = [0.55, 0.95]
-            steps = 34
-        else:
-            cn_scale = [0.5, 0.1]
-            steps = 30
+        # rearrange rooms or drop walls between them. Otherwise keep the balance
+        # that works well for single-room photos.
+        cn_scale, steps = ([0.55, 0.95], 34) if is_guided else ([0.5, 0.1], 30)
 
-        result = self.pipe(
+        out = self.pipe(
             prompt=prompt,
             image=[depth_img, seg_img],
             num_inference_steps=steps,
@@ -851,13 +777,10 @@ class InteriorAI:
             controlnet_conditioning_scale=cn_scale,
             negative_prompt=negative,
             generator=self.torch.manual_seed(42),
-        )
-        out = result.images[0]
+        ).images[0]
 
-        # Guided mode: run a per-room inpainting pass so each drawn polygon
-        # gets furniture specific to its assigned room type without shifting
-        # position. This is the step that turns a decent multi-room render
-        # into an interior-designer-grade plan.
+        # Guided mode: per-room inpainting so each drawn polygon gets furniture
+        # specific to its assigned type without shifting position.
         if is_guided:
             try:
                 out = self._refine_rooms_in_place(
@@ -869,85 +792,138 @@ class InteriorAI:
                     design_style=design_style,
                     color_tone=color_tone,
                 )
-            except Exception as e:
-                print(f"[guided-refine] pass failed, keeping base image: {e}")
+            except Exception as error:
+                print(f"[guided-refine] pass failed, keeping base image: {error}")
 
         buf = io.BytesIO()
         out.save(buf, format="PNG")
-        generated_b64 = base64.b64encode(buf.getvalue()).decode()
-
         return {
             "message": "Image generated successfully",
-            "generatedImage": generated_b64,
+            "generatedImage": base64.b64encode(buf.getvalue()).decode(),
             "prompt": prompt,
             "negative_prompt": negative,
+            "engine": "controlnet-guided" if is_guided else "controlnet",
+            "model": "Lykon/dreamshaper-8",
             "has_window": has_window,
         }
 
-    # --------------------- public HTTP endpoint ---------------------
+    # --------------------- legacy public HTTP endpoint ---------------------
 
     @modal.fastapi_endpoint(method="POST", docs=True)
-    def generate(
-        self,
-        payload: dict,
-        authorization: str = Header(default="") if Header else "",
-    ):
+    def generate(self, payload: dict, authorization: str = Header(default="") if Header else ""):
+        """Legacy endpoint kept so already-deployed backends keep working.
+
+        Prefer the app-level `generate` endpoint: it routes on a cheap CPU
+        container instead of waking this GPU class just to dispatch.
         """
-        HTTP endpoint called by the Livinai backend.
+        _require_token(authorization)
+        return _dispatch(payload or {})
 
-        Headers:
-          Authorization: Bearer <API_KEY>
 
-        Body (same shape as current RunPod payload.input):
-          { image, room_type, design_style, color_tone, custom_prompt? }
-        """
-        expected = os.environ.get("API_KEY")
-        if expected:
-            token = (authorization or "").removeprefix("Bearer ").strip()
-            if token != expected:
-                raise HTTPException(status_code=401, detail="Unauthorized")
+# ---------------------------------------------------------------------------
+# ROUTER — one cheap endpoint that picks the right engine
+# ---------------------------------------------------------------------------
 
-        body = payload or {}
-        image_b64 = body.get("image")
-        if not image_b64:
-            raise HTTPException(status_code=400, detail="Missing image")
+def _require_token(authorization: str):
+    expected = os.environ.get("API_KEY")
+    if expected:
+        token = (authorization or "").removeprefix("Bearer ").strip()
+        if token != expected:
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
+
+def _dispatch(body: dict):
+    """Route a request to the right engine, with a safe fallback.
+
+    Guided floor plans need ControlNet conditioning, so they stay on SD 1.5.
+    Everything else goes to Gen-Klein; if that path fails for any reason
+    (gated-model access, a cold-start problem, an OOM), we fall back to the
+    ControlNet pipeline rather than returning an error to the user.
+    """
+    image_b64 = body.get("image")
+    if not image_b64:
+        raise HTTPException(status_code=400, detail="Missing image")
+
+    mode = (body.get("mode") or "").strip()
+    rooms = body.get("rooms") if isinstance(body.get("rooms"), list) else None
+    doors = body.get("doors") if isinstance(body.get("doors"), list) else None
+    canvas = body.get("canvas") if isinstance(body.get("canvas"), dict) else None
+    room_type = (body.get("room_type") or "").strip()
+    design_style = (body.get("design_style") or "").strip()
+    color_tone = (body.get("color_tone") or "").strip()
+    custom_prompt = body.get("custom_prompt") or ""
+
+    is_guided = mode.lower() == "guided" and bool(rooms)
+
+    if not is_guided:
         try:
-            return self.run.local(
+            return GenKlein().run.remote(
                 image=image_b64,
-                room_type=(body.get("room_type") or "").strip(),
-                design_style=(body.get("design_style") or "").strip(),
-                color_tone=(body.get("color_tone") or "").strip(),
-                custom_prompt=body.get("custom_prompt") or "",
-                rooms=body.get("rooms") if isinstance(body.get("rooms"), list) else None,
-                canvas=body.get("canvas") if isinstance(body.get("canvas"), dict) else None,
-                mode=(body.get("mode") or "").strip(),
-                doors=body.get("doors") if isinstance(body.get("doors"), list) else None,
+                room_type=room_type,
+                design_style=design_style,
+                color_tone=color_tone,
+                custom_prompt=custom_prompt,
+                mode=mode or "interior",
+                material=(body.get("material") or "Natural oak").strip(),
+                lighting=(body.get("lighting") or "Natural daylight").strip(),
+                preserve_geometry=body.get("preserve_geometry", True),
+                creativity=int(body.get("creativity") or 42),
             )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as error:
+            print(f"[router] Gen-Klein unavailable, falling back to ControlNet: {error}")
+
+    try:
+        return InteriorAI().run.remote(
+            image=image_b64,
+            room_type=room_type,
+            design_style=design_style,
+            color_tone=color_tone,
+            custom_prompt=custom_prompt,
+            rooms=rooms,
+            canvas=canvas,
+            mode=mode,
+            doors=doors,
+        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.function(image=router_image, secrets=[api_key_secret], timeout=900)
+@modal.fastapi_endpoint(method="POST", docs=True)
+def generate(payload: dict, authorization: str = Header(default="") if Header else ""):
+    """Preferred entry point for the Livinai backend."""
+    _require_token(authorization)
+    return _dispatch(payload or {})
+
+
+@app.function(image=router_image)
+@modal.fastapi_endpoint(method="GET")
+def health():
+    return {
+        "status": "ok",
+        "engines": {"default": FLUX_MODEL_ID, "guided": "Lykon/dreamshaper-8 + depth/seg ControlNet"},
+        "promptEngine": "gen-klein-v1",
+    }
 
 
 # ---------------------------------------------------------------------------
 # LOCAL ENTRYPOINT (for quick CLI testing: `modal run app.py`)
 # ---------------------------------------------------------------------------
 @app.local_entrypoint()
-def main(image_path: str = "test.jpg", room_type: str = "living room"):
+def main(image_path: str = "test.jpg", room_type: str = "living room", mode: str = "interior"):
     """Run a smoke test from the CLI using a local image file."""
     from pathlib import Path
 
-    data = Path(image_path).read_bytes()
-    b64 = base64.b64encode(data).decode()
-
-    ai = InteriorAI()
-    result = ai.run.remote(
+    b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
+    result = GenKlein().run.remote(
         image=b64,
         room_type=room_type,
         design_style="Scandinavian",
         color_tone="warm neutral",
+        mode=mode,
     )
     out_path = Path("generated.png")
     out_path.write_bytes(base64.b64decode(result["generatedImage"]))
     print(f"Saved -> {out_path.resolve()}")
-    print(f"Prompt: {result['prompt']}")
-    print(f"Has window: {result['has_window']}")
+    print(f"Engine: {result['engine']}")
+    print(f"Prompt: {result['prompt'][:200]}…")
