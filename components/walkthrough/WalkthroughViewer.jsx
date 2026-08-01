@@ -23,7 +23,19 @@ import { buildWalkthroughHtml } from "../../lib/walkthroughScene";
  * throw away the whole GPU scene and re-run the furnishing pass on every toggle.
  */
 const WalkthroughViewer = forwardRef(function WalkthroughViewer(
-  { layout, roomConfigs, settings, mode = "walk", roomIndex = 0, night = false, onReady, onSelect, onError, onSnapshot },
+  {
+    layout,
+    roomConfigs,
+    settings,
+    mode = "walk",
+    roomIndex = 0,
+    night = false,
+    onReady,
+    onSelect,
+    onError,
+    onSnapshot,
+    onComposition,
+  },
   ref,
 ) {
   const webRef = useRef(null);
@@ -51,7 +63,9 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     setFreeExplore: (value) => run(`window.LivinaiScene.setFreeExplore(${value ? "true" : "false"})`),
     rotateSelected: (delta) => run(`window.LivinaiScene.rotateSelected(${delta})`),
     clearSelection: () => run("window.LivinaiScene.clearSelection()"),
-    capture: () => run("window.LivinaiScene.capture()"),
+    frameRoom: (index) => run(`window.LivinaiScene.frameRoom(${index})`),
+    capture: (purpose = "photo", designerCamera = false) =>
+      run(`window.LivinaiScene.capture(${JSON.stringify(purpose)},${designerCamera ? "true" : "false"})`),
   }));
 
   const handleMessage = useCallback(
@@ -67,15 +81,17 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         onReady?.(data);
       } else if (data.type === "select") {
         onSelect?.(data.info);
+      } else if (data.type === "composition") {
+        onComposition?.(data.composition);
       } else if (data.type === "snapshot") {
-        onSnapshot?.(data.image);
+        onSnapshot?.(data.image, data.purpose, data.composition);
       } else if (data.type === "error") {
         setStatus("error");
         setMessage(data.message);
         onError?.(data.message);
       }
     },
-    [onError, onReady, onSelect, onSnapshot],
+    [onComposition, onError, onReady, onSelect, onSnapshot],
   );
 
   return (

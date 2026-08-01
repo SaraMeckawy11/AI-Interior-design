@@ -1,11 +1,11 @@
 import React from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform } from "react-native";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import COLORS from "../../constants/colors";
-import { RADIUS, SPACING, TYPE, ms } from "../../constants/theme";
+import { FONTS, ms } from "../../constants/theme";
 
 const TABS = [
   { name: "create", title: "Create", icon: "add-circle", iconOutline: "add-circle-outline" },
@@ -14,24 +14,14 @@ const TABS = [
 ];
 
 /**
- * The tab bar is a floating surface rather than a full-width strip, and the
- * active item gets a filled pill with its label. The previous bar relied on a
- * pale tint alone to signal the current section, which was not distinguishable
- * at that contrast level.
+ * A conventional docked tab bar.
+ *
+ * An earlier revision floated a rounded pill over the content. It looked
+ * tidier in isolation but every scrollable screen then needed bespoke bottom
+ * padding to avoid hiding its last row behind it, and the gesture area on
+ * Android sat awkwardly underneath. Docking the bar removes that whole class
+ * of problem: the navigator reserves the space itself.
  */
-function TabIcon({ focused, icon, iconOutline, title }) {
-  return (
-    <View style={[styles.item, focused && styles.itemActive]}>
-      <Ionicons
-        name={focused ? icon : iconOutline}
-        size={20}
-        color={focused ? COLORS.white : COLORS.textTertiary}
-      />
-      {focused ? <Text style={styles.itemLabel}>{title}</Text> : null}
-    </View>
-  );
-}
-
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
 
@@ -39,29 +29,32 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
+        tabBarActiveTintColor: COLORS.primaryDark,
+        tabBarInactiveTintColor: COLORS.textTertiary,
+        tabBarLabelStyle: {
+          fontFamily: FONTS.medium,
+          fontSize: ms(11),
+          marginTop: -2,
+          marginBottom: 4,
+        },
         tabBarStyle: {
-          position: "absolute",
-          left: SPACING.base,
-          right: SPACING.base,
-          bottom: Math.max(insets.bottom, SPACING.md),
-          height: ms(62),
-          paddingTop: 0,
-          paddingBottom: 0,
-          borderRadius: RADIUS.pill,
-          borderTopWidth: 0,
           backgroundColor: COLORS.surface,
+          borderTopWidth: 1,
+          borderTopColor: COLORS.border,
+          height: ms(58) + insets.bottom,
+          paddingTop: 8,
+          paddingBottom: insets.bottom || 8,
           ...Platform.select({
             ios: {
-              shadowColor: "#16211D",
-              shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: 0.12,
-              shadowRadius: 24,
+              shadowColor: "#1E241F",
+              shadowOffset: { width: 0, height: -2 },
+              shadowOpacity: 0.05,
+              shadowRadius: 10,
             },
-            android: { elevation: 10 },
+            android: { elevation: 8 },
           }),
         },
-        tabBarItemStyle: { height: ms(62) },
+        tabBarItemStyle: { paddingTop: 2 },
       }}
     >
       {TABS.map((tab) => (
@@ -70,13 +63,8 @@ export default function TabLayout() {
           name={tab.name}
           options={{
             title: tab.title,
-            tabBarIcon: ({ focused }) => (
-              <TabIcon
-                focused={focused}
-                icon={tab.icon}
-                iconOutline={tab.iconOutline}
-                title={tab.title}
-              />
+            tabBarIcon: ({ focused, color }) => (
+              <Ionicons name={focused ? tab.icon : tab.iconOutline} size={ms(23)} color={color} />
             ),
           }}
         />
@@ -84,18 +72,3 @@ export default function TabLayout() {
     </Tabs>
   );
 }
-
-const styles = StyleSheet.create({
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: SPACING.base,
-    height: ms(42),
-    borderRadius: RADIUS.pill,
-    minWidth: ms(46),
-  },
-  itemActive: { backgroundColor: COLORS.primaryDark },
-  itemLabel: { ...TYPE.caption, color: COLORS.white },
-});

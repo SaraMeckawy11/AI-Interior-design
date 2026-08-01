@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(18),
     marginLeft: moderateScale(12),
     borderWidth: moderateScale(1),
-    borderColor: "#ccc",
+    borderColor: COLORS.border,
   },
   modalButtonRowP: {
     flexDirection: 'row',

@@ -88,6 +88,12 @@ Redeploy `backend/`. Changes:
 * `POST /api/designs/walkthrough` is **new**: it stores a frame captured from
   the on-device 3D walkthrough. It uploads to Cloudinary and saves a `Design`,
   and it consumes **no** design credits or coins, because no inference runs.
+* The walkthrough's **"Render with AI"** button goes through the normal
+  `POST /api/designs` route — it sends the live 3D frame with
+  `preserveGeometry: true` and a very low `creativity`, so the model only
+  resolves materials and lighting over the geometry the user built. That means
+  it *does* consume a design credit, and the result is saved to the collection
+  by that route, exactly like any other generation.
 * `Design` now persists `imagePublicId` / `generatedImagePublicId`. These were
   always being set by the routes but were missing from the schema, so Mongoose
   silently dropped them and deletion fell back to parsing the URL — which is

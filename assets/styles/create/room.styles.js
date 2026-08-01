@@ -104,7 +104,7 @@ manualInput: {
     paddingVertical: verticalScale(6),
     paddingHorizontal: moderateScale(16),
     borderRadius: moderateScale(16),
-    borderColor: '#ccc',
+    borderColor: COLORS.border,
     borderWidth: moderateScale(1),
   },
 
@@ -112,7 +112,7 @@ manualCard: {
     marginTop: verticalScale(6),
     padding: moderateScale(8),
     // borderWidth: 1,
-    // borderColor: '#ccc',
+    // borderColor: COLORS.border,
     // borderRadius: 10,
   },
 

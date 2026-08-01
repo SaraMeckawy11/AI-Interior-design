@@ -16,34 +16,33 @@ import { RADIUS, TYPE } from "../../constants/theme";
 /**
  * Measured floor-plan canvas.
  *
- * The web studio derives its scale by detecting rooms in an uploaded plan and
- * estimating pixels-per-metre from the median room area. On a phone, drawing on
- * a *metric grid* is both easier and far more accurate: every cell is a fixed
- * 0.5 m, so the geometry handed to the 3D renderer is already correctly scaled
- * and doors/windows come out at believable widths without any estimation.
+ * The web studio detects rooms in an uploaded plan and estimates
+ * pixels-per-metre from the median room area. On a phone, drawing on a *metric
+ * grid* is both easier and more accurate: every cell is a fixed 0.5 m, so the
+ * geometry handed to the 3D renderer is already correctly scaled and openings
+ * come out at believable widths with no estimation step.
  *
- * Coordinates are stored in canvas pixels (matching what the renderer expects)
- * and converted to metres purely for the on-screen labels.
+ * Coordinates are stored in canvas pixels (what the renderer expects) and
+ * converted to metres only for on-screen labels.
  */
 
 export const PLAN_WIDTH_METERS = 12;
 export const GRID_METERS = 0.5;
 
 export const OPENING_SPECS = {
-  door: { meters: 0.9, color: "#B0653F", label: "Door" },
-  window: { meters: 1.2, color: "#2F6497", label: "Window" },
-  balcony: { meters: 1.8, color: "#2C7A57", label: "Balcony" },
+  door: { meters: 0.9, color: "#AE6740", label: "Door" },
+  window: { meters: 1.2, color: "#2C6089", label: "Window" },
+  balcony: { meters: 1.8, color: "#2E7350", label: "Balcony" },
 };
 
-const ROOM_FILLS = [
-  "rgba(76,124,101,0.16)",
-  "rgba(176,101,63,0.16)",
-  "rgba(47,100,151,0.15)",
-  "rgba(169,118,42,0.16)",
-  "rgba(110,155,133,0.18)",
-  "rgba(140,110,150,0.15)",
+export const ROOM_TINTS = [
+  { fill: "rgba(92,138,114,0.18)", stroke: "#41715A" },
+  { fill: "rgba(174,103,64,0.18)", stroke: "#8D5031" },
+  { fill: "rgba(44,96,137,0.16)", stroke: "#2C6089" },
+  { fill: "rgba(156,111,34,0.18)", stroke: "#9C6F22" },
+  { fill: "rgba(127,160,136,0.22)", stroke: "#5C8A72" },
+  { fill: "rgba(134,106,146,0.16)", stroke: "#6D5578" },
 ];
-const ROOM_STROKES = ["#4C7C65", "#B0653F", "#2F6497", "#A9762A", "#6E9B85", "#8C6E96"];
 
 export function polygonArea(points) {
   let twice = 0;
@@ -74,6 +73,16 @@ export function polygonCentroid(points) {
   return [x / (3 * twice), y / (3 * twice)];
 }
 
+export function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (yi > point[1] !== yj > point[1] && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi + 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 function projectOnSegment(point, start, end) {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
@@ -85,8 +94,8 @@ function projectOnSegment(point, start, end) {
 }
 
 /**
- * Place an opening of `widthPx` centred on the wall nearest to `tap`, clamped so
- * it always leaves a buildable return at each end of the wall.
+ * Place an opening of `widthPx` centred on the wall nearest to `tap`, clamped
+ * so it always leaves a buildable return at each end of the wall.
  */
 export function openingOnNearestWall(tap, rooms, widthPx, maxDistance) {
   let best = null;
@@ -115,17 +124,20 @@ export default function PlanCanvas({
   height,
   tool,
   rooms,
+  roomLabels = [],
   openings,
   draft,
   snapToGrid = true,
+  selectedRoom,
   onAddVertex,
   onCloseRoom,
+  onAddRoom,
   onAddOpening,
   onRemoveOpening,
   onSelectRoom,
-  selectedRoom,
 }) {
   const [pointer, setPointer] = useState(null);
+  const [rectDraft, setRectDraft] = useState(null);
   const gesture = useRef({ x: 0, y: 0, moved: 0, startedAt: 0 });
 
   const pixelsPerMeter = width / PLAN_WIDTH_METERS;
@@ -134,11 +146,13 @@ export default function PlanCanvas({
   const snap = (value) => (snapToGrid ? Math.round(value / gridStep) * gridStep : value);
   const clampX = (value) => Math.max(0, Math.min(width, value));
   const clampY = (value) => Math.max(0, Math.min(height, value));
+  const snapPoint = (point) => [clampX(snap(point[0])), clampY(snap(point[1]))];
+  const metres = (pixels) => pixels / pixelsPerMeter;
 
   const handleTap = (x, y) => {
     const raw = [clampX(x), clampY(y)];
     if (tool === "room") {
-      const point = [clampX(snap(raw[0])), clampY(snap(raw[1]))];
+      const point = snapPoint(raw);
       if (draft.length >= 3) {
         const first = draft[0];
         if (Math.hypot(point[0] - first[0], point[1] - first[1]) <= gridStep * 0.9) {
@@ -149,7 +163,7 @@ export default function PlanCanvas({
       onAddVertex?.(point);
       return;
     }
-    if (tool === "select") {
+    if (tool === "select" || tool === "rect") {
       const hit = rooms.findIndex((room) => pointInPolygon(raw, room));
       if (hit >= 0) onSelectRoom?.(hit);
       return;
@@ -157,7 +171,7 @@ export default function PlanCanvas({
     const spec = OPENING_SPECS[tool];
     if (!spec) return;
     const existing = openings.findIndex(
-      (opening) => opening.kind === tool && projectOnSegment(raw, opening.points[0], opening.points[1]).distance < gridStep * 0.7,
+      (opening) => projectOnSegment(raw, opening.points[0], opening.points[1]).distance < gridStep * 0.7,
     );
     if (existing >= 0) {
       onRemoveOpening?.(existing);
@@ -176,40 +190,75 @@ export default function PlanCanvas({
           const { locationX, locationY } = event.nativeEvent;
           gesture.current = { x: locationX, y: locationY, moved: 0, startedAt: Date.now() };
           setPointer([clampX(locationX), clampY(locationY)]);
+          if (tool === "rect") setRectDraft({ from: snapPoint([locationX, locationY]), to: snapPoint([locationX, locationY]) });
         },
         onPanResponderMove: (event, state) => {
           gesture.current.moved = Math.abs(state.dx) + Math.abs(state.dy);
           const { locationX, locationY } = event.nativeEvent;
           setPointer([clampX(locationX), clampY(locationY)]);
+          if (tool === "rect") {
+            setRectDraft((current) => (current ? { ...current, to: snapPoint([locationX, locationY]) } : current));
+          }
         },
         onPanResponderRelease: (event) => {
           const { locationX, locationY } = event.nativeEvent;
           const quick = Date.now() - gesture.current.startedAt < 700;
-          if (gesture.current.moved < 10 && quick) handleTap(locationX, locationY);
+          if (tool === "rect" && rectDraft && gesture.current.moved >= 10) {
+            const [x1, y1] = rectDraft.from;
+            const [x2, y2] = snapPoint([locationX, locationY]);
+            const minSide = gridStep * 1.5;
+            if (Math.abs(x2 - x1) >= minSide && Math.abs(y2 - y1) >= minSide) {
+              onAddRoom?.([
+                [Math.min(x1, x2), Math.min(y1, y2)],
+                [Math.max(x1, x2), Math.min(y1, y2)],
+                [Math.max(x1, x2), Math.max(y1, y2)],
+                [Math.min(x1, x2), Math.max(y1, y2)],
+              ]);
+            }
+          } else if (gesture.current.moved < 10 && quick) {
+            handleTap(locationX, locationY);
+          }
+          setRectDraft(null);
           setPointer(null);
         },
-        onPanResponderTerminate: () => setPointer(null),
+        onPanResponderTerminate: () => {
+          setRectDraft(null);
+          setPointer(null);
+        },
       }),
     // Recreated whenever the drawing context changes so the closure never
     // captures stale rooms/draft state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tool, rooms, openings, draft, snapToGrid, width, height],
+    [tool, rooms, openings, draft, snapToGrid, width, height, rectDraft],
   );
 
   const gridLines = useMemo(() => {
     const lines = [];
-    for (let x = 0; x <= width + 0.5; x += gridStep) lines.push({ key: `v${x}`, x1: x, y1: 0, x2: x, y2: height, major: Math.round(x / gridStep) % 2 === 0 });
-    for (let y = 0; y <= height + 0.5; y += gridStep) lines.push({ key: `h${y}`, x1: 0, y1: y, x2: width, y2: y, major: Math.round(y / gridStep) % 2 === 0 });
+    for (let x = 0; x <= width + 0.5; x += gridStep) {
+      lines.push({ key: `v${Math.round(x)}`, x1: x, y1: 0, x2: x, y2: height, major: Math.round(x / gridStep) % 2 === 0 });
+    }
+    for (let y = 0; y <= height + 0.5; y += gridStep) {
+      lines.push({ key: `h${Math.round(y)}`, x1: 0, y1: y, x2: width, y2: y, major: Math.round(y / gridStep) % 2 === 0 });
+    }
     return lines;
   }, [gridStep, height, width]);
 
-  const snappedPointer = pointer && tool === "room" ? [snap(pointer[0]), snap(pointer[1])] : pointer;
+  const snappedPointer = pointer && (tool === "room" || tool === "rect") ? snapPoint(pointer) : pointer;
+
+  const rectPreview = rectDraft
+    ? {
+        x: Math.min(rectDraft.from[0], rectDraft.to[0]),
+        y: Math.min(rectDraft.from[1], rectDraft.to[1]),
+        w: Math.abs(rectDraft.to[0] - rectDraft.from[0]),
+        h: Math.abs(rectDraft.to[1] - rectDraft.from[1]),
+      }
+    : null;
 
   return (
     <View style={[styles.canvas, { width, height }]} {...responder.panHandlers}>
       <Svg width={width} height={height}>
         <Rect x={0} y={0} width={width} height={height} fill={COLORS.surface} />
-        <G opacity={0.55}>
+        <G opacity={0.6}>
           {gridLines.map((line) => (
             <Line
               key={line.key}
@@ -217,8 +266,8 @@ export default function PlanCanvas({
               y1={line.y1}
               x2={line.x2}
               y2={line.y2}
-              stroke={line.major ? COLORS.borderStrong : COLORS.border}
-              strokeWidth={line.major ? 1 : 0.6}
+              stroke={line.major ? COLORS.border : COLORS.surfaceSunken}
+              strokeWidth={line.major ? 1 : 0.75}
             />
           ))}
         </G>
@@ -226,33 +275,21 @@ export default function PlanCanvas({
         {rooms.map((room, index) => {
           const centroid = polygonCentroid(room);
           const areaMeters = polygonArea(room) / (pixelsPerMeter * pixelsPerMeter);
+          const tint = ROOM_TINTS[index % ROOM_TINTS.length];
           const active = selectedRoom === index;
           return (
             <G key={`room-${index}`}>
               <Polygon
                 points={room.map((point) => point.join(",")).join(" ")}
-                fill={ROOM_FILLS[index % ROOM_FILLS.length]}
-                stroke={ROOM_STROKES[index % ROOM_STROKES.length]}
+                fill={tint.fill}
+                stroke={tint.stroke}
                 strokeWidth={active ? 4 : 2.5}
                 strokeLinejoin="round"
               />
-              <SvgText
-                x={centroid[0]}
-                y={centroid[1] - 2}
-                fill={COLORS.textPrimary}
-                fontSize={11}
-                fontWeight="600"
-                textAnchor="middle"
-              >
-                {`Room ${index + 1}`}
+              <SvgText x={centroid[0]} y={centroid[1] - 1} fill={COLORS.textPrimary} fontSize={11.5} fontWeight="600" textAnchor="middle">
+                {roomLabels[index] || `Room ${index + 1}`}
               </SvgText>
-              <SvgText
-                x={centroid[0]}
-                y={centroid[1] + 12}
-                fill={COLORS.textSecondary}
-                fontSize={10}
-                textAnchor="middle"
-              >
+              <SvgText x={centroid[0]} y={centroid[1] + 13} fill={COLORS.textSecondary} fontSize={10} textAnchor="middle">
                 {`${areaMeters.toFixed(1)} m²`}
               </SvgText>
             </G>
@@ -262,53 +299,111 @@ export default function PlanCanvas({
         {openings.map((opening, index) => {
           const spec = OPENING_SPECS[opening.kind] || OPENING_SPECS.door;
           return (
-            <Line
-              key={`opening-${index}`}
-              x1={opening.points[0][0]}
-              y1={opening.points[0][1]}
-              x2={opening.points[1][0]}
-              y2={opening.points[1][1]}
-              stroke={spec.color}
-              strokeWidth={7}
-              strokeLinecap="round"
-            />
+            <G key={`opening-${index}`}>
+              <Line
+                x1={opening.points[0][0]}
+                y1={opening.points[0][1]}
+                x2={opening.points[1][0]}
+                y2={opening.points[1][1]}
+                stroke={COLORS.surface}
+                strokeWidth={9}
+                strokeLinecap="round"
+              />
+              <Line
+                x1={opening.points[0][0]}
+                y1={opening.points[0][1]}
+                x2={opening.points[1][0]}
+                y2={opening.points[1][1]}
+                stroke={spec.color}
+                strokeWidth={5}
+                strokeLinecap="round"
+              />
+            </G>
           );
         })}
+
+        {rectPreview && (
+          <G>
+            <Rect
+              x={rectPreview.x}
+              y={rectPreview.y}
+              width={rectPreview.w}
+              height={rectPreview.h}
+              fill="rgba(92,138,114,0.16)"
+              stroke={COLORS.primaryDark}
+              strokeWidth={2.5}
+              strokeDasharray="8 5"
+            />
+            <SvgText
+              x={rectPreview.x + rectPreview.w / 2}
+              y={rectPreview.y + rectPreview.h / 2 + 4}
+              fill={COLORS.primaryDark}
+              fontSize={12}
+              fontWeight="600"
+              textAnchor="middle"
+            >
+              {`${metres(rectPreview.w).toFixed(1)} × ${metres(rectPreview.h).toFixed(1)} m`}
+            </SvgText>
+          </G>
+        )}
 
         {draft.length > 0 && (
           <G>
             <Polyline
-              points={[...draft, ...(snappedPointer && tool === "room" ? [snappedPointer] : [])]
-                .map((point) => point.join(","))
-                .join(" ")}
+              points={[...draft, ...(snappedPointer && tool === "room" ? [snappedPointer] : [])].map((point) => point.join(",")).join(" ")}
               fill="none"
               stroke={COLORS.primaryDark}
               strokeWidth={2.5}
-              strokeDasharray="7 5"
+              strokeDasharray="8 5"
               strokeLinejoin="round"
             />
-            {draft.map((point, index) => (
-              <Circle
-                key={`draft-${index}`}
-                cx={point[0]}
-                cy={point[1]}
-                r={index === 0 ? 7 : 4.5}
-                fill={index === 0 ? COLORS.primaryDark : COLORS.surface}
-                stroke={COLORS.primaryDark}
-                strokeWidth={2}
-              />
-            ))}
+            {draft.map((point, index) => {
+              const next = draft[index + 1];
+              return (
+                <G key={`draft-${index}`}>
+                  {next && (
+                    <SvgText
+                      x={(point[0] + next[0]) / 2}
+                      y={(point[1] + next[1]) / 2 - 6}
+                      fill={COLORS.primaryDark}
+                      fontSize={10}
+                      fontWeight="600"
+                      textAnchor="middle"
+                    >
+                      {`${metres(Math.hypot(next[0] - point[0], next[1] - point[1])).toFixed(1)} m`}
+                    </SvgText>
+                  )}
+                  <Circle
+                    cx={point[0]}
+                    cy={point[1]}
+                    r={index === 0 ? 7.5 : 4.5}
+                    fill={index === 0 ? COLORS.primaryDark : COLORS.surface}
+                    stroke={COLORS.primaryDark}
+                    strokeWidth={2}
+                  />
+                </G>
+              );
+            })}
           </G>
         )}
 
         {snappedPointer && (
-          <G opacity={0.9}>
-            <Line x1={snappedPointer[0]} y1={0} x2={snappedPointer[0]} y2={height} stroke={COLORS.accent} strokeWidth={0.8} strokeDasharray="4 6" />
-            <Line x1={0} y1={snappedPointer[1]} x2={width} y2={snappedPointer[1]} stroke={COLORS.accent} strokeWidth={0.8} strokeDasharray="4 6" />
-            <Circle cx={snappedPointer[0]} cy={snappedPointer[1]} r={6} fill="none" stroke={COLORS.accent} strokeWidth={2} />
+          <G opacity={0.85}>
+            <Line x1={snappedPointer[0]} y1={0} x2={snappedPointer[0]} y2={height} stroke={COLORS.accent} strokeWidth={0.9} strokeDasharray="4 6" />
+            <Line x1={0} y1={snappedPointer[1]} x2={width} y2={snappedPointer[1]} stroke={COLORS.accent} strokeWidth={0.9} strokeDasharray="4 6" />
+            <Circle cx={snappedPointer[0]} cy={snappedPointer[1]} r={6.5} fill="none" stroke={COLORS.accent} strokeWidth={2} />
           </G>
         )}
       </Svg>
+
+      {rooms.length === 0 && draft.length === 0 && !rectDraft && (
+        <View style={styles.empty} pointerEvents="none">
+          <Text style={styles.emptyTitle}>
+            {tool === "rect" ? "Drag to draw a room" : "Tap to place each corner"}
+          </Text>
+          <Text style={styles.emptyBody}>Each square is half a metre</Text>
+        </View>
+      )}
 
       <View style={styles.scaleBadge} pointerEvents="none">
         <View style={[styles.scaleBar, { width: gridStep * 2 }]} />
@@ -316,16 +411,6 @@ export default function PlanCanvas({
       </View>
     </View>
   );
-}
-
-function pointInPolygon(point, polygon) {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [xi, yi] = polygon[i];
-    const [xj, yj] = polygon[j];
-    if (yi > point[1] !== yj > point[1] && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi + 1e-9) + xi) inside = !inside;
-  }
-  return inside;
 }
 
 const styles = StyleSheet.create({
@@ -336,6 +421,14 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     backgroundColor: COLORS.surface,
   },
+  empty: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  emptyTitle: { ...TYPE.bodyStrong, color: COLORS.textSecondary },
+  emptyBody: { ...TYPE.caption, color: COLORS.textTertiary },
   scaleBadge: {
     position: "absolute",
     left: 10,
@@ -343,7 +436,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "rgba(255,255,255,0.9)",
+    backgroundColor: "rgba(255,255,255,0.92)",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: RADIUS.pill,

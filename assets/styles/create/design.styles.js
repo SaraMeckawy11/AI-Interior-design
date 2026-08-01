@@ -102,7 +102,7 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(6),
     padding: verticalScale(8),
     // borderWidth: 1,
-    // borderColor: '#ccc',
+    // borderColor: COLORS.border,
     // borderRadius: 10,
   },
   manualInput: {
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(6),
     paddingHorizontal: moderateScale(16),
     borderRadius: moderateScale(16),
-    borderColor: '#ccc',
+    borderColor: COLORS.border,
     borderWidth: moderateScale(1),
   },
   addButton: {

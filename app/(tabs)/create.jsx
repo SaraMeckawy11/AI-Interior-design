@@ -32,6 +32,16 @@ const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
   requestNonPersonalizedAdsOnly: false,
 });
 
+/**
+ * Three entry points, not four.
+ *
+ * "Floor Plan" used to sit here as its own card, but from the user's point of
+ * view it answers the same question the walkthrough does — "I have a plan, show
+ * me the space". The route still exists and is offered inside the walkthrough's
+ * first step for anyone starting from a photo of a plan; pulling it out of the
+ * hub keeps the top level to one clear choice per starting material: a room
+ * photo, an outdoor photo, or a plan.
+ */
 const CARDS = [
   {
     title: "Interior Design",
@@ -50,20 +60,12 @@ const CARDS = [
     iconColor: COLORS.accentStrong,
   },
   {
-    title: "Floor Plan",
-    description: "Turn a drawn or uploaded plan into a furnished visualisation.",
-    icon: "grid-outline",
-    route: "/create/plan",
-    tint: COLORS.infoSoft,
-    iconColor: COLORS.info,
-  },
-  {
     title: "3D Walkthrough",
-    description: "Trace your home to scale and walk through it in real time.",
+    description: "Draw your home to scale, walk through it, then render it with AI.",
     icon: "cube-outline",
     route: "/create/walkthrough",
-    tint: COLORS.successSoft,
-    iconColor: COLORS.success,
+    tint: COLORS.infoSoft,
+    iconColor: COLORS.info,
     badge: "New",
   },
 ];
@@ -155,8 +157,7 @@ export default function Create() {
     <View style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        // Clears the floating tab bar (62pt pill + its bottom offset).
-        contentContainerStyle={{ paddingBottom: ms(110) }}
+        contentContainerStyle={{ paddingBottom: SPACING.xxl }}
       >
         <Animated.View style={{ opacity: reveal }}>
           <LinearGradient

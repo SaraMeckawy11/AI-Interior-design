@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(24),
   },
   buttonText: {
-    color:COLORS.background,
+    color: COLORS.white,
     fontWeight: '600',
     fontSize: moderateScale(15),
   },
@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(8),
     paddingHorizontal: moderateScale(16),
     borderRadius: moderateScale(16),
-    borderColor: '#ccc',
+    borderColor: COLORS.border,
     borderWidth: 1,
   },
 

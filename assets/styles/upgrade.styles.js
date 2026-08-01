@@ -89,13 +89,13 @@ export default StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     fontWeight: '500',
-    color: '#A084E8',
+    color: COLORS.accent,
   },
   bestValueBadge: {
     position: 'absolute',
     top: -8,
     right: -8,
-    backgroundColor: '#A084E8',
+    backgroundColor: COLORS.accent,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
@@ -124,7 +124,7 @@ export default StyleSheet.create({
     marginTop: verticalScale(14),
     fontSize: 12,
     fontWeight: '400',
-    color: '#777',
+    color: COLORS.textSecondary,
   },
   cardInteractive: {
     backgroundColor: COLORS.inputBackground,
@@ -137,7 +137,7 @@ export default StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   cardDestructive: {
-    backgroundColor: '#fff5f5',
+    backgroundColor: COLORS.dangerSoft,
     flexDirection: 'row',
     padding: 14,
     borderRadius: 12,
@@ -189,7 +189,7 @@ export default StyleSheet.create({
   unsubscribedText: {
     fontSize: 14,
     fontWeight: '400',
-    color: '#666',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 16,
@@ -220,26 +220,26 @@ export default StyleSheet.create({
   cardSubtitle: {
     fontSize: 14,
     fontWeight: '400',
-    color: '#666',
+    color: COLORS.textSecondary,
     marginTop: 3,
   },
   cardSmall: {
     fontSize: 12,
     fontWeight: '400',
-    color: '#777',
+    color: COLORS.textSecondary,
     marginTop: 2,
   },
   warningBox: {
-  backgroundColor: '#fff5f5',
+  backgroundColor: COLORS.dangerSoft,
   padding: 12,
   borderRadius: 8,
   marginBottom: 20,
-  borderColor: '#e74c3c',
+  borderColor: COLORS.danger,
   borderWidth: 1,
 },
 
 warningTitle: {
-  color: '#e74c3c',
+  color: COLORS.danger,
   fontWeight: 'bold',
   fontSize: 16,
   marginBottom: 4,
@@ -338,7 +338,7 @@ coinValue: {
 
 coinSubtitle: {
   fontSize: 14,
-  color: '#666',
+  color: COLORS.textSecondary,
   textAlign: 'center',
   marginBottom: verticalScale(12),
 },

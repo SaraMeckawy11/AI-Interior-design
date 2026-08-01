@@ -14,8 +14,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
     padding: moderateScale(16),
-    // Clears the floating tab bar.
-    paddingBottom: moderateScale(96),
+    paddingBottom: moderateScale(8),
   },
   loadingContainer: {
     flex: 1,

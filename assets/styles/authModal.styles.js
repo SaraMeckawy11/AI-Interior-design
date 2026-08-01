@@ -40,7 +40,7 @@ export default StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: 1,
-    borderColor: "#ccc",
+    borderColor: COLORS.border,
     marginBottom: 16,
     position: "relative",
   },
@@ -107,7 +107,7 @@ export default StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: "#ccc",
+    backgroundColor: COLORS.border,
   },
 
   dividerText: {

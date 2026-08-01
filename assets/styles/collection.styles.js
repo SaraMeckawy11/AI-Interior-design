@@ -21,8 +21,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: moderateScale(16),
-    // Clears the floating tab bar so the last card is never trapped under it.
-    paddingBottom: moderateScale(110),
+    paddingBottom: moderateScale(24),
   },
   header: {
     marginBottom: verticalScale(10),

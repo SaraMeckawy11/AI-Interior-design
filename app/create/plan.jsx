@@ -1821,7 +1821,7 @@ export default function PlanEditor() {
                             y1={d.y1}
                             x2={d.x2}
                             y2={d.y2}
-                            stroke={isPendingRemove ? "#EF4444" : "#22C55E"}
+                            stroke={isPendingRemove ? COLORS.danger : COLORS.success}
                             strokeWidth={8}
                             strokeLinecap="round"
                             opacity={isPendingRemove ? 0.55 : 0.95}
@@ -1848,7 +1848,7 @@ export default function PlanEditor() {
                           y1={doorPreview.door.y1}
                           x2={doorPreview.door.x2}
                           y2={doorPreview.door.y2}
-                          stroke="#22C55E"
+                          stroke={COLORS.success}
                           strokeWidth={8}
                           strokeLinecap="round"
                           strokeDasharray="4,4"
@@ -1956,7 +1956,7 @@ export default function PlanEditor() {
                         to green when a snap is active. */}
                     {liveTouch && (() => {
                       const snapping = !!liveTouch.snapType;
-                      const crossColor = snapping ? "#22C55E" : nextColor;
+                      const crossColor = snapping ? COLORS.success : nextColor;
                       const outerR = snapping ? 20 : 18;
                       return (
                         <>
@@ -1969,7 +1969,7 @@ export default function PlanEditor() {
                                 y1={liveTouch.snapTarget.fromY}
                                 x2={liveTouch.x}
                                 y2={liveTouch.y}
-                                stroke="#22C55E"
+                                stroke={COLORS.success}
                                 strokeWidth={1.2}
                                 strokeDasharray="4,4"
                                 opacity={0.7}
@@ -1985,8 +1985,8 @@ export default function PlanEditor() {
                                 cx={liveTouch.snapTarget.x}
                                 cy={liveTouch.snapTarget.y}
                                 r={liveTouch.snapType === "vertex" ? 12 : 8}
-                                fill="#22C55E22"
-                                stroke="#22C55E"
+                                fill={`${COLORS.success}22`}
+                                stroke={COLORS.success}
                                 strokeWidth={1.5}
                               />
                             )}
