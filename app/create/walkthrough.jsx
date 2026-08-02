@@ -1167,6 +1167,7 @@ export default function WalkthroughScreen() {
           onComposition={setComposition}
           onFurnitureChange={updateFurnitureEdit}
           onDiagnostic={setNotice}
+          onNotice={setNotice}
           onExactError={(message) => {
             setExactScene(null);
             setExactSceneError(message || "The exact scene could not be opened. Showing the offline preview.");
@@ -1662,6 +1663,7 @@ function WalkthroughStage({
   onFurnitureChange,
   onDiagnostic,
   onExactError,
+  onNotice,
   onChangeMode,
   onToggleNight,
   onFocusRoom,
@@ -1920,28 +1922,39 @@ function WalkthroughStage({
         )}
 
         <View style={styles.actionBar}>
-          <View style={styles.sceneBadge}>
-            <View style={styles.sceneDot} />
+          {/*
+            Which renderer produced what is on screen.
+
+            Livinai_web shows the Interior_Plan scene exported by its Python
+            renderer; the style-aware procedural families are its *preview*
+            renderer, used only for orbit mode. When the Interior_Plan service
+            is unreachable this app falls back to that preview, and the two are
+            easy to mistake for each other — so the badge says which one it is,
+            and tapping it explains why.
+          */}
+          <Pressable
+            style={styles.sceneBadge}
+            disabled={!exactSceneError}
+            onPress={() => onNotice(
+              `${exactSceneError} Livinai is showing its preview furniture instead of the `
+              + "Interior_Plan models. Point INTERIOR_PLAN_RENDERER_URL at the Livinai_web "
+              + "renderer to get the same furniture as the web app.",
+            )}
+          >
+            <View style={[styles.sceneDot, !sceneInfo?.exact && styles.sceneDotPreview]} />
             <Text style={styles.sceneBadgeText} numberOfLines={1}>
               {sceneInfo?.exact
-                ? `${sceneInfo.objects} exact Livinai pieces`
+                ? `${sceneInfo.objects} Interior_Plan pieces`
                 : exactSceneLoading
-                  ? "Syncing exact Livinai scene…"
+                  ? "Syncing Interior_Plan scene…"
                   : sceneInfo
-                    // Say which furniture is actually on screen. "12 pieces · 4
-                    // Livinai models" and "12 pieces · procedural only" look
-                    // identical in the viewport, and that ambiguity is exactly
-                    // what makes a catalogue that failed to load undiagnosable.
-                    ? `${sceneInfo.objects} pieces · ${
-                        sceneInfo.catalogUsed
-                          ? `${sceneInfo.catalogUsed} Livinai models`
-                          : sceneInfo.catalogRequested
-                            ? "procedural only"
-                            : "procedural"
-                      }`
+                    ? `Preview furniture · ${sceneInfo.objects} pieces`
                     : "Building scene…"}
             </Text>
-          </View>
+            {!!exactSceneError && !sceneInfo?.exact && (
+              <Ionicons name="information-circle-outline" size={14} color={COLORS.accentStrong} />
+            )}
+          </Pressable>
           <Pressable style={styles.aiButton} onPress={() => onSetPanel(panel === "ai" ? null : "ai")}>
             <Ionicons name="sparkles" size={17} color={COLORS.white} />
             <Text style={styles.aiButtonText}>Render</Text>
@@ -2863,6 +2876,7 @@ const styles = StyleSheet.create({
 
   sceneBadge: { flex: 1, minWidth: 0, height: ms(44), flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.94)", ...SHADOW.sm },
   sceneDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.success },
+  sceneDotPreview: { backgroundColor: COLORS.accentStrong },
   sceneBadgeText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, fontSize: 10 },
 
   // Snapshot sheet
