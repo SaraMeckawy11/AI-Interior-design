@@ -24,16 +24,22 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import PlanCanvas, {
   DEFAULT_CURVE_SETTINGS,
   GRID_METERS,
+  OPENING_MIN_METERS,
   OPENING_SPECS,
   OPENING_VARIANTS,
   PLAN_HEIGHT_METERS,
+  PLAN_PIXELS_PER_METER,
   PLAN_WIDTH_METERS,
   ROOM_TINTS,
+  SHEET_WIDTH,
   buildCurveGeometry,
   openingOnNearestWall,
   openingDefaults,
+  openingWidthMeters,
   polygonArea,
+  polygonBounds,
   snapOpeningToNearestWall,
+  variantForWidth,
 } from "../../components/walkthrough/PlanCanvas";
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
@@ -88,24 +94,27 @@ const MAX_SAVED_PROJECTS = 12;
 
 const createWalkthroughProjectId = () => `walkthrough-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+// Ordered the way a plan is actually built: rooms first, then openings, then
+// corrections. "Edit" used to be armed on an empty canvas, so a first-time user
+// could drag all over the grid and nothing would ever appear.
 const TOOLS = [
-  { key: "pan", icon: "hand-left-outline", label: "Pan & zoom" },
-  { key: "select", icon: "move-outline", label: "Edit" },
-  { key: "rect", icon: "square-outline", label: "Quick room" },
+  { key: "rect", icon: "square-outline", label: "Room" },
   { key: "room", icon: "shapes-outline", label: "Outline" },
   { key: "door", icon: "log-in-outline", label: "Door" },
   { key: "window", icon: "browsers-outline", label: "Window" },
   { key: "balcony", icon: "sunny-outline", label: "Balcony" },
+  { key: "select", icon: "move-outline", label: "Edit" },
+  { key: "pan", icon: "hand-left-outline", label: "Pan" },
 ];
 
 const TOOL_HINTS = {
-  pan: "Drag to move around the plan. Pinch or use + and − to zoom at any time.",
-  rect: "Drag on the grid to draw a rectangular room.",
-  room: "Tap each corner, then tap the first corner again—or use Finish room—to close it.",
-  door: "Tap for a standard door, or drag along a wall for a wider door or open passage.",
-  window: "Tap for a standard window, or drag along a wall to set its exact length.",
-  balcony: "Tap for a balcony door, or drag along an outside wall for a wide slider.",
-  select: "Select a room or opening, then drag the shape or one of its handles.",
+  pan: "Drag to move around the plan. Two fingers pan and pinch at any time, in any tool.",
+  rect: "Drag on the grid to draw a rectangular room. The size in metres is shown as you drag.",
+  room: "Tap each corner, then tap the first corner again — or use Finish room — to close it.",
+  door: "Tap a wall for a standard door, or drag along it for a wider door or open passage.",
+  window: "Tap a wall for a standard window, or drag along it to set its exact length.",
+  balcony: "Tap an outside wall for a balcony door, or drag along it for a wide slider.",
+  select: "Tap a room or opening, then drag the shape or one of its handles to adjust it.",
 };
 
 const VIEW_MODES = [
@@ -129,11 +138,12 @@ export default function WalkthroughScreen() {
 
   // ── Plan state ───────────────────────────────────────────────────────────
   const [stage, setStage] = useState(0);
-  const [tool, setTool] = useState("select");
+  const [tool, setTool] = useState("rect");
   const [canvasFocus, setCanvasFocus] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [roomEdgeType, setRoomEdgeType] = useState("straight");
   const [curveSettings, setCurveSettings] = useState(DEFAULT_CURVE_SETTINGS);
+  const [curveControl, setCurveControl] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [openings, setOpenings] = useState([]);
   const [draft, setDraft] = useState([]);
@@ -181,9 +191,18 @@ export default function WalkthroughScreen() {
   const [exactSceneLoading, setExactSceneLoading] = useState(false);
   const [exactSceneError, setExactSceneError] = useState("");
 
-  const canvasWidth = Math.round(LAYOUT.screenWidth - SPACING.md * 2);
-  const canvasHeight = Math.round(canvasWidth * canvasAspect);
-  const pixelsPerMeter = detectedPixelsPerMeter || canvasWidth / PLAN_WIDTH_METERS;
+  // The sheet is the measured drawing surface; the canvas is only the window
+  // onto it. Keeping the sheet device-independent is what makes a room's area
+  // identical on every phone and keeps furniture in proportion to the room.
+  const sheetWidth = SHEET_WIDTH;
+  const sheetHeight = Math.round(sheetWidth * canvasAspect);
+  const canvasWidth = Math.round(canvasFocus ? LAYOUT.screenWidth : LAYOUT.screenWidth - SPACING.md * 2);
+  const canvasHeight = Math.round(
+    canvasFocus
+      ? Math.max(320, LAYOUT.screenHeight * 0.66)
+      : Math.max(280, Math.min(canvasWidth * 1.02, LAYOUT.screenHeight * 0.42)),
+  );
+  const pixelsPerMeter = detectedPixelsPerMeter || PLAN_PIXELS_PER_METER;
 
   const layout = useMemo(
     () =>
@@ -192,11 +211,11 @@ export default function WalkthroughScreen() {
         doors: openings.filter((opening) => opening.kind === "door"),
         windows: openings.filter((opening) => opening.kind === "window"),
         balconies: openings.filter((opening) => opening.kind === "balcony"),
-        width: canvasWidth,
-        height: canvasHeight,
+        width: sheetWidth,
+        height: sheetHeight,
         pixelsPerMeter,
       }),
-    [canvasHeight, canvasWidth, openings, pixelsPerMeter, rooms],
+    [openings, pixelsPerMeter, rooms, sheetHeight, sheetWidth],
   );
 
   const totalArea = useMemo(
@@ -270,12 +289,17 @@ export default function WalkthroughScreen() {
     if (!saved) return;
     const sourceAspect = Number(saved.canvasAspect) || CANVAS_RATIO;
     const restoredAspect = Math.max(sourceAspect, CANVAS_RATIO);
-    const restoredSourceHeight = canvasWidth * sourceAspect;
+    // Geometry is stored as a fraction of the sheet, so a plan drawn on any
+    // phone reopens at exactly the same measured size on any other. Plans saved
+    // before the fixed sheet used the same fractions relative to the device
+    // canvas, and their pixels-per-metre was stored as the same ratio, so they
+    // restore to identical metres without a migration step.
+    const restoredSourceHeight = sheetWidth * sourceAspect;
     const toPixels = saved.coordinateSpace === "normalized"
-      ? (point) => [point[0] * canvasWidth, point[1] * restoredSourceHeight]
-      : (point) => [point[0] * (canvasWidth / PLAN_WIDTH_METERS), point[1] * (canvasWidth / PLAN_WIDTH_METERS)];
+      ? (point) => [point[0] * sheetWidth, point[1] * restoredSourceHeight]
+      : (point) => [point[0] * PLAN_PIXELS_PER_METER, point[1] * PLAN_PIXELS_PER_METER];
     setCanvasAspect(restoredAspect);
-    setDetectedPixelsPerMeter(saved.pixelsPerMeterRatio ? saved.pixelsPerMeterRatio * canvasWidth : null);
+    setDetectedPixelsPerMeter(saved.pixelsPerMeterRatio ? saved.pixelsPerMeterRatio * sheetWidth : null);
     setPlanImage(saved.planImage || null);
     setRooms((saved.rooms || []).map((room) => room.map(toPixels)));
     setRoomConfigs((saved.roomConfigs || []).map((room) => ({ ...room })));
@@ -291,9 +315,10 @@ export default function WalkthroughScreen() {
     setAiRenders(saved.aiRenders || {});
     setDraft([]);
     setSelection(null);
+    setCurveControl(null);
     setHistory([]);
     setFuture([]);
-  }, [canvasWidth]);
+  }, [sheetWidth]);
 
   useEffect(() => {
     if (restored.current) return undefined;
@@ -323,12 +348,12 @@ export default function WalkthroughScreen() {
   useEffect(() => {
     if (!restored.current || !projectReady || detecting || rendering) return undefined;
     const timer = setTimeout(async () => {
-      const normalize = (point) => [point[0] / canvasWidth, point[1] / canvasHeight];
+      const normalize = (point) => [point[0] / sheetWidth, point[1] / sheetHeight];
       const savedAt = new Date().toISOString();
       const data = {
         coordinateSpace: "normalized",
         canvasAspect,
-        pixelsPerMeterRatio: pixelsPerMeter / canvasWidth,
+        pixelsPerMeterRatio: pixelsPerMeter / sheetWidth,
         planImage,
         rooms: rooms.map((room) => room.map(normalize)),
         roomConfigs,
@@ -368,7 +393,7 @@ export default function WalkthroughScreen() {
       }
     }, 700);
     return () => clearTimeout(timer);
-  }, [aiRenders, canvasAspect, canvasHeight, canvasWidth, detecting, furnitureEdits, openings, pixelsPerMeter, planImage, projectId, projectReady, projectTitle, rendering, roomConfigs, rooms, saveTick, selectedRoom, settings, stage]);
+  }, [aiRenders, canvasAspect, detecting, furnitureEdits, openings, pixelsPerMeter, planImage, projectId, projectReady, projectTitle, rendering, roomConfigs, rooms, saveTick, selectedRoom, settings, sheetHeight, sheetWidth, stage]);
 
   // ── Plan editing ─────────────────────────────────────────────────────────
   const configFor = (index) => ({
@@ -435,7 +460,23 @@ export default function WalkthroughScreen() {
     if (polygon.length < 3) return;
     commitRoom(polygon);
     setDraft([]);
+    setCurveControl(null);
   }, [commitRoom, curveSettings, draft, roomEdgeType]);
+
+  /**
+   * Commit the rounded wall that is currently previewed. Staging the curve —
+   * pick the far end, shape it, then apply — mirrors the web studio instead of
+   * baking in whatever the sliders happened to say at the moment of the tap.
+   */
+  const applyCurve = useCallback(() => {
+    if (!curveControl || !draft.length) return;
+    const geometry = buildCurveGeometry(draft[draft.length - 1], curveControl, curveSettings);
+    if (!geometry) return setCurveControl(null);
+    addCurve(geometry.samples);
+    setCurveControl(null);
+  }, [addCurve, curveControl, curveSettings, draft]);
+
+  const cancelCurve = useCallback(() => setCurveControl(null), []);
 
   const removeRoom = useCallback((index) => {
     rememberPlan();
@@ -457,13 +498,42 @@ export default function WalkthroughScreen() {
           const maxX = Math.max(...room.map((p) => p[0]));
           const minY = Math.min(...room.map((p) => p[1]));
           const maxY = Math.max(...room.map((p) => p[1]));
-          const clampedDx = Math.max(-minX, Math.min(canvasWidth - maxX, dx));
-          const clampedDy = Math.max(-minY, Math.min(canvasHeight - maxY, dy));
+          const clampedDx = Math.max(-minX, Math.min(sheetWidth - maxX, dx));
+          const clampedDy = Math.max(-minY, Math.min(sheetHeight - maxY, dy));
           return room.map(([x, y]) => [x + clampedDx, y + clampedDy]);
         }),
       );
     },
-    [canvasHeight, canvasWidth],
+    [sheetHeight, sheetWidth],
+  );
+
+  /**
+   * Resize a room to exact interior dimensions. Rooms drawn by finger are never
+   * quite the size the user meant, and correcting a 4.2 m wall by dragging a
+   * handle on a phone is hopeless — so the numbers are directly editable and the
+   * polygon is scaled about its top-left corner to match.
+   */
+  const resizeRoom = useCallback(
+    (index, widthMeters, depthMeters) => {
+      const room = rooms[index];
+      if (!room?.length) return;
+      const bounds = polygonBounds(room);
+      const targetWidth = Math.max(0.6, Number(widthMeters) || 0) * pixelsPerMeter;
+      const targetDepth = Math.max(0.6, Number(depthMeters) || 0) * pixelsPerMeter;
+      if (bounds.width < 0.01 || bounds.height < 0.01) return;
+      const scaleX = targetWidth / bounds.width;
+      const scaleY = targetDepth / bounds.height;
+      rememberPlan();
+      setRooms((current) => current.map((candidate, candidateIndex) => (
+        candidateIndex === index
+          ? candidate.map(([x, y]) => [
+              Math.max(0, Math.min(sheetWidth, bounds.minX + (x - bounds.minX) * scaleX)),
+              Math.max(0, Math.min(sheetHeight, bounds.minY + (y - bounds.minY) * scaleY)),
+            ])
+          : candidate
+      )));
+    },
+    [pixelsPerMeter, rememberPlan, rooms, sheetHeight, sheetWidth],
   );
 
   const moveVertex = useCallback((index, vertexIndex, point) => {
@@ -513,6 +583,7 @@ export default function WalkthroughScreen() {
   }, [pixelsPerMeter, rooms]);
 
   const undo = useCallback(() => {
+    if (curveControl) return setCurveControl(null);
     if (draft.length) {
       const previousLength = draftStepsRef.current.pop();
       return setDraft((current) => current.slice(0, previousLength ?? Math.max(0, current.length - 1)));
@@ -522,7 +593,7 @@ export default function WalkthroughScreen() {
     setFuture((items) => [currentPlanSnapshot(), ...items].slice(0, 50));
     restorePlanSnapshot(previous);
     setHistory((items) => items.slice(0, -1));
-  }, [currentPlanSnapshot, draft.length, history, restorePlanSnapshot]);
+  }, [currentPlanSnapshot, curveControl, draft.length, history, restorePlanSnapshot]);
 
   const redo = useCallback(() => {
     const next = future[0];
@@ -538,6 +609,7 @@ export default function WalkthroughScreen() {
     setRoomConfigs([]);
     setOpenings([]);
     setDraft([]);
+    setCurveControl(null);
     setSelectedRoom(0);
     setSelection(null);
   }, [openings.length, rememberPlan, rooms.length]);
@@ -560,23 +632,49 @@ export default function WalkthroughScreen() {
     setSelection(null);
   }, [rememberPlan]);
 
-  const applyOpeningPreset = useCallback((index, nextKind, variantLabel) => {
-    const variants = OPENING_VARIANTS[nextKind] || OPENING_VARIANTS.door;
-    const preset = variants.find((item) => item.label === variantLabel) || variants[0];
+  /**
+   * The single place an opening's type, section and width are changed.
+   *
+   * Width is now first-class rather than a side effect of the chosen preset:
+   * switching a door to a balcony keeps the span the user set, and a width can
+   * be typed or stepped to anything the wall will take. That is what makes a
+   * 3 m wall opening possible instead of only door-sized doors.
+   */
+  const editOpening = useCallback((index, changes = {}) => {
     rememberPlan();
     setOpenings((current) => current.map((opening, openingIndex) => {
       if (openingIndex !== index) return opening;
+      const kind = changes.kind || opening.kind;
+      const kindChanged = kind !== opening.kind;
+      const variants = OPENING_VARIANTS[kind] || OPENING_VARIANTS.door;
       const [start, end] = opening.points;
       const midpoint = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
       const length = Math.max(0.001, Math.hypot(end[0] - start[0], end[1] - start[1]));
       const direction = [(end[0] - start[0]) / length, (end[1] - start[1]) / length];
-      const half = (preset.meters * pixelsPerMeter) / 2;
+      const currentMeters = length / pixelsPerMeter;
+
+      // A named variant carries its own width; anything else keeps the width
+      // the opening already has.
+      const preset = changes.variant
+        ? variants.find((item) => item.label === changes.variant) || variants[0]
+        : null;
+      const targetMeters = Math.max(
+        OPENING_MIN_METERS,
+        Number(changes.meters) || (preset ? preset.meters : currentMeters),
+      );
+      const variantLabel = preset
+        ? preset.label
+        : kindChanged || changes.meters !== undefined
+          ? variantForWidth(kind, targetMeters)
+          : opening.variant;
+
+      const half = (targetMeters * pixelsPerMeter) / 2;
       const raw = [
         [midpoint[0] - direction[0] * half, midpoint[1] - direction[1] * half],
         [midpoint[0] + direction[0] * half, midpoint[1] + direction[1] * half],
       ];
-      const points = snapOpeningToNearestWall(raw, rooms, nextKind, pixelsPerMeter) || opening.points;
-      return { ...opening, kind: nextKind, points, ...openingDefaults(nextKind, preset.label) };
+      const points = snapOpeningToNearestWall(raw, rooms, kind, pixelsPerMeter) || opening.points;
+      return { ...opening, kind, points, ...openingDefaults(kind, variantLabel) };
     }));
   }, [pixelsPerMeter, rememberPlan, rooms]);
 
@@ -601,6 +699,7 @@ export default function WalkthroughScreen() {
     setOpenings([]);
     setRoomConfigs([]);
     setDraft([]);
+    setCurveControl(null);
     setSelection(null);
     setSelectedRoom(0);
     setHistory([]);
@@ -636,6 +735,7 @@ export default function WalkthroughScreen() {
     setRooms([]);
     setOpenings([]);
     setDraft([]);
+    setCurveControl(null);
     setRoomConfigs([]);
     setSettings({ ...DEFAULT_WALKTHROUGH_SETTINGS });
     setFurnitureEdits({});
@@ -704,6 +804,7 @@ export default function WalkthroughScreen() {
     setOpenings([]);
     setRoomConfigs([]);
     setDraft([]);
+    setCurveControl(null);
     setSelection(null);
     setSelectedRoom(0);
     setHistory([]);
@@ -732,7 +833,7 @@ export default function WalkthroughScreen() {
       const detectedWidth = Math.max(1, Number(data.width) || sourceWidth);
       const detectedHeight = Math.max(1, Number(data.height) || sourceHeight);
       const detectedAspect = Math.max(CANVAS_RATIO, Math.min(3, detectedHeight / detectedWidth));
-      const displayScale = canvasWidth / detectedWidth;
+      const displayScale = sheetWidth / detectedWidth;
       const toDisplay = (point) => [point[0] * displayScale, point[1] * displayScale];
       const detectedRooms = (data.rooms || []).map((room) => room.map(toDisplay));
       const detectedOpenings = [
@@ -756,7 +857,7 @@ export default function WalkthroughScreen() {
       if (detectionTimeout) clearTimeout(detectionTimeout);
       setDetecting(false);
     }
-  }, [canvasWidth, projectId, token]);
+  }, [projectId, sheetWidth, token]);
 
   const updateRoom = useCallback((index, key, value) => {
     setRoomConfigs((current) => current.map((room, i) => (i === index ? { ...room, [key]: value } : room)));
@@ -779,9 +880,14 @@ export default function WalkthroughScreen() {
   }, []);
 
   const adjustCalculatedArea = useCallback((multiplier) => {
-    setDetectedPixelsPerMeter(Math.max(8, Math.min(canvasWidth, pixelsPerMeter / Math.sqrt(multiplier))));
+    setDetectedPixelsPerMeter(Math.max(10, Math.min(240, pixelsPerMeter / Math.sqrt(multiplier))));
     setFurnitureEdits({});
-  }, [canvasWidth, pixelsPerMeter]);
+  }, [pixelsPerMeter]);
+
+  const resetCalculatedScale = useCallback(() => {
+    setDetectedPixelsPerMeter(null);
+    setFurnitureEdits({});
+  }, []);
 
   // ── Viewer actions ───────────────────────────────────────────────────────
   const changeViewMode = (mode) => {
@@ -1161,43 +1267,81 @@ export default function WalkthroughScreen() {
               {tool === "room" && (
                 <CurveControls
                   edgeType={roomEdgeType}
-                  onChangeEdgeType={setRoomEdgeType}
+                  onChangeEdgeType={(value) => {
+                    setRoomEdgeType(value);
+                    if (value !== "rounded") setCurveControl(null);
+                  }}
                   settings={curveSettings}
                   onChangeSettings={setCurveSettings}
+                  stage={!draft.length ? 0 : curveControl ? 2 : 1}
+                  curveStaged={!!curveControl}
+                  onApplyCurve={applyCurve}
+                  onCancelCurve={cancelCurve}
                 />
               )}
 
-              <PlanCanvas
-                width={canvasWidth}
-                height={canvasHeight}
-                pixelsPerMeter={pixelsPerMeter}
-                imageUri={planImage}
-                detecting={detecting}
-                tool={tool}
-                rooms={rooms}
-                roomLabels={roomConfigs.map((room) => room.name)}
-                openings={openings}
-                draft={draft}
-                snapToGrid={snapToGrid}
-                roomEdgeType={roomEdgeType}
-                curveSettings={curveSettings}
-                selectedRoom={selectedRoom}
-                selection={selection}
-                onAddVertex={addVertex}
-                onAddCurve={addCurve}
-                onCloseRoom={closeRoom}
-                onAddRoom={commitRoom}
-                onAddOpening={addOpening}
-                onRemoveOpening={removeOpening}
-                onSelectRoom={setSelectedRoom}
-                onMoveRoom={moveRoom}
-                onMoveVertex={moveVertex}
-                onInsertVertex={insertVertex}
-                onMoveOpening={moveOpening}
-                onMoveOpeningPoint={moveOpeningPoint}
-                onSelectShape={selectShape}
-                onBeginEdit={rememberPlan}
-              />
+              <View style={[styles.canvasFrame, canvasFocus && styles.canvasFrameFocused]}>
+                <PlanCanvas
+                  width={canvasWidth}
+                  height={canvasHeight}
+                  sheetWidth={sheetWidth}
+                  sheetHeight={sheetHeight}
+                  pixelsPerMeter={pixelsPerMeter}
+                  imageUri={planImage}
+                  detecting={detecting}
+                  tool={tool}
+                  rooms={rooms}
+                  roomLabels={roomConfigs.map((room) => room.name)}
+                  openings={openings}
+                  draft={draft}
+                  snapToGrid={snapToGrid}
+                  roomEdgeType={roomEdgeType}
+                  curveSettings={curveSettings}
+                  curveControl={curveControl}
+                  selectedRoom={selectedRoom}
+                  selection={selection}
+                  onAddVertex={addVertex}
+                  onCloseRoom={closeRoom}
+                  onAddRoom={commitRoom}
+                  onAddOpening={addOpening}
+                  onRemoveOpening={removeOpening}
+                  onSelectRoom={setSelectedRoom}
+                  onMoveRoom={moveRoom}
+                  onMoveVertex={moveVertex}
+                  onInsertVertex={insertVertex}
+                  onMoveOpening={moveOpening}
+                  onMoveOpeningPoint={moveOpeningPoint}
+                  onSelectShape={selectShape}
+                  onSetCurveControl={setCurveControl}
+                  onBeginEdit={rememberPlan}
+                />
+              </View>
+
+              {(draft.length > 0 || !!curveControl) && (
+                <View style={styles.drawingBar}>
+                  <Ionicons name="pencil-outline" size={15} color={COLORS.primaryDark} />
+                  <Text style={styles.drawingBarText} numberOfLines={2}>
+                    {curveControl
+                      ? "Shape the rounded wall above, then add it."
+                      : draft.length < 3
+                        ? `${draft.length} of at least 3 corners placed.`
+                        : "Tap the first corner again, or finish the room."}
+                  </Text>
+                  {curveControl ? (
+                    <Pressable style={styles.drawingBarPrimary} onPress={applyCurve}>
+                      <Text style={styles.drawingBarPrimaryText}>Add wall</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[styles.drawingBarPrimary, draft.length < 3 && styles.drawingBarPrimaryDisabled]}
+                      disabled={draft.length < 3}
+                      onPress={() => closeRoom()}
+                    >
+                      <Text style={styles.drawingBarPrimaryText}>Finish</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
 
               {tool === "select" && selection && (
                 <View style={styles.selectionBar}>
@@ -1236,7 +1380,10 @@ export default function WalkthroughScreen() {
                     </View>
                     <View style={styles.openingEditorCopy}>
                       <Text style={styles.openingEditorTitle}>Opening settings</Text>
-                      <Text style={styles.openingEditorText}>Change the type or preset; it stays centred and snapped to this wall.</Text>
+                      <Text style={styles.openingEditorText}>
+                        Set any width the wall will take — a wide opening becomes a real wall
+                        opening, not a door. Changing the type keeps the width.
+                      </Text>
                     </View>
                   </View>
                   <ChipRow
@@ -1244,21 +1391,30 @@ export default function WalkthroughScreen() {
                     options={["door", "window", "balcony"]}
                     value={openings[selection.index].kind}
                     formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
-                    onChange={(kind) => applyOpeningPreset(selection.index, kind, OPENING_VARIANTS[kind][0].label)}
+                    onChange={(kind) => editOpening(selection.index, { kind })}
+                  />
+                  <OpeningWidthControl
+                    widthMeters={openingWidthMeters(openings[selection.index], pixelsPerMeter)}
+                    onChange={(meters) => editOpening(selection.index, { meters })}
                   />
                   <ChipRow
-                    label="Size and style"
+                    label="Presets"
                     options={OPENING_VARIANTS[openings[selection.index].kind].map((item) => item.label)}
                     value={openings[selection.index].variant || OPENING_VARIANTS[openings[selection.index].kind][0].label}
-                    onChange={(variant) => applyOpeningPreset(selection.index, openings[selection.index].kind, variant)}
+                    formatOption={(option) => {
+                      const preset = OPENING_VARIANTS[openings[selection.index].kind]
+                        .find((item) => item.label === option);
+                      return preset ? `${option} · ${preset.meters.toFixed(1)} m` : option;
+                    }}
+                    onChange={(variant) => editOpening(selection.index, { variant })}
                   />
                 </View>
               )}
 
               <View style={styles.canvasActions}>
                 <GhostButton icon="checkmark-done-outline" label="Finish room" disabled={draft.length < 3} onPress={() => closeRoom()} />
-                <GhostButton icon="arrow-undo-outline" label="Undo" disabled={!draft.length && !history.length} onPress={undo} />
-                {!!draft.length && <GhostButton icon="close-outline" label="Cancel room" tone="danger" onPress={() => setDraft([])} />}
+                <GhostButton icon="arrow-undo-outline" label="Undo" disabled={!draft.length && !history.length && !curveControl} onPress={undo} />
+                {!!draft.length && <GhostButton icon="close-outline" label="Cancel room" tone="danger" onPress={() => { setDraft([]); setCurveControl(null); }} />}
                 <GhostButton icon="arrow-redo-outline" label="Redo" disabled={!future.length} onPress={redo} />
                 <GhostButton icon="options-outline" label={snapToGrid ? "Grid snap" : "Free move"} active={snapToGrid} onPress={() => setSnapToGrid((v) => !v)} />
                 <GhostButton icon="trash-outline" label="Clear lines" tone="danger" disabled={!rooms.length && !openings.length && !draft.length} onPress={clearPlanLines} />
@@ -1267,20 +1423,52 @@ export default function WalkthroughScreen() {
               <View style={styles.metrics}>
                 <Metric value={rooms.length} label="Rooms" />
                 <Metric value={openings.length} label="Openings" />
-                <Metric value={`${totalArea.toFixed(0)} m²`} label="Area" />
+                <Metric value={`${totalArea.toFixed(1)} m²`} label="Area" />
               </View>
+
+              {!!rooms.length && (
+                <View style={styles.roomSizeList}>
+                  <Text style={styles.cardSectionTitle}>Room sizes</Text>
+                  <Text style={styles.cardSectionCopy}>
+                    Type the real dimensions of any room. The plan, the area and the furniture that
+                    Livinai places all follow these numbers.
+                  </Text>
+                  {rooms.map((room, index) => (
+                    <RoomSizeRow
+                      key={`size-${index}`}
+                      index={index}
+                      label={roomConfigs[index]?.name || `Room ${index + 1}`}
+                      room={room}
+                      pixelsPerMeter={pixelsPerMeter}
+                      active={selectedRoom === index}
+                      onFocus={() => {
+                        setSelectedRoom(index);
+                        setSelection({ kind: "room", index });
+                      }}
+                      onResize={resizeRoom}
+                    />
+                  ))}
+                </View>
+              )}
 
               {!!rooms.length && (
                 <View style={styles.scaleEditor}>
                   <View style={styles.scaleEditorCopy}>
-                    <Text style={styles.scaleEditorTitle}>Measured area</Text>
+                    <Text style={styles.scaleEditorTitle}>Drawing scale</Text>
                     <Text style={styles.scaleEditorText}>
-                      1 metre = {pixelsPerMeter.toFixed(0)} px. Adjust once if the plan has no printed dimensions; room areas and furniture update together.
+                      1 metre = {pixelsPerMeter.toFixed(0)} px on the sheet. Only change this if an
+                      uploaded plan was detected at the wrong scale — every room area moves with it.
                     </Text>
                   </View>
                   <View style={styles.scaleEditorActions}>
                     <GhostButton icon="remove-outline" label="Smaller" onPress={() => adjustCalculatedArea(0.9)} />
                     <GhostButton icon="add-outline" label="Larger" onPress={() => adjustCalculatedArea(1.1)} />
+                    <GhostButton
+                      icon="refresh-outline"
+                      label="Reset"
+                      disabled={!detectedPixelsPerMeter}
+                      onPress={resetCalculatedScale}
+                    />
                   </View>
                 </View>
               )}
@@ -1320,6 +1508,16 @@ export default function WalkthroughScreen() {
                       <Ionicons name="trash-outline" size={17} color={COLORS.textTertiary} />
                     </Pressable>
                   </View>
+                  <RoomSizeRow
+                    index={index}
+                    label="Exact size"
+                    room={rooms[index] || []}
+                    pixelsPerMeter={pixelsPerMeter}
+                    active
+                    compact
+                    onFocus={() => setSelectedRoom(index)}
+                    onResize={resizeRoom}
+                  />
                   <ChipRow label="Room type" options={ROOM_TYPES} value={room.roomType} onChange={(v) => updateRoom(index, "roomType", v)} />
                   <ChipRow label="Style" options={WALKTHROUGH_STYLES} value={room.style} onChange={(v) => updateRoom(index, "style", v)} />
                 </View>
@@ -1776,7 +1974,142 @@ function GhostButton({ icon, label, onPress, disabled, active, tone }) {
   );
 }
 
-function CurveControls({ edgeType, onChangeEdgeType, settings, onChangeSettings }) {
+/**
+ * Editable width × depth for one room.
+ *
+ * Dragging a corner handle on a phone can never land on "4.20 m", so the
+ * measured numbers are typed. The field keeps its own text while it is being
+ * edited and only commits on blur, otherwise re-scaling the polygon on every
+ * keystroke would fight the caret.
+ */
+function RoomSizeRow({ index, label, room, pixelsPerMeter, active, compact, onFocus, onResize }) {
+  const bounds = polygonBounds(room);
+  const widthMeters = bounds.width / pixelsPerMeter;
+  const depthMeters = bounds.height / pixelsPerMeter;
+  const areaMeters = polygonArea(room) / (pixelsPerMeter * pixelsPerMeter);
+  const [drafts, setDrafts] = useState(null);
+
+  const shown = drafts || {
+    width: widthMeters.toFixed(2),
+    depth: depthMeters.toFixed(2),
+  };
+
+  const commit = () => {
+    if (!drafts) return;
+    const nextWidth = Number.parseFloat(drafts.width);
+    const nextDepth = Number.parseFloat(drafts.depth);
+    setDrafts(null);
+    if (!Number.isFinite(nextWidth) || !Number.isFinite(nextDepth)) return;
+    if (Math.abs(nextWidth - widthMeters) < 0.005 && Math.abs(nextDepth - depthMeters) < 0.005) return;
+    onResize(index, nextWidth, nextDepth);
+  };
+
+  return (
+    <View style={[styles.roomSizeRow, active && !compact && styles.roomSizeRowActive]}>
+      {!compact && <Text style={styles.roomSizeLabel} numberOfLines={1}>{label}</Text>}
+      {compact && <Text style={styles.fieldLabel}>{label}</Text>}
+      <View style={styles.roomSizeFields}>
+        <View style={styles.roomSizeField}>
+          <TextInput
+            style={styles.roomSizeInput}
+            keyboardType="decimal-pad"
+            value={shown.width}
+            selectTextOnFocus
+            onFocus={onFocus}
+            onChangeText={(value) => setDrafts({ ...shown, width: value })}
+            onBlur={commit}
+            onSubmitEditing={commit}
+          />
+          <Text style={styles.roomSizeUnit}>m</Text>
+        </View>
+        <Text style={styles.roomSizeTimes}>×</Text>
+        <View style={styles.roomSizeField}>
+          <TextInput
+            style={styles.roomSizeInput}
+            keyboardType="decimal-pad"
+            value={shown.depth}
+            selectTextOnFocus
+            onFocus={onFocus}
+            onChangeText={(value) => setDrafts({ ...shown, depth: value })}
+            onBlur={commit}
+            onSubmitEditing={commit}
+          />
+          <Text style={styles.roomSizeUnit}>m</Text>
+        </View>
+        <Text style={styles.roomSizeArea}>{areaMeters.toFixed(1)} m²</Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Free width for the selected opening, in metres.
+ *
+ * The presets below it are shortcuts, not a cage: the steppers and the typed
+ * value can set anything from a 0.3 m slot to a full-wall opening. The value is
+ * clamped to the host wall by the snapper, so an over-long entry lands on the
+ * widest span that wall can actually give.
+ */
+function OpeningWidthControl({ widthMeters, onChange }) {
+  const [draft, setDraft] = useState(null);
+  const shown = draft ?? widthMeters.toFixed(2);
+  const step = (delta) => {
+    setDraft(null);
+    onChange(Math.max(OPENING_MIN_METERS, Math.round((widthMeters + delta) * 100) / 100));
+  };
+  const commit = () => {
+    if (draft === null) return;
+    const value = Number.parseFloat(draft);
+    setDraft(null);
+    if (!Number.isFinite(value) || Math.abs(value - widthMeters) < 0.005) return;
+    onChange(Math.max(OPENING_MIN_METERS, value));
+  };
+  return (
+    <View style={styles.openingWidth}>
+      <Text style={styles.fieldLabel}>Width</Text>
+      <View style={styles.openingWidthRow}>
+        <Pressable
+          accessibilityLabel="Narrow this opening"
+          style={[styles.openingWidthStep, widthMeters <= OPENING_MIN_METERS && styles.openingWidthStepDisabled]}
+          disabled={widthMeters <= OPENING_MIN_METERS}
+          onPress={() => step(-0.1)}
+        >
+          <Ionicons name="remove" size={16} color={COLORS.textPrimary} />
+        </Pressable>
+        <View style={styles.openingWidthField}>
+          <TextInput
+            style={styles.openingWidthInput}
+            keyboardType="decimal-pad"
+            value={String(shown)}
+            selectTextOnFocus
+            onChangeText={setDraft}
+            onBlur={commit}
+            onSubmitEditing={commit}
+          />
+          <Text style={styles.openingWidthUnit}>m</Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Widen this opening"
+          style={styles.openingWidthStep}
+          onPress={() => step(0.1)}
+        >
+          <Ionicons name="add" size={16} color={COLORS.textPrimary} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function CurveControls({
+  edgeType,
+  onChangeEdgeType,
+  settings,
+  onChangeSettings,
+  stage = 0,
+  curveStaged = false,
+  onApplyCurve,
+  onCancelCurve,
+}) {
   const update = (key, value) => onChangeSettings((current) => ({ ...current, [key]: value }));
   return (
     <View style={styles.curveCard}>
@@ -1802,6 +2135,32 @@ function CurveControls({ edgeType, onChangeEdgeType, settings, onChangeSettings 
       </View>
       {edgeType === "rounded" && (
         <View style={styles.curveSettings}>
+          {/* Same three-step flow as the web studio: start point, end point,
+              then shape the wall before it is committed. */}
+          <View style={styles.curveFlow}>
+            {["Start point", "End point", "Shape wall"].map((label, index) => (
+              <View key={label} style={styles.curveFlowStep}>
+                <View style={[
+                  styles.curveFlowDot,
+                  stage === index && styles.curveFlowDotActive,
+                  stage > index && styles.curveFlowDotComplete,
+                ]}>
+                  {stage > index
+                    ? <Ionicons name="checkmark" size={10} color={COLORS.white} />
+                    : <Text style={[styles.curveFlowDotText, stage === index && styles.curveFlowDotTextActive]}>{index + 1}</Text>}
+                </View>
+                <Text style={[styles.curveFlowLabel, stage === index && styles.curveFlowLabelActive]} numberOfLines={1}>{label}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.curveCopy}>
+            {stage === 0
+              ? "Tap the first corner of the room."
+              : curveStaged
+                ? "Adjust the shape below. Tap the canvas again to move the wall's end point."
+                : "Tap where this wall ends, or tap the first corner to close the room."}
+          </Text>
+
           <View style={styles.curveDirection}>
             <Text style={styles.curveSettingLabel}>Curve direction</Text>
             <View style={styles.curveDirectionButtons}>
@@ -1813,13 +2172,25 @@ function CurveControls({ edgeType, onChangeEdgeType, settings, onChangeSettings 
               </Pressable>
             </View>
           </View>
-          <CurveStepper label="Strength" value={settings.intensity} min={0} max={100} step={10} suffix="%" onChange={(value) => update("intensity", value)} />
+          <CurveStepper label="Curve strength" value={settings.intensity} min={0} max={100} step={5} suffix="%" onChange={(value) => update("intensity", value)} />
           <CurveStepper label="Bend position" value={settings.position} min={15} max={85} step={5} suffix="%" onChange={(value) => update("position", value)} />
-          <CurveStepper label="Tilt" value={settings.angle} min={-55} max={55} step={5} suffix="°" onChange={(value) => update("angle", value)} />
-          <Pressable style={styles.curveReset} onPress={() => onChangeSettings({ ...DEFAULT_CURVE_SETTINGS })}>
-            <Ionicons name="refresh-outline" size={13} color={COLORS.primaryDark} />
-            <Text style={styles.curveResetText}>Reset curve</Text>
-          </Pressable>
+          <CurveStepper label="Curve tilt" value={settings.angle} min={-55} max={55} step={5} suffix="°" onChange={(value) => update("angle", value)} />
+          {curveStaged ? (
+            <View style={styles.curveApplyRow}>
+              <Pressable style={styles.curveCancel} onPress={onCancelCurve}>
+                <Text style={styles.curveCancelText}>Cancel curve</Text>
+              </Pressable>
+              <Pressable style={styles.curveApply} onPress={onApplyCurve}>
+                <Ionicons name="add" size={15} color={COLORS.white} />
+                <Text style={styles.curveApplyText}>Add curved wall</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.curveReset} onPress={() => onChangeSettings({ ...DEFAULT_CURVE_SETTINGS })}>
+              <Ionicons name="refresh-outline" size={13} color={COLORS.primaryDark} />
+              <Text style={styles.curveResetText}>Reset curve shape</Text>
+            </Pressable>
+          )}
         </View>
       )}
     </View>
@@ -2123,6 +2494,66 @@ const styles = StyleSheet.create({
   curveStepValue: { minWidth: 46, ...TYPE.caption, color: COLORS.textPrimary, textAlign: "center" },
   curveReset: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 },
   curveResetText: { ...TYPE.caption, color: COLORS.primaryDark },
+  curveFlow: { flexDirection: "row", gap: SPACING.sm },
+  curveFlowStep: { flex: 1, alignItems: "center", gap: 4 },
+  curveFlowDot: {
+    width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
+  },
+  curveFlowDotActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
+  curveFlowDotComplete: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  curveFlowDotText: { ...TYPE.caption, fontSize: 10, color: COLORS.textTertiary },
+  curveFlowDotTextActive: { color: COLORS.white },
+  curveFlowLabel: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary },
+  curveFlowLabelActive: { color: COLORS.textPrimary },
+  curveApplyRow: { flexDirection: "row", gap: SPACING.sm, marginTop: 2 },
+  curveCancel: {
+    paddingHorizontal: SPACING.md, height: 38, alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  },
+  curveCancelText: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveApply: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
+    height: 38, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+  },
+  curveApplyText: { ...TYPE.caption, color: COLORS.white },
+
+  canvasFrame: { alignSelf: "center" },
+  canvasFrameFocused: { marginHorizontal: -SPACING.md },
+  drawingBar: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    marginTop: SPACING.sm, padding: SPACING.sm, paddingLeft: SPACING.md,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  drawingBarText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 15 },
+  drawingBarPrimary: {
+    paddingHorizontal: SPACING.md, height: 32, alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
+  },
+  drawingBarPrimaryDisabled: { opacity: 0.4 },
+  drawingBarPrimaryText: { ...TYPE.caption, color: COLORS.white },
+
+  roomSizeList: {
+    marginTop: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+  },
+  roomSizeRow: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingVertical: 6, borderRadius: RADIUS.sm,
+  },
+  roomSizeRowActive: { backgroundColor: COLORS.primaryTint, paddingHorizontal: SPACING.sm },
+  roomSizeLabel: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
+  roomSizeFields: { flexDirection: "row", alignItems: "center", gap: 5 },
+  roomSizeField: {
+    flexDirection: "row", alignItems: "center", gap: 2,
+    paddingHorizontal: 7, height: 34, borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
+  },
+  roomSizeInput: { width: 42, ...TYPE.caption, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
+  roomSizeUnit: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary },
+  roomSizeTimes: { ...TYPE.caption, color: COLORS.textTertiary },
+  roomSizeArea: { minWidth: 54, ...TYPE.caption, color: COLORS.textSecondary, textAlign: "right" },
 
   canvasActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm, marginTop: SPACING.md },
   ghost: {
@@ -2205,6 +2636,22 @@ const styles = StyleSheet.create({
   openingEditorText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, lineHeight: 16 },
   roomName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 4 },
   roomArea: { ...TYPE.caption, color: COLORS.textTertiary },
+
+  openingWidth: { marginTop: SPACING.sm },
+  openingWidthRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm, marginTop: 5 },
+  openingWidthStep: {
+    width: 38, height: 38, alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  openingWidthStepDisabled: { opacity: 0.4 },
+  openingWidthField: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3,
+    paddingHorizontal: SPACING.md, height: 38, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.borderStrong,
+  },
+  openingWidthInput: { width: 54, ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
+  openingWidthUnit: { ...TYPE.caption, color: COLORS.textTertiary },
 
   chipBlock: { marginTop: SPACING.sm },
   fieldLabel: { ...TYPE.overline, color: COLORS.textTertiary, marginBottom: SPACING.sm },
