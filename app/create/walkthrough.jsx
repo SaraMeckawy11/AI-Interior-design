@@ -22,11 +22,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import PlanCanvas, {
+  DEFAULT_CURVE_SETTINGS,
   GRID_METERS,
   OPENING_SPECS,
+  OPENING_VARIANTS,
+  PLAN_HEIGHT_METERS,
   PLAN_WIDTH_METERS,
   ROOM_TINTS,
+  buildCurveGeometry,
   openingOnNearestWall,
+  openingDefaults,
   polygonArea,
   snapOpeningToNearestWall,
 } from "../../components/walkthrough/PlanCanvas";
@@ -36,12 +41,16 @@ import COLORS from "../../constants/colors";
 import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
   COLOR_MOODS,
+  CURTAIN_DESIGNS,
+  DECOR_SETS,
   DEFAULT_WALKTHROUGH_SETTINGS,
   DESIGN_PROFILES,
   FLOOR_FINISHES,
+  RUG_DESIGNS,
   ROOM_TYPES,
   WALKTHROUGH_STYLES,
   WALL_FINISHES,
+  WALKTHROUGH_RENDERER_REVISION,
   buildLayout,
 } from "../../lib/walkthroughScene";
 
@@ -54,22 +63,33 @@ const STAGES = [
   },
   {
     key: "rooms",
-    label: "Design",
-    title: "Name and style the rooms",
-    copy: "Choose what each space is. Livinai will use the same room-aware furniture families as the web walkthrough.",
+    label: "Rooms",
+    title: "Assign every room",
+    copy: "Name each space and choose its function. Room area stays visible while you make each choice.",
+  },
+  {
+    key: "style",
+    label: "Style",
+    title: "Coordinate the whole home",
+    copy: "Choose the shared finishes and mood before Livinai builds the exact furnished scene.",
   },
   {
     key: "walk",
-    label: "Walk",
-    title: "Walk through your home",
-    copy: "Drag to look, use the pad to move, tap anything to inspect it.",
+    label: "Explore",
+    title: "Explore and edit",
+    copy: "Walk, orbit or use the bird view. Tap any furniture item to adjust it.",
   },
 ];
 
-const CANVAS_RATIO = 1.0;
+const CANVAS_RATIO = PLAN_HEIGHT_METERS / PLAN_WIDTH_METERS;
 const STORAGE_KEY = "livinai-walkthrough-plan";
+const PROJECTS_KEY = "livinai-walkthrough-project-library-v1";
+const MAX_SAVED_PROJECTS = 12;
+
+const createWalkthroughProjectId = () => `walkthrough-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const TOOLS = [
+  { key: "pan", icon: "hand-left-outline", label: "Pan & zoom" },
   { key: "select", icon: "move-outline", label: "Edit" },
   { key: "rect", icon: "square-outline", label: "Quick room" },
   { key: "room", icon: "shapes-outline", label: "Outline" },
@@ -79,8 +99,9 @@ const TOOLS = [
 ];
 
 const TOOL_HINTS = {
+  pan: "Drag to move around the plan. Pinch or use + and − to zoom at any time.",
   rect: "Drag on the grid to draw a rectangular room.",
-  room: "Tap each corner, then tap the first corner again to close the shape.",
+  room: "Tap each corner, then tap the first corner again—or use Finish room—to close it.",
   door: "Tap for a standard door, or drag along a wall for a wider door or open passage.",
   window: "Tap for a standard window, or drag along a wall to set its exact length.",
   balcony: "Tap for a balcony door, or drag along an outside wall for a wide slider.",
@@ -109,12 +130,16 @@ export default function WalkthroughScreen() {
   // ── Plan state ───────────────────────────────────────────────────────────
   const [stage, setStage] = useState(0);
   const [tool, setTool] = useState("select");
+  const [canvasFocus, setCanvasFocus] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const [roomEdgeType, setRoomEdgeType] = useState("straight");
+  const [curveSettings, setCurveSettings] = useState(DEFAULT_CURVE_SETTINGS);
   const [rooms, setRooms] = useState([]);
   const [openings, setOpenings] = useState([]);
   const [draft, setDraft] = useState([]);
   const [roomConfigs, setRoomConfigs] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_WALKTHROUGH_SETTINGS);
+  const [furnitureEdits, setFurnitureEdits] = useState({});
   const [selectedRoom, setSelectedRoom] = useState(0);
   const [selection, setSelection] = useState(null);
   const [planImage, setPlanImage] = useState(null);
@@ -124,6 +149,14 @@ export default function WalkthroughScreen() {
   const [planError, setPlanError] = useState("");
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
+  const [projectId, setProjectId] = useState(createWalkthroughProjectId);
+  const [projectTitle, setProjectTitle] = useState("New 3D plan");
+  const [projects, setProjects] = useState([]);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectReady, setProjectReady] = useState(false);
+  const [saveTick, setSaveTick] = useState(0);
+  const draftStepsRef = useRef([]);
+  const explicitSaveRef = useRef(false);
 
   // ── Viewer state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("walk");
@@ -143,8 +176,12 @@ export default function WalkthroughScreen() {
   const [snapshotKind, setSnapshotKind] = useState("capture");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const [exactScene, setExactScene] = useState(null);
+  const [exactSceneBaseUrl, setExactSceneBaseUrl] = useState("");
+  const [exactSceneLoading, setExactSceneLoading] = useState(false);
+  const [exactSceneError, setExactSceneError] = useState("");
 
-  const canvasWidth = Math.round(LAYOUT.screenWidth - SPACING.lg * 2);
+  const canvasWidth = Math.round(LAYOUT.screenWidth - SPACING.md * 2);
   const canvasHeight = Math.round(canvasWidth * canvasAspect);
   const pixelsPerMeter = detectedPixelsPerMeter || canvasWidth / PLAN_WIDTH_METERS;
 
@@ -152,9 +189,9 @@ export default function WalkthroughScreen() {
     () =>
       buildLayout({
         rooms,
-        doors: openings.filter((opening) => opening.kind === "door").map((opening) => opening.points),
-        windows: openings.filter((opening) => opening.kind === "window").map((opening) => opening.points),
-        balconies: openings.filter((opening) => opening.kind === "balcony").map((opening) => opening.points),
+        doors: openings.filter((opening) => opening.kind === "door"),
+        windows: openings.filter((opening) => opening.kind === "window"),
+        balconies: openings.filter((opening) => opening.kind === "balcony"),
         width: canvasWidth,
         height: canvasHeight,
         pixelsPerMeter,
@@ -170,60 +207,168 @@ export default function WalkthroughScreen() {
   const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
   const currentRender = aiRenders[aiKey];
 
+  useEffect(() => {
+    if (stage !== STAGES.length - 1 || !layout.rooms.length) return undefined;
+    const rendererRoot = (process.env.EXPO_PUBLIC_WALKTHROUGH_SERVER_URI || process.env.EXPO_PUBLIC_SERVER_URI || "").replace(/\/$/, "");
+    if (!rendererRoot) {
+      setExactScene(null);
+      setExactSceneError("Exact renderer URL is not configured.");
+      return undefined;
+    }
+    const controller = new AbortController();
+    setExactScene(null);
+    setExactSceneBaseUrl("");
+    setSceneInfo(null);
+    setExactSceneLoading(true);
+    setExactSceneError("");
+    (async () => {
+      try {
+        const response = await fetch(`${rendererRoot}/api/walkthrough/realtime/session`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            rendererRevision: WALKTHROUGH_RENDERER_REVISION,
+            rooms: layout.rooms,
+            doors: layout.doors.map((opening) => opening.slice(0, 2)),
+            windows: layout.windows.map((opening) => opening.slice(0, 2)),
+            balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
+            pixelsPerMeter: layout.pixelsPerMeter,
+            roomConfigs,
+            settings: { ...settings, useCatalog: true },
+            width: 960,
+            height: 600,
+          }),
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || data.message || "The exact Livinai scene is unavailable.");
+        if (!data.modelUrl || !Array.isArray(data.furniture)) throw new Error("The exact renderer returned an incomplete scene.");
+        if (controller.signal.aborted) return;
+        const origin = rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
+        setExactScene(data);
+        setExactSceneBaseUrl(origin);
+      } catch (error) {
+        if (error.name === "AbortError") return;
+        setExactScene(null);
+        setExactSceneError(error.message || "The exact Livinai scene is unavailable.");
+      } finally {
+        if (!controller.signal.aborted) setExactSceneLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [layout, roomConfigs, settings, stage, token]);
+
   // ── Autosave ─────────────────────────────────────────────────────────────
   // Drawing a home takes real effort; geometry is saved in normalized canvas
   // coordinates so uploaded plans restore correctly on a different phone.
   const restored = useRef(false);
 
+  const restoreSavedPlan = useCallback((saved) => {
+    if (!saved) return;
+    const sourceAspect = Number(saved.canvasAspect) || CANVAS_RATIO;
+    const restoredAspect = Math.max(sourceAspect, CANVAS_RATIO);
+    const restoredSourceHeight = canvasWidth * sourceAspect;
+    const toPixels = saved.coordinateSpace === "normalized"
+      ? (point) => [point[0] * canvasWidth, point[1] * restoredSourceHeight]
+      : (point) => [point[0] * (canvasWidth / PLAN_WIDTH_METERS), point[1] * (canvasWidth / PLAN_WIDTH_METERS)];
+    setCanvasAspect(restoredAspect);
+    setDetectedPixelsPerMeter(saved.pixelsPerMeterRatio ? saved.pixelsPerMeterRatio * canvasWidth : null);
+    setPlanImage(saved.planImage || null);
+    setRooms((saved.rooms || []).map((room) => room.map(toPixels)));
+    setRoomConfigs((saved.roomConfigs || []).map((room) => ({ ...room })));
+    setOpenings((saved.openings || []).map((opening) => ({
+      ...openingDefaults(opening.kind, opening.variant),
+      ...opening,
+      points: opening.points.map(toPixels),
+    })));
+    setSettings({ ...DEFAULT_WALKTHROUGH_SETTINGS, ...(saved.settings || {}), useCatalog: true });
+    setFurnitureEdits(saved.furnitureEdits || {});
+    setSelectedRoom(Number(saved.selectedRoom) || 0);
+    setStage(Math.max(0, Math.min(STAGES.length - 1, Number(saved.stage) || 0)));
+    setAiRenders(saved.aiRenders || {});
+    setDraft([]);
+    setSelection(null);
+    setHistory([]);
+    setFuture([]);
+  }, [canvasWidth]);
+
   useEffect(() => {
+    if (restored.current) return undefined;
+    let cancelled = false;
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const saved = JSON.parse(raw);
-          const restoredAspect = Number(saved.canvasAspect) || CANVAS_RATIO;
-          const restoredHeight = canvasWidth * restoredAspect;
-          const toPixels = saved.coordinateSpace === "normalized"
-            ? (point) => [point[0] * canvasWidth, point[1] * restoredHeight]
-            : (point) => [point[0] * (canvasWidth / PLAN_WIDTH_METERS), point[1] * (canvasWidth / PLAN_WIDTH_METERS)];
-          setCanvasAspect(restoredAspect);
-          setDetectedPixelsPerMeter(saved.pixelsPerMeterRatio ? saved.pixelsPerMeterRatio * canvasWidth : null);
-          setPlanImage(saved.planImage || null);
-          if (saved.rooms?.length) {
-            setRooms(saved.rooms.map((room) => room.map(toPixels)));
-            setRoomConfigs(saved.roomConfigs || []);
-            setOpenings((saved.openings || []).map((o) => ({ kind: o.kind, points: o.points.map(toPixels) })));
-            setSettings({ ...DEFAULT_WALKTHROUGH_SETTINGS, ...(saved.settings || {}) });
-          }
+        const values = await AsyncStorage.multiGet([PROJECTS_KEY, STORAGE_KEY]);
+        if (cancelled) return;
+        const savedProjects = JSON.parse(values[0][1] || "[]")
+          .filter((project) => project?.id && project?.data)
+          .sort((one, two) => String(two.updatedAt).localeCompare(String(one.updatedAt)));
+        setProjects(savedProjects);
+        if (savedProjects[0]) {
+          setProjectId(savedProjects[0].id);
+          setProjectTitle(savedProjects[0].title || "3D walkthrough");
+          restoreSavedPlan(savedProjects[0].data);
+        } else if (values[1][1]) {
+          restoreSavedPlan(JSON.parse(values[1][1]));
         }
       } catch {}
       restored.current = true;
+      setProjectReady(true);
     })();
-    // Runs once; restored geometry is scaled to the current screen width.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => { cancelled = true; };
+  }, [restoreSavedPlan]);
 
   useEffect(() => {
-    if (!restored.current) return undefined;
-    const timer = setTimeout(() => {
+    if (!restored.current || !projectReady || detecting || rendering) return undefined;
+    const timer = setTimeout(async () => {
       const normalize = (point) => [point[0] / canvasWidth, point[1] / canvasHeight];
-      AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          coordinateSpace: "normalized",
-          canvasAspect,
-          pixelsPerMeterRatio: pixelsPerMeter / canvasWidth,
-          planImage,
-          rooms: rooms.map((room) => room.map(normalize)),
-          roomConfigs,
-          openings: openings.map((o) => ({ kind: o.kind, points: o.points.map(normalize) })),
-          settings,
-          savedAt: Date.now(),
-        }),
-      ).catch(() => {});
-    }, 600);
+      const savedAt = new Date().toISOString();
+      const data = {
+        coordinateSpace: "normalized",
+        canvasAspect,
+        pixelsPerMeterRatio: pixelsPerMeter / canvasWidth,
+        planImage,
+        rooms: rooms.map((room) => room.map(normalize)),
+        roomConfigs,
+        openings: openings.map((opening) => ({ ...opening, points: opening.points.map(normalize) })),
+        settings,
+        furnitureEdits,
+        selectedRoom,
+        stage,
+        aiRenders,
+        savedAt,
+      };
+      try {
+        const rawProjects = await AsyncStorage.getItem(PROJECTS_KEY);
+        const storedProjects = JSON.parse(rawProjects || "[]").filter((project) => project?.id !== projectId);
+        const project = {
+          id: projectId,
+          title: projectTitle.trim() || `${rooms.length || "New"} room walkthrough`,
+          updatedAt: savedAt,
+          thumbnail: Object.values(aiRenders).find((render) => render?.image)?.image || planImage || null,
+          roomCount: rooms.length,
+          data,
+        };
+        const nextProjects = [project, ...storedProjects]
+          .sort((one, two) => String(two.updatedAt).localeCompare(String(one.updatedAt)))
+          .slice(0, MAX_SAVED_PROJECTS);
+        await AsyncStorage.multiSet([
+          [STORAGE_KEY, JSON.stringify(data)],
+          [PROJECTS_KEY, JSON.stringify(nextProjects)],
+        ]);
+        setProjects(nextProjects);
+        if (explicitSaveRef.current) {
+          explicitSaveRef.current = false;
+          setNotice("3D plan saved to Projects.");
+        }
+      } catch {
+        setNotice("This 3D plan could not be saved on this device.");
+      }
+    }, 700);
     return () => clearTimeout(timer);
-  }, [canvasAspect, canvasHeight, canvasWidth, openings, pixelsPerMeter, planImage, roomConfigs, rooms, settings]);
+  }, [aiRenders, canvasAspect, canvasHeight, canvasWidth, detecting, furnitureEdits, openings, pixelsPerMeter, planImage, projectId, projectReady, projectTitle, rendering, roomConfigs, rooms, saveTick, selectedRoom, settings, stage]);
 
   // ── Plan editing ─────────────────────────────────────────────────────────
   const configFor = (index) => ({
@@ -250,9 +395,28 @@ export default function WalkthroughScreen() {
     const snapshot = currentPlanSnapshot();
     setHistory((items) => [...items, snapshot].slice(-50));
     setFuture([]);
+    // Architectural edits can change room-relative furnishing rules (including
+    // balcony-aware seating), so stale world-space nudges must not be replayed
+    // into a newly measured layout.
+    setFurnitureEdits({});
   }, [currentPlanSnapshot]);
 
-  const addVertex = useCallback((point) => setDraft((current) => [...current, point]), []);
+  useEffect(() => {
+    if (!draft.length) draftStepsRef.current = [];
+  }, [draft.length]);
+
+  const addVertex = useCallback((point) => setDraft((current) => {
+    draftStepsRef.current.push(current.length);
+    return [...current, point];
+  }), []);
+
+  const addCurve = useCallback((samples) => {
+    if (!samples?.length) return;
+    setDraft((current) => {
+      draftStepsRef.current.push(current.length);
+      return [...current, ...samples];
+    });
+  }, []);
 
   const commitRoom = useCallback((polygon) => {
     rememberPlan();
@@ -260,14 +424,18 @@ export default function WalkthroughScreen() {
     setRoomConfigs((configs) => [...configs, configFor(configs.length)]);
     setSelectedRoom(rooms.length);
     setSelection({ kind: "room", index: rooms.length });
-    setTool("select");
   }, [rememberPlan, rooms.length]);
 
-  const closeRoom = useCallback(() => {
-    if (draft.length < 3) return;
-    commitRoom(draft);
+  const closeRoom = useCallback((closingPoints) => {
+    const automaticCurve = roomEdgeType === "rounded" && draft.length > 1
+      ? buildCurveGeometry(draft[draft.length - 1], draft[0], curveSettings)?.samples?.slice(0, -1) || []
+      : [];
+    const extraPoints = Array.isArray(closingPoints) ? closingPoints : automaticCurve;
+    const polygon = [...draft, ...extraPoints];
+    if (polygon.length < 3) return;
+    commitRoom(polygon);
     setDraft([]);
-  }, [commitRoom, draft]);
+  }, [commitRoom, curveSettings, draft, roomEdgeType]);
 
   const removeRoom = useCallback((index) => {
     rememberPlan();
@@ -345,7 +513,10 @@ export default function WalkthroughScreen() {
   }, [pixelsPerMeter, rooms]);
 
   const undo = useCallback(() => {
-    if (draft.length) return setDraft((current) => current.slice(0, -1));
+    if (draft.length) {
+      const previousLength = draftStepsRef.current.pop();
+      return setDraft((current) => current.slice(0, previousLength ?? Math.max(0, current.length - 1)));
+    }
     const previous = history[history.length - 1];
     if (!previous) return;
     setFuture((items) => [currentPlanSnapshot(), ...items].slice(0, 50));
@@ -389,6 +560,26 @@ export default function WalkthroughScreen() {
     setSelection(null);
   }, [rememberPlan]);
 
+  const applyOpeningPreset = useCallback((index, nextKind, variantLabel) => {
+    const variants = OPENING_VARIANTS[nextKind] || OPENING_VARIANTS.door;
+    const preset = variants.find((item) => item.label === variantLabel) || variants[0];
+    rememberPlan();
+    setOpenings((current) => current.map((opening, openingIndex) => {
+      if (openingIndex !== index) return opening;
+      const [start, end] = opening.points;
+      const midpoint = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+      const length = Math.max(0.001, Math.hypot(end[0] - start[0], end[1] - start[1]));
+      const direction = [(end[0] - start[0]) / length, (end[1] - start[1]) / length];
+      const half = (preset.meters * pixelsPerMeter) / 2;
+      const raw = [
+        [midpoint[0] - direction[0] * half, midpoint[1] - direction[1] * half],
+        [midpoint[0] + direction[0] * half, midpoint[1] + direction[1] * half],
+      ];
+      const points = snapOpeningToNearestWall(raw, rooms, nextKind, pixelsPerMeter) || opening.points;
+      return { ...opening, kind: nextKind, points, ...openingDefaults(nextKind, preset.label) };
+    }));
+  }, [pixelsPerMeter, rememberPlan, rooms]);
+
   const deleteSelection = useCallback(() => {
     if (!selection) return;
     if (selection.kind === "room") removeRoom(selection.index);
@@ -414,8 +605,65 @@ export default function WalkthroughScreen() {
     setSelectedRoom(0);
     setHistory([]);
     setFuture([]);
+    setFurnitureEdits({});
     setTool("rect");
   }, []);
+
+  const saveCurrentProject = useCallback(() => {
+    explicitSaveRef.current = true;
+    setSaveTick((value) => value + 1);
+  }, []);
+
+  const openSavedProject = useCallback((project) => {
+    if (!project?.data) return;
+    setProjectId(project.id);
+    setProjectTitle(project.title || "3D walkthrough");
+    restoreSavedPlan(project.data);
+    setProjectsOpen(false);
+    setViewMode("walk");
+    setOutputMode("live");
+    setPanel(null);
+    setInspected(null);
+    setSceneInfo(null);
+    setNotice("Saved 3D plan opened.");
+  }, [restoreSavedPlan]);
+
+  const newWalkthroughProject = useCallback(() => {
+    setProjectId(createWalkthroughProjectId());
+    setProjectTitle("New 3D plan");
+    setStage(0);
+    setTool("rect");
+    setRooms([]);
+    setOpenings([]);
+    setDraft([]);
+    setRoomConfigs([]);
+    setSettings({ ...DEFAULT_WALKTHROUGH_SETTINGS });
+    setFurnitureEdits({});
+    setSelectedRoom(0);
+    setSelection(null);
+    setPlanImage(null);
+    setCanvasAspect(CANVAS_RATIO);
+    setDetectedPixelsPerMeter(null);
+    setHistory([]);
+    setFuture([]);
+    setAiRenders({});
+    setViewMode("walk");
+    setOutputMode("live");
+    setProjectsOpen(false);
+    setNotice("New 3D plan ready.");
+  }, []);
+
+  const removeSavedProject = useCallback(async (project) => {
+    if (!project?.id) return;
+    try {
+      const nextProjects = projects.filter((item) => item.id !== project.id);
+      await AsyncStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects));
+      setProjects(nextProjects);
+      if (project.id === projectId) newWalkthroughProject();
+    } catch {
+      setNotice("This saved plan could not be removed.");
+    }
+  }, [newWalkthroughProject, projectId, projects]);
 
   const uploadPlan = useCallback(async () => {
     let result;
@@ -433,13 +681,15 @@ export default function WalkthroughScreen() {
     const asset = result.assets[0];
     const sourceWidth = Math.max(1, asset.width || 1200);
     const sourceHeight = Math.max(1, asset.height || 800);
-    const aspect = Math.max(0.3, Math.min(3, sourceHeight / sourceWidth));
+    const aspect = Math.max(CANVAS_RATIO, Math.min(3, sourceHeight / sourceWidth));
     const extension = (asset.fileName?.split(".").pop() || asset.mimeType?.split("/").pop() || "jpg").replace(/[^a-z0-9]/gi, "");
     let stableUri = asset.uri;
 
     try {
       if (FileSystem.documentDirectory) {
-        stableUri = `${FileSystem.documentDirectory}livinai-walkthrough-plan.${extension}`;
+        // Each saved project owns its source image. Reusing one filename made
+        // a later upload silently replace the plan underneath older projects.
+        stableUri = `${FileSystem.documentDirectory}livinai-walkthrough-plan-${projectId}.${extension}`;
         await FileSystem.deleteAsync(stableUri, { idempotent: true });
         await FileSystem.copyAsync({ from: asset.uri, to: stableUri });
       }
@@ -458,6 +708,7 @@ export default function WalkthroughScreen() {
     setSelectedRoom(0);
     setHistory([]);
     setFuture([]);
+    setFurnitureEdits({});
     setDetecting(true);
     setPlanError("");
 
@@ -480,14 +731,14 @@ export default function WalkthroughScreen() {
 
       const detectedWidth = Math.max(1, Number(data.width) || sourceWidth);
       const detectedHeight = Math.max(1, Number(data.height) || sourceHeight);
-      const detectedAspect = Math.max(0.3, Math.min(3, detectedHeight / detectedWidth));
+      const detectedAspect = Math.max(CANVAS_RATIO, Math.min(3, detectedHeight / detectedWidth));
       const displayScale = canvasWidth / detectedWidth;
       const toDisplay = (point) => [point[0] * displayScale, point[1] * displayScale];
       const detectedRooms = (data.rooms || []).map((room) => room.map(toDisplay));
       const detectedOpenings = [
-        ...(data.doors || []).map((points) => ({ kind: "door", points: points.slice(0, 2).map(toDisplay) })),
-        ...(data.windows || []).map((points) => ({ kind: "window", points: points.slice(0, 2).map(toDisplay) })),
-        ...(data.balconies || []).map((points) => ({ kind: "balcony", points: points.slice(0, 2).map(toDisplay) })),
+        ...(data.doors || []).map((points) => ({ kind: "door", points: points.slice(0, 2).map(toDisplay), ...openingDefaults("door") })),
+        ...(data.windows || []).map((points) => ({ kind: "window", points: points.slice(0, 2).map(toDisplay), ...openingDefaults("window") })),
+        ...(data.balconies || []).map((points) => ({ kind: "balcony", points: points.slice(0, 2).map(toDisplay), ...openingDefaults("balcony") })),
       ];
 
       setCanvasAspect(detectedAspect);
@@ -505,15 +756,32 @@ export default function WalkthroughScreen() {
       if (detectionTimeout) clearTimeout(detectionTimeout);
       setDetecting(false);
     }
-  }, [canvasWidth, token]);
+  }, [canvasWidth, projectId, token]);
 
   const updateRoom = useCallback((index, key, value) => {
     setRoomConfigs((current) => current.map((room, i) => (i === index ? { ...room, [key]: value } : room)));
+    if (key === "roomType" || key === "style") setFurnitureEdits({});
   }, []);
 
   const updateSetting = useCallback((key, value) => {
     setSettings((current) => ({ ...current, [key]: value }));
   }, []);
+
+  const updateFurnitureEdit = useCallback((id, transform) => {
+    if (!id) return;
+    setFurnitureEdits((current) => {
+      if (transform) return { ...current, [id]: transform };
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  const adjustCalculatedArea = useCallback((multiplier) => {
+    setDetectedPixelsPerMeter(Math.max(8, Math.min(canvasWidth, pixelsPerMeter / Math.sqrt(multiplier))));
+    setFurnitureEdits({});
+  }, [canvasWidth, pixelsPerMeter]);
 
   // ── Viewer actions ───────────────────────────────────────────────────────
   const changeViewMode = (mode) => {
@@ -737,6 +1005,12 @@ export default function WalkthroughScreen() {
               <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
               <Text style={styles.headerTitle}>{current.title}</Text>
             </View>
+            <Pressable accessibilityLabel="Open saved 3D projects" onPress={() => setProjectsOpen(true)} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
+              <Ionicons name="folder-open-outline" size={19} color={COLORS.white} />
+            </Pressable>
+            <Pressable accessibilityLabel="Save 3D plan" onPress={saveCurrentProject} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
+              <Ionicons name="save-outline" size={19} color={COLORS.white} />
+            </Pressable>
           </View>
 
           <View style={styles.stepper}>
@@ -758,12 +1032,17 @@ export default function WalkthroughScreen() {
       </LinearGradient>
 
       {/* ── Body ───────────────────────────────────────────────────────── */}
-      {stage === 2 ? (
+      {stage === STAGES.length - 1 ? (
         <WalkthroughStage
           viewerRef={viewerRef}
           layout={layout}
           roomConfigs={roomConfigs}
           settings={settings}
+          furnitureEdits={furnitureEdits}
+          exactScene={exactScene}
+          exactSceneBaseUrl={exactSceneBaseUrl}
+          exactSceneLoading={exactSceneLoading}
+          exactSceneError={exactSceneError}
           viewMode={viewMode}
           night={night}
           selectedRoom={selectedRoom}
@@ -780,6 +1059,11 @@ export default function WalkthroughScreen() {
           onSelect={setInspected}
           onSnapshot={handleSnapshot}
           onComposition={setComposition}
+          onFurnitureChange={updateFurnitureEdit}
+          onExactError={(message) => {
+            setExactScene(null);
+            setExactSceneError(message || "The exact scene could not be opened. Showing the offline preview.");
+          }}
           onChangeMode={changeViewMode}
           onToggleNight={toggleNight}
           onFocusRoom={focusRoom}
@@ -795,11 +1079,23 @@ export default function WalkthroughScreen() {
           }}
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-          <Text style={styles.stageCopy}>{current.copy}</Text>
+        <ScrollView contentContainerStyle={[styles.body, stage === 0 && styles.planBody]} showsVerticalScrollIndicator={false}>
+          {!(stage === 0 && canvasFocus) && <Text style={styles.stageCopy}>{current.copy}</Text>}
+
+          {!(stage === 0 && canvasFocus) && <Pressable style={styles.projectStatus} onPress={() => setProjectsOpen(true)}>
+            <View style={styles.projectStatusIcon}>
+              <Ionicons name="folder-open-outline" size={17} color={COLORS.primaryDark} />
+            </View>
+            <View style={styles.projectStatusCopy}>
+              <Text style={styles.projectStatusTitle} numberOfLines={1}>{projectTitle || "New 3D plan"}</Text>
+              <Text style={styles.projectStatusMeta}>{rooms.length} rooms · {openings.length} openings · Autosaves on this device</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={17} color={COLORS.textTertiary} />
+          </Pressable>}
 
           {stage === 0 && (
             <>
+              {!canvasFocus && <>
               <View style={styles.sourceRow}>
                 <Pressable style={styles.sourcePrimary} onPress={uploadPlan} disabled={detecting}>
                   {detecting
@@ -822,6 +1118,28 @@ export default function WalkthroughScreen() {
                   <Text style={styles.planNoticeText}>{planError}</Text>
                 </View>
               )}
+              </>}
+
+              <View style={styles.workspaceHeader}>
+                <View style={styles.workspaceIcon}>
+                  <Ionicons name="grid-outline" size={18} color={COLORS.primaryDark} />
+                </View>
+                <View style={styles.workspaceCopy}>
+                  <Text style={styles.workspaceEyebrow}>Plan workspace · {TOOLS.find((item) => item.key === tool)?.label}</Text>
+                  <Text style={styles.workspaceHint}>{TOOL_HINTS[tool]}</Text>
+                </View>
+                <View style={styles.workspaceBadge}>
+                  <Text style={styles.workspaceBadgeValue}>{rooms.length}</Text>
+                  <Text style={styles.workspaceBadgeLabel}>rooms</Text>
+                </View>
+                <Pressable
+                  accessibilityLabel={canvasFocus ? "Exit canvas focus mode" : "Focus canvas editor"}
+                  style={[styles.workspaceExpand, canvasFocus && styles.workspaceExpandActive]}
+                  onPress={() => setCanvasFocus((value) => !value)}
+                >
+                  <Ionicons name={canvasFocus ? "contract-outline" : "expand-outline"} size={17} color={canvasFocus ? COLORS.white : COLORS.primaryDark} />
+                </Pressable>
+              </View>
 
               <ScrollView
                 horizontal
@@ -840,7 +1158,14 @@ export default function WalkthroughScreen() {
                 })}
               </ScrollView>
 
-              <Text style={styles.toolHint}>{TOOL_HINTS[tool]}</Text>
+              {tool === "room" && (
+                <CurveControls
+                  edgeType={roomEdgeType}
+                  onChangeEdgeType={setRoomEdgeType}
+                  settings={curveSettings}
+                  onChangeSettings={setCurveSettings}
+                />
+              )}
 
               <PlanCanvas
                 width={canvasWidth}
@@ -854,9 +1179,12 @@ export default function WalkthroughScreen() {
                 openings={openings}
                 draft={draft}
                 snapToGrid={snapToGrid}
+                roomEdgeType={roomEdgeType}
+                curveSettings={curveSettings}
                 selectedRoom={selectedRoom}
                 selection={selection}
                 onAddVertex={addVertex}
+                onAddCurve={addCurve}
                 onCloseRoom={closeRoom}
                 onAddRoom={commitRoom}
                 onAddOpening={addOpening}
@@ -896,9 +1224,41 @@ export default function WalkthroughScreen() {
                 </View>
               )}
 
+              {tool === "select" && selection?.kind === "opening" && openings[selection.index] && (
+                <View style={styles.openingEditor}>
+                  <View style={styles.openingEditorHead}>
+                    <View style={styles.openingEditorIcon}>
+                      <Ionicons
+                        name={openings[selection.index].kind === "door" ? "log-in-outline" : openings[selection.index].kind === "window" ? "browsers-outline" : "sunny-outline"}
+                        size={18}
+                        color={(OPENING_SPECS[openings[selection.index].kind] || OPENING_SPECS.door).color}
+                      />
+                    </View>
+                    <View style={styles.openingEditorCopy}>
+                      <Text style={styles.openingEditorTitle}>Opening settings</Text>
+                      <Text style={styles.openingEditorText}>Change the type or preset; it stays centred and snapped to this wall.</Text>
+                    </View>
+                  </View>
+                  <ChipRow
+                    label="Opening type"
+                    options={["door", "window", "balcony"]}
+                    value={openings[selection.index].kind}
+                    formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
+                    onChange={(kind) => applyOpeningPreset(selection.index, kind, OPENING_VARIANTS[kind][0].label)}
+                  />
+                  <ChipRow
+                    label="Size and style"
+                    options={OPENING_VARIANTS[openings[selection.index].kind].map((item) => item.label)}
+                    value={openings[selection.index].variant || OPENING_VARIANTS[openings[selection.index].kind][0].label}
+                    onChange={(variant) => applyOpeningPreset(selection.index, openings[selection.index].kind, variant)}
+                  />
+                </View>
+              )}
+
               <View style={styles.canvasActions}>
-                <GhostButton icon="checkmark-done-outline" label="Close shape" disabled={draft.length < 3} onPress={closeRoom} />
+                <GhostButton icon="checkmark-done-outline" label="Finish room" disabled={draft.length < 3} onPress={() => closeRoom()} />
                 <GhostButton icon="arrow-undo-outline" label="Undo" disabled={!draft.length && !history.length} onPress={undo} />
+                {!!draft.length && <GhostButton icon="close-outline" label="Cancel room" tone="danger" onPress={() => setDraft([])} />}
                 <GhostButton icon="arrow-redo-outline" label="Redo" disabled={!future.length} onPress={redo} />
                 <GhostButton icon="options-outline" label={snapToGrid ? "Grid snap" : "Free move"} active={snapToGrid} onPress={() => setSnapToGrid((v) => !v)} />
                 <GhostButton icon="trash-outline" label="Clear lines" tone="danger" disabled={!rooms.length && !openings.length && !draft.length} onPress={clearPlanLines} />
@@ -910,12 +1270,38 @@ export default function WalkthroughScreen() {
                 <Metric value={`${totalArea.toFixed(0)} m²`} label="Area" />
               </View>
 
+              {!!rooms.length && (
+                <View style={styles.scaleEditor}>
+                  <View style={styles.scaleEditorCopy}>
+                    <Text style={styles.scaleEditorTitle}>Measured area</Text>
+                    <Text style={styles.scaleEditorText}>
+                      1 metre = {pixelsPerMeter.toFixed(0)} px. Adjust once if the plan has no printed dimensions; room areas and furniture update together.
+                    </Text>
+                  </View>
+                  <View style={styles.scaleEditorActions}>
+                    <GhostButton icon="remove-outline" label="Smaller" onPress={() => adjustCalculatedArea(0.9)} />
+                    <GhostButton icon="add-outline" label="Larger" onPress={() => adjustCalculatedArea(1.1)} />
+                  </View>
+                </View>
+              )}
+
             </>
           )}
 
           {stage === 1 && (
             <>
               {roomConfigs.length === 0 && <EmptyState text="Go back and draw at least one room." />}
+              {!!roomConfigs.length && (
+                <View style={styles.stageSummary}>
+                  <View style={styles.stageSummaryIcon}>
+                    <Ionicons name="home-outline" size={19} color={COLORS.primaryDark} />
+                  </View>
+                  <View style={styles.stageSummaryCopy}>
+                    <Text style={styles.stageSummaryTitle}>{roomConfigs.length} rooms ready to assign</Text>
+                    <Text style={styles.stageSummaryText}>{totalArea.toFixed(1)} m² total measured area</Text>
+                  </View>
+                </View>
+              )}
               {roomConfigs.map((room, index) => (
                 <View key={`config-${index}`} style={styles.card}>
                   <View style={styles.cardHead}>
@@ -939,6 +1325,24 @@ export default function WalkthroughScreen() {
                 </View>
               ))}
 
+            </>
+          )}
+
+          {stage === 2 && (
+            <>
+              {!!roomConfigs.length && (
+                <View style={styles.exactSourceCard}>
+                  <View style={styles.exactSourceIcon}>
+                    <Ionicons name="shield-checkmark-outline" size={22} color={COLORS.primaryDark} />
+                  </View>
+                  <View style={styles.exactSourceCopy}>
+                    <Text style={styles.exactSourceTitle}>Exact Livinai furniture engine</Text>
+                    <Text style={styles.exactSourceText}>
+                      Explore loads the same Interior_Plan models, dimensions and placement used by Livinai_web.
+                    </Text>
+                  </View>
+                </View>
+              )}
               {!!roomConfigs.length && (
                 <View style={styles.card}>
                   <Text style={styles.cardSectionTitle}>Whole-home direction</Text>
@@ -947,6 +1351,19 @@ export default function WalkthroughScreen() {
                   <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
                   <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
                   <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
+                  <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
+                  <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
+                  <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
+                  <Pressable style={styles.settingToggle} onPress={() => updateSetting("freeExplore", !settings.freeExplore)}>
+                    <View style={[styles.settingToggleIcon, settings.freeExplore && styles.settingToggleIconActive]}>
+                      {settings.freeExplore && <Ionicons name="checkmark" size={13} color={COLORS.white} />}
+                    </View>
+                    <View style={styles.settingToggleCopy}>
+                      <Text style={styles.settingToggleTitle}>Free explore</Text>
+                      <Text style={styles.settingToggleText}>Walk through walls while reviewing furniture placement.</Text>
+                    </View>
+                    <Ionicons name="move-outline" size={18} color={COLORS.textTertiary} />
+                  </Pressable>
                   <Text style={[styles.fieldLabel, { marginTop: SPACING.lg }]}>Optional notes</Text>
                   <TextInput
                     style={styles.notes}
@@ -966,18 +1383,31 @@ export default function WalkthroughScreen() {
       )}
 
       {/* ── Footer ─────────────────────────────────────────────────────── */}
-      {stage < 2 && (
+      {stage < STAGES.length - 1 && (
         <SafeAreaView edges={["bottom"]} style={styles.footer}>
           <Pressable style={styles.footerGhost} onPress={goBack}>
             <Ionicons name="arrow-back" size={16} color={COLORS.textPrimary} />
             <Text style={styles.footerGhostText}>Back</Text>
           </Pressable>
           <Pressable style={[styles.footerPrimary, !canContinue && styles.footerPrimaryDisabled]} disabled={!canContinue} onPress={goNext}>
-            <Text style={styles.footerPrimaryText}>{stage === 1 ? "Enter the walkthrough" : "Continue"}</Text>
+            <Text style={styles.footerPrimaryText}>{stage === STAGES.length - 2 ? "Open exact walkthrough" : "Continue"}</Text>
             <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
           </Pressable>
         </SafeAreaView>
       )}
+
+      <ProjectLibraryModal
+        visible={projectsOpen}
+        projects={projects}
+        currentId={projectId}
+        title={projectTitle}
+        onChangeTitle={setProjectTitle}
+        onClose={() => setProjectsOpen(false)}
+        onSave={saveCurrentProject}
+        onOpen={openSavedProject}
+        onNew={newWalkthroughProject}
+        onRemove={removeSavedProject}
+      />
 
       <SnapshotModal
         snapshot={snapshot}
@@ -1009,6 +1439,11 @@ function WalkthroughStage({
   layout,
   roomConfigs,
   settings,
+  furnitureEdits,
+  exactScene,
+  exactSceneBaseUrl,
+  exactSceneLoading,
+  exactSceneError,
   viewMode,
   night,
   selectedRoom,
@@ -1025,6 +1460,8 @@ function WalkthroughStage({
   onSelect,
   onSnapshot,
   onComposition,
+  onFurnitureChange,
+  onExactError,
   onChangeMode,
   onToggleNight,
   onFocusRoom,
@@ -1059,6 +1496,9 @@ function WalkthroughStage({
         layout={layout}
         roomConfigs={roomConfigs}
         settings={settings}
+        furnitureEdits={furnitureEdits}
+        exactScene={exactScene}
+        exactBaseUrl={exactSceneBaseUrl}
         mode={viewMode}
         roomIndex={selectedRoom}
         night={night}
@@ -1066,6 +1506,8 @@ function WalkthroughStage({
         onSelect={onSelect}
         onSnapshot={onSnapshot}
         onComposition={onComposition}
+        onFurnitureChange={onFurnitureChange}
+        onError={exactScene ? onExactError : undefined}
       />
 
       {showingAi && (
@@ -1116,7 +1558,7 @@ function WalkthroughStage({
         </Pressable>
       </View>
 
-      {roomConfigs.length > 1 && viewMode !== "plan" && (
+      {roomConfigs.length > 1 && viewMode === "walk" && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roomStrip} contentContainerStyle={styles.roomStripContent}>
           {roomConfigs.map((room, index) => (
             <Pressable
@@ -1132,11 +1574,26 @@ function WalkthroughStage({
         </ScrollView>
       )}
 
+      {!showingAi && !inspected && panel !== "ai" && (
+        <View style={[styles.viewerGuidance, roomConfigs.length > 1 && viewMode === "walk" && styles.viewerGuidanceWithRooms]} pointerEvents="none">
+          <Ionicons name={viewMode === "plan" ? "scan-outline" : "hand-left-outline"} size={14} color={COLORS.white} />
+          <Text style={styles.viewerGuidanceText} numberOfLines={1}>
+            {viewMode === "walk" ? "Drag to look · Tap furniture to edit" : viewMode === "orbit" ? "Drag to orbit · Tap an item to edit" : "Drag to rotate the furnished plan"}
+          </Text>
+        </View>
+      )}
+
       {inspected && !showingAi && (
         <View style={styles.inspector}>
           <View style={styles.inspectorHead}>
-            <Text style={styles.inspectorTitle} numberOfLines={1}>{inspected.name}</Text>
-            <Pressable onPress={() => onSelect(null)} hitSlop={LAYOUT.hitSlop}>
+            <View style={styles.inspectorObjectIcon}>
+              <Ionicons name="cube-outline" size={17} color={COLORS.primaryDark} />
+            </View>
+            <View style={styles.inspectorHeadingCopy}>
+              <Text style={styles.inspectorEyebrow}>Selected furniture</Text>
+              <Text style={styles.inspectorTitle} numberOfLines={1}>{inspected.name}</Text>
+            </View>
+            <Pressable style={styles.inspectorClose} onPress={() => onSelect(null)} hitSlop={LAYOUT.hitSlop}>
               <Ionicons name="close" size={16} color={COLORS.textSecondary} />
             </Pressable>
           </View>
@@ -1144,33 +1601,45 @@ function WalkthroughStage({
           <Text style={styles.inspectorBody}>{inspected.detail}</Text>
 
           <View style={styles.inspectorActions}>
-            <Pressable style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(-Math.PI / 12)}>
-              <Ionicons name="return-up-back-outline" size={16} color={COLORS.textPrimary} />
-            </Pressable>
-            <Pressable style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(Math.PI / 12)}>
-              <Ionicons name="return-up-forward-outline" size={16} color={COLORS.textPrimary} />
-            </Pressable>
-            <View style={styles.inspectorDivider} />
-            {[
-              { direction: "left", icon: "chevron-back" },
-              { direction: "forward", icon: "chevron-up" },
-              { direction: "back", icon: "chevron-down" },
-              { direction: "right", icon: "chevron-forward" },
-            ].map((item) => (
-              <Pressable
-                key={item.direction}
-                style={styles.inspectorIcon}
-                onPress={() => viewerRef.current?.moveSelected(item.direction)}
-              >
-                <Ionicons name={item.icon} size={16} color={COLORS.textPrimary} />
+            <View style={styles.inspectorActionGroup}>
+              <Text style={styles.inspectorActionLabel}>Rotate</Text>
+              <View style={styles.inspectorActionRow}>
+                <Pressable accessibilityLabel="Rotate furniture left" style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(-Math.PI / 12)}>
+                  <Ionicons name="return-up-back-outline" size={17} color={COLORS.textPrimary} />
+                </Pressable>
+                <Pressable accessibilityLabel="Rotate furniture right" style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(Math.PI / 12)}>
+                  <Ionicons name="return-up-forward-outline" size={17} color={COLORS.textPrimary} />
+                </Pressable>
+              </View>
+            </View>
+            <View style={[styles.inspectorActionGroup, styles.inspectorPositionGroup]}>
+              <Text style={styles.inspectorActionLabel}>Position</Text>
+              <View style={styles.inspectorActionRow}>
+                {[
+                  { direction: "left", icon: "chevron-back" },
+                  { direction: "forward", icon: "chevron-up" },
+                  { direction: "back", icon: "chevron-down" },
+                  { direction: "right", icon: "chevron-forward" },
+                ].map((item) => (
+                  <Pressable
+                    accessibilityLabel={`Move furniture ${item.direction}`}
+                    key={item.direction}
+                    style={styles.inspectorIcon}
+                    onPress={() => viewerRef.current?.moveSelected(item.direction)}
+                  >
+                    <Ionicons name={item.icon} size={17} color={COLORS.textPrimary} />
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+            <View style={styles.inspectorActionGroup}>
+              <Text style={styles.inspectorActionLabel}>Reset</Text>
+              <Pressable accessibilityLabel="Reset furniture placement" style={styles.inspectorIcon} onPress={() => viewerRef.current?.resetSelected()}>
+                <Ionicons name="refresh-outline" size={17} color={COLORS.textSecondary} />
               </Pressable>
-            ))}
-            <View style={styles.inspectorDivider} />
-            <Pressable style={styles.inspectorIcon} onPress={() => viewerRef.current?.resetSelected()}>
-              <Ionicons name="refresh-outline" size={16} color={COLORS.textSecondary} />
-            </Pressable>
+            </View>
           </View>
-          <Text style={styles.inspectorHint}>Rotate, nudge, or reset to the designer&rsquo;s placement.</Text>
+          <Text style={styles.inspectorHint}>Every adjustment is saved automatically with this 3D project.</Text>
         </View>
       )}
 
@@ -1253,7 +1722,15 @@ function WalkthroughStage({
           <View style={styles.sceneBadge}>
             <View style={styles.sceneDot} />
             <Text style={styles.sceneBadgeText} numberOfLines={1}>
-              {sceneInfo ? `${sceneInfo.rooms} rooms ready` : "Building scene…"}
+              {sceneInfo?.exact
+                ? `${sceneInfo.objects} exact Livinai pieces`
+                : exactSceneLoading
+                  ? "Syncing exact Livinai scene…"
+                  : exactSceneError
+                    ? "Offline preview"
+                    : sceneInfo
+                      ? `${sceneInfo.rooms} rooms ready`
+                      : "Building scene…"}
             </Text>
           </View>
           <Pressable style={styles.aiButton} onPress={() => onSetPanel(panel === "ai" ? null : "ai")}>
@@ -1299,6 +1776,156 @@ function GhostButton({ icon, label, onPress, disabled, active, tone }) {
   );
 }
 
+function CurveControls({ edgeType, onChangeEdgeType, settings, onChangeSettings }) {
+  const update = (key, value) => onChangeSettings((current) => ({ ...current, [key]: value }));
+  return (
+    <View style={styles.curveCard}>
+      <View style={styles.curveHead}>
+        <View style={styles.curveHeadCopy}>
+          <Text style={styles.curveTitle}>Wall shape</Text>
+          <Text style={styles.curveCopy}>Rounded walls are stored as editable plan points and carry into 3D.</Text>
+        </View>
+        <View style={styles.curveSegmented}>
+          {[
+            ["straight", "Straight"],
+            ["rounded", "Rounded"],
+          ].map(([value, label]) => (
+            <Pressable
+              key={value}
+              style={[styles.curveSegment, edgeType === value && styles.curveSegmentActive]}
+              onPress={() => onChangeEdgeType(value)}
+            >
+              <Text style={[styles.curveSegmentText, edgeType === value && styles.curveSegmentTextActive]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      {edgeType === "rounded" && (
+        <View style={styles.curveSettings}>
+          <View style={styles.curveDirection}>
+            <Text style={styles.curveSettingLabel}>Curve direction</Text>
+            <View style={styles.curveDirectionButtons}>
+              <Pressable style={[styles.curveDirectionButton, settings.direction === -1 && styles.curveDirectionButtonActive]} onPress={() => update("direction", -1)}>
+                <Text style={[styles.curveDirectionText, settings.direction === -1 && styles.curveDirectionTextActive]}>Left</Text>
+              </Pressable>
+              <Pressable style={[styles.curveDirectionButton, settings.direction === 1 && styles.curveDirectionButtonActive]} onPress={() => update("direction", 1)}>
+                <Text style={[styles.curveDirectionText, settings.direction === 1 && styles.curveDirectionTextActive]}>Right</Text>
+              </Pressable>
+            </View>
+          </View>
+          <CurveStepper label="Strength" value={settings.intensity} min={0} max={100} step={10} suffix="%" onChange={(value) => update("intensity", value)} />
+          <CurveStepper label="Bend position" value={settings.position} min={15} max={85} step={5} suffix="%" onChange={(value) => update("position", value)} />
+          <CurveStepper label="Tilt" value={settings.angle} min={-55} max={55} step={5} suffix="°" onChange={(value) => update("angle", value)} />
+          <Pressable style={styles.curveReset} onPress={() => onChangeSettings({ ...DEFAULT_CURVE_SETTINGS })}>
+            <Ionicons name="refresh-outline" size={13} color={COLORS.primaryDark} />
+            <Text style={styles.curveResetText}>Reset curve</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function CurveStepper({ label, value, min, max, step, suffix, onChange }) {
+  return (
+    <View style={styles.curveStepper}>
+      <Text style={styles.curveSettingLabel}>{label}</Text>
+      <View style={styles.curveStepperActions}>
+        <Pressable style={styles.curveStepButton} disabled={value <= min} onPress={() => onChange(Math.max(min, value - step))}>
+          <Ionicons name="remove" size={14} color={value <= min ? COLORS.textTertiary : COLORS.textPrimary} />
+        </Pressable>
+        <Text style={styles.curveStepValue}>{value}{suffix}</Text>
+        <Pressable style={styles.curveStepButton} disabled={value >= max} onPress={() => onChange(Math.min(max, value + step))}>
+          <Ionicons name="add" size={14} color={value >= max ? COLORS.textTertiary : COLORS.textPrimary} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ProjectLibraryModal({ visible, projects, currentId, title, onChangeTitle, onClose, onSave, onOpen, onNew, onRemove }) {
+  return (
+    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={styles.projectBackdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <SafeAreaView edges={["bottom"]} style={styles.projectSheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.projectHead}>
+            <View style={styles.projectHeadCopy}>
+              <Text style={styles.projectEyebrow}>Saved on this device</Text>
+              <Text style={styles.projectTitle}>3D projects</Text>
+            </View>
+            <Pressable style={styles.projectClose} onPress={onClose}>
+              <Ionicons name="close" size={20} color={COLORS.textPrimary} />
+            </Pressable>
+          </View>
+
+          <View style={styles.currentProjectCard}>
+            <Text style={styles.fieldLabel}>Current project name</Text>
+            <TextInput
+              value={title}
+              onChangeText={onChangeTitle}
+              style={styles.projectNameInput}
+              placeholder="Name this 3D plan"
+              placeholderTextColor={COLORS.placeholderText}
+              maxLength={60}
+            />
+            <View style={styles.currentProjectActions}>
+              <Pressable style={styles.projectSaveButton} onPress={onSave}>
+                <Ionicons name="save-outline" size={16} color={COLORS.white} />
+                <Text style={styles.projectSaveText}>Save current plan</Text>
+              </Pressable>
+              <Pressable style={styles.projectNewButton} onPress={onNew}>
+                <Ionicons name="add" size={17} color={COLORS.primaryDark} />
+                <Text style={styles.projectNewText}>New plan</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <ScrollView style={styles.projectList} contentContainerStyle={styles.projectListContent} showsVerticalScrollIndicator={false}>
+            {projects.length ? projects.map((project) => (
+              <Pressable key={project.id} style={[styles.projectCard, project.id === currentId && styles.projectCardActive]} onPress={() => onOpen(project)}>
+                <View style={styles.projectThumbnail}>
+                  {project.thumbnail
+                    ? <Image source={{ uri: project.thumbnail }} style={styles.projectThumbnailImage} resizeMode="cover" />
+                    : <Ionicons name="cube-outline" size={23} color={COLORS.primaryDark} />}
+                </View>
+                <View style={styles.projectCardCopy}>
+                  <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title || "3D walkthrough"}</Text>
+                  <Text style={styles.projectCardMeta}>
+                    {project.roomCount || project.data?.rooms?.length || 0} rooms · {new Date(project.updatedAt).toLocaleDateString()}
+                  </Text>
+                </View>
+                {project.id === currentId ? (
+                  <View style={styles.projectCurrentPill}><Text style={styles.projectCurrentText}>Current</Text></View>
+                ) : (
+                  <Ionicons name="chevron-forward" size={17} color={COLORS.textTertiary} />
+                )}
+                <Pressable
+                  hitSlop={LAYOUT.hitSlop}
+                  style={styles.projectDelete}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    onRemove(project);
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                </Pressable>
+              </Pressable>
+            )) : (
+              <View style={styles.projectEmpty}>
+                <Ionicons name="folder-open-outline" size={27} color={COLORS.textTertiary} />
+                <Text style={styles.projectEmptyTitle}>No saved 3D plans yet</Text>
+                <Text style={styles.projectEmptyText}>Save the current plan, then reopen it here whenever you want.</Text>
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
 function Metric({ value, label }) {
   return (
     <View style={styles.metric}>
@@ -1308,7 +1935,7 @@ function Metric({ value, label }) {
   );
 }
 
-function ChipRow({ label, options, value, onChange }) {
+function ChipRow({ label, options, value, onChange, formatOption = (option) => option }) {
   return (
     <View style={styles.chipBlock}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -1317,7 +1944,7 @@ function ChipRow({ label, options, value, onChange }) {
           const active = value === option;
           return (
             <Pressable key={option} style={[styles.chip, active && styles.chipActive]} onPress={() => onChange(option)}>
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{option}</Text>
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{formatOption(option)}</Text>
             </Pressable>
           );
         })}
@@ -1395,7 +2022,20 @@ const styles = StyleSheet.create({
 
   // Body
   body: { padding: SPACING.lg, paddingBottom: SPACING.xxxl },
+  planBody: { paddingHorizontal: SPACING.md },
   stageCopy: { ...TYPE.small, color: COLORS.textSecondary, marginBottom: SPACING.base },
+  projectStatus: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    marginBottom: SPACING.base, padding: SPACING.md, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+  },
+  projectStatusIcon: {
+    width: 36, height: 36, alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
+  },
+  projectStatusCopy: { flex: 1, minWidth: 0 },
+  projectStatusTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  projectStatusMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, fontSize: 9.5 },
 
   sourceRow: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
   sourcePrimary: {
@@ -1418,18 +2058,71 @@ const styles = StyleSheet.create({
   },
   planNoticeText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 18 },
 
-  toolbarWrap: { marginHorizontal: -SPACING.lg, marginBottom: SPACING.sm },
-  toolbar: { paddingHorizontal: SPACING.lg, gap: SPACING.sm },
+  workspaceHeader: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    marginBottom: SPACING.sm, paddingHorizontal: SPACING.xs,
+  },
+  workspaceIcon: {
+    width: 40, height: 40, borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+  },
+  workspaceCopy: { flex: 1 },
+  workspaceEyebrow: { ...TYPE.overline, color: COLORS.primaryDark, fontSize: 9.5 },
+  workspaceHint: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2, lineHeight: 16 },
+  workspaceBadge: {
+    minWidth: 48, alignItems: "center", paddingHorizontal: SPACING.sm, paddingVertical: 5,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  },
+  workspaceBadgeValue: { ...TYPE.bodyStrong, color: COLORS.textPrimary, lineHeight: 18 },
+  workspaceBadgeLabel: { ...TYPE.caption, color: COLORS.textTertiary, fontSize: 9 },
+  workspaceExpand: {
+    width: 40, height: 40, borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+  },
+  workspaceExpandActive: { backgroundColor: COLORS.primaryDark },
+  toolbarWrap: {
+    marginBottom: SPACING.sm, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
+  toolbar: { padding: 5, gap: 4 },
   tool: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: SPACING.base, paddingVertical: SPACING.sm,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.md, backgroundColor: "transparent",
+    borderWidth: 1, borderColor: "transparent",
   },
   toolActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
   toolLabel: { ...TYPE.caption, color: COLORS.textSecondary },
   toolLabelActive: { color: COLORS.white },
   toolHint: { ...TYPE.caption, color: COLORS.textTertiary, marginBottom: SPACING.md },
+
+  curveCard: {
+    marginBottom: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
+  curveHead: { gap: SPACING.md },
+  curveHeadCopy: { gap: 2 },
+  curveTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  curveCopy: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
+  curveSegmented: { flexDirection: "row", padding: 3, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveSegment: { flex: 1, alignItems: "center", paddingVertical: SPACING.sm, borderRadius: RADIUS.pill },
+  curveSegmentActive: { backgroundColor: COLORS.primaryDark },
+  curveSegmentText: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveSegmentTextActive: { color: COLORS.white },
+  curveSettings: { marginTop: SPACING.md, gap: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: SPACING.md },
+  curveDirection: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
+  curveDirectionButtons: { flexDirection: "row", gap: 4 },
+  curveDirectionButton: { paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveDirectionButtonActive: { backgroundColor: COLORS.primaryTint },
+  curveDirectionText: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveDirectionTextActive: { color: COLORS.primaryDark },
+  curveSettingLabel: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveStepper: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 34 },
+  curveStepperActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  curveStepButton: { width: 30, height: 30, alignItems: "center", justifyContent: "center", borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveStepValue: { minWidth: 46, ...TYPE.caption, color: COLORS.textPrimary, textAlign: "center" },
+  curveReset: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 },
+  curveResetText: { ...TYPE.caption, color: COLORS.primaryDark },
 
   canvasActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm, marginTop: SPACING.md },
   ghost: {
@@ -1448,6 +2141,40 @@ const styles = StyleSheet.create({
   },
   metricValue: { ...TYPE.h3, color: COLORS.textPrimary },
   metricLabel: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 1 },
+  scaleEditor: {
+    marginTop: SPACING.md, padding: SPACING.md, gap: SPACING.md,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  scaleEditorCopy: { gap: 2 },
+  scaleEditorTitle: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
+  scaleEditorText: { ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 17 },
+  scaleEditorActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
+
+  stageSummary: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    marginBottom: SPACING.md, padding: SPACING.base, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  stageSummaryIcon: {
+    width: 42, height: 42, alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+  },
+  stageSummaryCopy: { flex: 1 },
+  stageSummaryTitle: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
+  stageSummaryText: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2 },
+  exactSourceCard: {
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.md,
+    marginBottom: SPACING.md, padding: SPACING.base, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  exactSourceIcon: {
+    width: 44, height: 44, alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+  },
+  exactSourceCopy: { flex: 1 },
+  exactSourceTitle: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
+  exactSourceText: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 3, lineHeight: 17 },
 
   card: {
     backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.base,
@@ -1467,6 +2194,15 @@ const styles = StyleSheet.create({
   selectionName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary },
   selectionAction: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.dangerSoft },
   selectionActionText: { ...TYPE.caption },
+  openingEditor: {
+    marginTop: SPACING.sm, padding: SPACING.base, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+  },
+  openingEditorHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
+  openingEditorIcon: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken },
+  openingEditorCopy: { flex: 1 },
+  openingEditorTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  openingEditorText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, lineHeight: 16 },
   roomName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 4 },
   roomArea: { ...TYPE.caption, color: COLORS.textTertiary },
 
@@ -1481,10 +2217,54 @@ const styles = StyleSheet.create({
   chipText: { ...TYPE.caption, color: COLORS.textSecondary },
   chipTextActive: { color: COLORS.white },
 
+  settingToggle: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.lg,
+    padding: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  },
+  settingToggleIcon: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: COLORS.border, alignItems: "center", justifyContent: "center" },
+  settingToggleIconActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
+  settingToggleCopy: { flex: 1 },
+  settingToggleTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  settingToggleText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
+
   notes: {
     minHeight: 92, borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
     padding: SPACING.md, ...TYPE.small, color: COLORS.textPrimary, textAlignVertical: "top",
   },
+
+  projectBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: COLORS.scrim },
+  projectSheet: {
+    maxHeight: "88%", backgroundColor: COLORS.background,
+    borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
+    paddingHorizontal: SPACING.lg, paddingTop: SPACING.sm,
+  },
+  projectHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.base },
+  projectHeadCopy: { flex: 1 },
+  projectEyebrow: { ...TYPE.overline, color: COLORS.primary },
+  projectTitle: { ...TYPE.h2, color: COLORS.textPrimary, marginTop: 2 },
+  projectClose: { width: 38, height: 38, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken },
+  currentProjectCard: { padding: SPACING.base, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs },
+  projectNameInput: { ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingHorizontal: SPACING.md, paddingVertical: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken },
+  currentProjectActions: { flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md },
+  projectSaveButton: { flex: 1.2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
+  projectSaveText: { ...TYPE.caption, color: COLORS.white },
+  projectNewButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint },
+  projectNewText: { ...TYPE.caption, color: COLORS.primaryDark },
+  projectList: { marginTop: SPACING.base },
+  projectListContent: { gap: SPACING.sm, paddingBottom: SPACING.xl },
+  projectCard: { flexDirection: "row", alignItems: "center", gap: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
+  projectCardActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryTint },
+  projectThumbnail: { width: 52, height: 52, borderRadius: RADIUS.md, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken },
+  projectThumbnailImage: { width: "100%", height: "100%" },
+  projectCardCopy: { flex: 1 },
+  projectCardTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  projectCardMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 3 },
+  projectCurrentPill: { paddingHorizontal: SPACING.sm, paddingVertical: 4, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
+  projectCurrentText: { ...TYPE.caption, color: COLORS.white, fontSize: 9.5 },
+  projectDelete: { width: 30, height: 30, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.dangerSoft },
+  projectEmpty: { alignItems: "center", paddingVertical: SPACING.xxl, paddingHorizontal: SPACING.xl },
+  projectEmptyTitle: { ...TYPE.bodyStrong, color: COLORS.textSecondary, marginTop: SPACING.sm },
+  projectEmptyText: { ...TYPE.caption, color: COLORS.textTertiary, textAlign: "center", marginTop: 4, lineHeight: 17 },
 
   empty: { alignItems: "center", gap: SPACING.sm, paddingVertical: SPACING.xxl },
   emptyText: { ...TYPE.small, color: COLORS.textTertiary },
@@ -1529,21 +2309,39 @@ const styles = StyleSheet.create({
   roomPillText: { ...TYPE.caption, color: COLORS.textSecondary },
   roomPillTextActive: { color: COLORS.white },
 
+  viewerGuidance: {
+    position: "absolute", top: ms(62), left: SPACING.base,
+    maxWidth: "78%", flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: SPACING.md, paddingVertical: 7, borderRadius: RADIUS.pill,
+    backgroundColor: "rgba(25,32,29,0.72)",
+  },
+  viewerGuidanceWithRooms: { top: ms(106) },
+  viewerGuidanceText: { ...TYPE.caption, color: COLORS.white, fontSize: 10 },
+
   inspector: {
     position: "absolute", left: SPACING.base, right: SPACING.base, bottom: ms(94),
-    backgroundColor: "rgba(255,255,255,0.97)", borderRadius: RADIUS.lg, padding: SPACING.base, ...SHADOW.md,
+    backgroundColor: "rgba(255,255,255,0.98)", borderRadius: RADIUS.xl, padding: SPACING.base,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.78)", ...SHADOW.lg,
   },
-  inspectorHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.sm },
-  inspectorTitle: { ...TYPE.h3, color: COLORS.textPrimary, flex: 1, textTransform: "capitalize" },
-  inspectorMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: 2 },
-  inspectorBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: SPACING.xs },
-  inspectorActions: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: SPACING.md },
+  inspectorHead: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  inspectorObjectIcon: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint },
+  inspectorHeadingCopy: { flex: 1, minWidth: 0 },
+  inspectorEyebrow: { ...TYPE.overline, color: COLORS.primary, fontSize: 9 },
+  inspectorTitle: { ...TYPE.h3, color: COLORS.textPrimary, textTransform: "capitalize" },
+  inspectorClose: { width: 34, height: 34, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken },
+  inspectorMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: SPACING.sm },
+  inspectorBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: 2, lineHeight: 18 },
+  inspectorActions: { flexDirection: "row", alignItems: "flex-end", gap: SPACING.sm, marginTop: SPACING.md },
+  inspectorActionGroup: { gap: 5 },
+  inspectorPositionGroup: { flex: 1 },
+  inspectorActionLabel: { ...TYPE.overline, color: COLORS.textTertiary, fontSize: 8.5 },
+  inspectorActionRow: { flexDirection: "row", gap: 4 },
   inspectorIcon: {
-    width: ms(34), height: ms(34), borderRadius: RADIUS.sm,
+    flex: 1, minWidth: ms(34), height: ms(38), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  inspectorDivider: { width: 1, height: ms(20), backgroundColor: COLORS.border, marginHorizontal: 3 },
-  inspectorHint: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: SPACING.sm },
+  inspectorHint: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: SPACING.sm, textAlign: "center" },
 
   // AI
   aiLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.surfaceInverse },

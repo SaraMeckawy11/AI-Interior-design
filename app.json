@@ -5,10 +5,10 @@
     "scheme": "livinai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon1.png",
+    "icon": "./assets/images/icon-square.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/splash-icon.jpg"
+      "image": "./assets/images/splash-icon.png"
     },
     "ios": {
       "supportsTablet": true,
@@ -20,7 +20,7 @@
     "android": {
       "package": "com.livinai.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon1.png",
+        "foregroundImage": "./assets/images/adaptive-icon-square.png",
         "backgroundColor": "#ffffff"
       }
     },
@@ -39,8 +39,8 @@
       [
         "react-native-google-mobile-ads",
         {
-          "android_app_id": "ca-app-pub-4470538534931449~7850095110",
-          "ios_app_id": "ca-app-pub-4470538534931449~7850095110"
+          "androidAppId": "ca-app-pub-4470538534931449~7850095110",
+          "iosAppId": "ca-app-pub-4470538534931449~7850095110"
         }
       ],
       "expo-router",

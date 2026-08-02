@@ -1,8 +1,9 @@
-import React, { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, PanResponder, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, {
   Circle,
   G,
+  Image as SvgImage,
   Line,
   Polygon,
   Polyline,
@@ -11,7 +12,7 @@ import Svg, {
 } from "react-native-svg";
 
 import COLORS from "../../constants/colors";
-import { RADIUS, TYPE } from "../../constants/theme";
+import { RADIUS, SHADOW, TYPE } from "../../constants/theme";
 
 /**
  * Measured floor-plan canvas.
@@ -24,14 +25,71 @@ import { RADIUS, TYPE } from "../../constants/theme";
  * converted to metres only for on-screen labels.
  */
 
-export const PLAN_WIDTH_METERS = 12;
+export const PLAN_WIDTH_METERS = 15;
+// A deeper 15 m × 13 m workspace gives fingers and edit handles room to work
+// on portrait phones while preserving a true metres-to-pixels scale.
+export const PLAN_HEIGHT_METERS = 13;
 export const GRID_METERS = 0.5;
+
+export const DEFAULT_CURVE_SETTINGS = {
+  direction: 1,
+  angle: 0,
+  intensity: 45,
+  position: 50,
+};
+
+export function buildCurveGeometry(start, end, settings = DEFAULT_CURVE_SETTINGS) {
+  if (!start || !end) return null;
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 0.001) return null;
+  const position = Math.max(0.15, Math.min(0.85, Number(settings.position) / 100));
+  const base = [start[0] + dx * position, start[1] + dy * position];
+  const offsetAngle = Math.atan2(dy, dx) + Math.PI / 2 + (Number(settings.angle) * Math.PI) / 180;
+  const offset = length * 0.65 * (Number(settings.intensity) / 100) * (Number(settings.direction) || 1);
+  const control = [base[0] + Math.cos(offsetAngle) * offset, base[1] + Math.sin(offsetAngle) * offset];
+  const sampleCount = Math.max(10, Math.min(24, Math.ceil(length / 18)));
+  const samples = Array.from({ length: sampleCount }, (_, index) => {
+    const t = (index + 1) / sampleCount;
+    const oneMinus = 1 - t;
+    return [
+      oneMinus ** 2 * start[0] + 2 * oneMinus * t * control[0] + t ** 2 * end[0],
+      oneMinus ** 2 * start[1] + 2 * oneMinus * t * control[1] + t ** 2 * end[1],
+    ];
+  });
+  return { control, samples };
+}
 
 export const OPENING_SPECS = {
   door: { meters: 0.9, minimumMeters: 0.9, color: "#AE6740", label: "Door" },
   window: { meters: 1.2, minimumMeters: 0.7, color: "#2C6089", label: "Window" },
   balcony: { meters: 1.8, minimumMeters: 0.9, color: "#2E7350", label: "Balcony" },
 };
+
+export const OPENING_VARIANTS = {
+  door: [
+    { label: "Single", meters: 0.9, height: 2.1 },
+    { label: "Double", meters: 1.6, height: 2.1 },
+    { label: "Open passage", meters: 1.4, height: 2.18 },
+  ],
+  window: [
+    { label: "Standard", meters: 1.2, sillHeight: 0.82, height: 1.24 },
+    { label: "Picture", meters: 1.8, sillHeight: 0.72, height: 1.4 },
+    { label: "Wide", meters: 2.4, sillHeight: 0.72, height: 1.4 },
+  ],
+  balcony: [
+    { label: "French", meters: 1.4, height: 2.32 },
+    { label: "Sliding", meters: 1.8, height: 2.38 },
+    { label: "Wide slider", meters: 2.8, height: 2.38 },
+  ],
+};
+
+export function openingDefaults(kind, variantLabel) {
+  const variants = OPENING_VARIANTS[kind] || OPENING_VARIANTS.door;
+  const variant = variants.find((item) => item.label === variantLabel) || variants[0];
+  return { variant: variant.label, height: variant.height, sillHeight: variant.sillHeight };
+}
 
 export const ROOM_TINTS = [
   { fill: "rgba(92,138,114,0.18)", stroke: "#41715A" },
@@ -184,9 +242,12 @@ export default function PlanCanvas({
   openings,
   draft,
   snapToGrid = true,
+  roomEdgeType = "straight",
+  curveSettings = DEFAULT_CURVE_SETTINGS,
   selectedRoom,
   selection,
   onAddVertex,
+  onAddCurve,
   onCloseRoom,
   onAddRoom,
   onAddOpening,
@@ -203,7 +264,20 @@ export default function PlanCanvas({
   const [pointer, setPointer] = useState(null);
   const [rectDraft, setRectDraft] = useState(null);
   const [openingDraft, setOpeningDraft] = useState(null);
-  const gesture = useRef({ x: 0, y: 0, moved: 0, startedAt: 0, drag: null, lastX: 0, lastY: 0, historyStarted: false });
+  const [viewport, setViewport] = useState({ zoom: 1, x: 0, y: 0 });
+  const viewportRef = useRef(viewport);
+  const gesture = useRef({
+    moved: 0,
+    drag: null,
+    lastX: 0,
+    lastY: 0,
+    historyStarted: false,
+    rectDraft: null,
+    openingDraft: null,
+    viewport: null,
+    pinchDistance: 0,
+    pinchZoom: 1,
+  });
 
   const pixelsPerMeter = suppliedPixelsPerMeter || width / PLAN_WIDTH_METERS;
   const gridStep = pixelsPerMeter * GRID_METERS;
@@ -214,16 +288,69 @@ export default function PlanCanvas({
   const snapPoint = (point) => [clampX(snap(point[0])), clampY(snap(point[1]))];
   const metres = (pixels) => pixels / pixelsPerMeter;
 
+  const clampViewport = (next) => {
+    const zoom = Math.max(1, Math.min(4, Number(next.zoom) || 1));
+    const visibleWidth = width / zoom;
+    const visibleHeight = height / zoom;
+    // Keep a small amount of pasteboard around the plan. Besides making edge
+    // editing much easier, this lets the user reposition the sheet even at the
+    // fitted zoom level instead of making the canvas feel locked in place.
+    const marginX = visibleWidth * 0.14;
+    const marginY = visibleHeight * 0.14;
+    return {
+      zoom,
+      x: Math.max(-marginX, Math.min(width - visibleWidth + marginX, Number(next.x) || 0)),
+      y: Math.max(-marginY, Math.min(height - visibleHeight + marginY, Number(next.y) || 0)),
+    };
+  };
+
+  const updateViewport = (next) => {
+    const clamped = clampViewport(next);
+    viewportRef.current = clamped;
+    setViewport(clamped);
+  };
+
+  const zoomAt = (nextZoom, screenX = width / 2, screenY = height / 2) => {
+    const current = viewportRef.current;
+    const anchorX = current.x + screenX / current.zoom;
+    const anchorY = current.y + screenY / current.zoom;
+    const zoom = Math.max(1, Math.min(4, nextZoom));
+    updateViewport({
+      zoom,
+      x: anchorX - screenX / zoom,
+      y: anchorY - screenY / zoom,
+    });
+  };
+
+  const screenToPlan = (x, y) => {
+    const current = viewportRef.current;
+    return [clampX(current.x + x / current.zoom), clampY(current.y + y / current.zoom)];
+  };
+
+  useEffect(() => {
+    updateViewport({ zoom: 1, x: 0, y: 0 });
+    // Reset the camera only when a different-sized plan is loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width, height, imageUri]);
+
   const handleTap = (x, y) => {
-    const raw = [clampX(x), clampY(y)];
+    const raw = screenToPlan(x, y);
     if (tool === "room") {
       const point = snapPoint(raw);
       if (draft.length >= 3) {
         const first = draft[0];
         if (Math.hypot(point[0] - first[0], point[1] - first[1]) <= gridStep * 0.9) {
-          onCloseRoom?.();
+          const closingCurve = roomEdgeType === "rounded"
+            ? buildCurveGeometry(draft[draft.length - 1], first, curveSettings)
+            : null;
+          onCloseRoom?.(closingCurve?.samples?.slice(0, -1) || []);
           return;
         }
+      }
+      if (roomEdgeType === "rounded" && draft.length) {
+        const curve = buildCurveGeometry(draft[draft.length - 1], point, curveSettings);
+        if (curve) onAddCurve?.(curve.samples);
+        return;
       }
       onAddVertex?.(point);
       return;
@@ -263,7 +390,7 @@ export default function PlanCanvas({
       return;
     }
     const placed = openingOnNearestWall(raw, rooms, spec.meters * pixelsPerMeter, gridStep * 2.2);
-    if (placed) onAddOpening?.({ kind: tool, points: placed });
+    if (placed) onAddOpening?.({ kind: tool, points: placed, ...openingDefaults(tool) });
   };
 
   /**
@@ -315,16 +442,21 @@ export default function PlanCanvas({
 
         onPanResponderGrant: (event) => {
           const { locationX, locationY } = event.nativeEvent;
-          const point = [clampX(locationX), clampY(locationY)];
+          const point = screenToPlan(locationX, locationY);
           gesture.current = {
-            x: locationX, y: locationY, moved: 0, startedAt: Date.now(),
+            moved: 0,
             drag: null, lastX: locationX, lastY: locationY,
-            historyStarted: false,
+            historyStarted: false, rectDraft: null, openingDraft: null,
+            viewport: { ...viewportRef.current }, pinchDistance: 0, pinchZoom: viewportRef.current.zoom,
           };
           setPointer(point);
 
+          if (tool === "pan") return;
+
           if (tool === "rect") {
-            setRectDraft({ from: snapPoint(point), to: snapPoint(point) });
+            const nextDraft = { from: snapPoint(point), to: snapPoint(point) };
+            gesture.current.rectDraft = nextDraft;
+            setRectDraft(nextDraft);
             return;
           }
           if (tool === "select") {
@@ -349,23 +481,63 @@ export default function PlanCanvas({
             return;
           }
           if (OPENING_SPECS[tool]) {
-            setOpeningDraft({ from: point, to: point, kind: tool });
+            const nextDraft = { from: point, to: point, kind: tool };
+            gesture.current.openingDraft = nextDraft;
+            setOpeningDraft(nextDraft);
           }
         },
 
         onPanResponderMove: (event, state) => {
+          const touches = event.nativeEvent.touches || [];
+          if (touches.length >= 2) {
+            const distance = Math.hypot(
+              touches[0].pageX - touches[1].pageX,
+              touches[0].pageY - touches[1].pageY,
+            );
+            if (!gesture.current.pinchDistance) {
+              gesture.current.pinchDistance = Math.max(1, distance);
+              gesture.current.pinchZoom = viewportRef.current.zoom;
+            } else {
+              zoomAt(gesture.current.pinchZoom * (distance / gesture.current.pinchDistance));
+            }
+            gesture.current.moved = 20;
+            setPointer(null);
+            return;
+          }
+
           gesture.current.moved = Math.abs(state.dx) + Math.abs(state.dy);
           const { locationX, locationY } = event.nativeEvent;
-          const point = [clampX(locationX), clampY(locationY)];
+          if (tool === "pan") {
+            const start = gesture.current.viewport || viewportRef.current;
+            updateViewport({
+              ...start,
+              x: start.x - state.dx / start.zoom,
+              y: start.y - state.dy / start.zoom,
+            });
+            setPointer(null);
+            return;
+          }
+
+          const point = screenToPlan(locationX, locationY);
           setPointer(point);
 
           if (tool === "rect") {
-            setRectDraft((current) => (current ? { ...current, to: snapPoint(point) } : current));
+            const current = gesture.current.rectDraft;
+            if (current) {
+              const nextDraft = { ...current, to: snapPoint(point) };
+              gesture.current.rectDraft = nextDraft;
+              setRectDraft(nextDraft);
+            }
             return;
           }
 
           if (OPENING_SPECS[tool]) {
-            setOpeningDraft((current) => (current ? { ...current, to: point } : current));
+            const current = gesture.current.openingDraft;
+            if (current) {
+              const nextDraft = { ...current, to: point };
+              gesture.current.openingDraft = nextDraft;
+              setOpeningDraft(nextDraft);
+            }
             return;
           }
 
@@ -386,7 +558,11 @@ export default function PlanCanvas({
           } else if (drag.kind === "room") {
             // Deltas rather than absolute positions: the room keeps its shape
             // and does not jump to centre itself under the finger.
-            onMoveRoom?.(drag.index, locationX - gesture.current.lastX, locationY - gesture.current.lastY);
+            onMoveRoom?.(
+              drag.index,
+              (locationX - gesture.current.lastX) / viewportRef.current.zoom,
+              (locationY - gesture.current.lastY) / viewportRef.current.zoom,
+            );
           }
           gesture.current.lastX = locationX;
           gesture.current.lastY = locationY;
@@ -394,11 +570,15 @@ export default function PlanCanvas({
 
         onPanResponderRelease: (event) => {
           const { locationX, locationY } = event.nativeEvent;
-          const quick = Date.now() - gesture.current.startedAt < 700;
+          const releasePoint = screenToPlan(locationX, locationY);
+          const activeRectDraft = gesture.current.rectDraft;
+          const activeOpeningDraft = gesture.current.openingDraft;
 
-          if (tool === "rect" && rectDraft && gesture.current.moved >= 10) {
-            const [x1, y1] = rectDraft.from;
-            const [x2, y2] = snapPoint([clampX(locationX), clampY(locationY)]);
+          if (tool === "pan" || gesture.current.pinchDistance) {
+            // The gesture only changed the viewport.
+          } else if (tool === "rect" && activeRectDraft && gesture.current.moved >= 8) {
+            const [x1, y1] = activeRectDraft.from;
+            const [x2, y2] = snapPoint(releasePoint);
             const minSide = gridStep * 1.5;
             if (Math.abs(x2 - x1) >= minSide && Math.abs(y2 - y1) >= minSide) {
               onAddRoom?.([
@@ -408,19 +588,21 @@ export default function PlanCanvas({
                 [Math.min(x1, x2), Math.max(y1, y2)],
               ]);
             }
-          } else if (OPENING_SPECS[tool] && openingDraft && gesture.current.moved >= 10) {
+          } else if (OPENING_SPECS[tool] && activeOpeningDraft && gesture.current.moved >= 8) {
             const placed = snapOpeningToNearestWall(
-              [openingDraft.from, [clampX(locationX), clampY(locationY)]],
+              [activeOpeningDraft.from, releasePoint],
               rooms,
               tool,
               pixelsPerMeter,
             );
-            if (placed) onAddOpening?.({ kind: tool, points: placed });
-          } else if (gesture.current.moved < 10 && quick) {
+            if (placed) onAddOpening?.({ kind: tool, points: placed, ...openingDefaults(tool) });
+          } else if (gesture.current.moved < 12) {
             handleTap(locationX, locationY);
           }
 
           gesture.current.drag = null;
+          gesture.current.rectDraft = null;
+          gesture.current.openingDraft = null;
           setRectDraft(null);
           setOpeningDraft(null);
           setPointer(null);
@@ -428,6 +610,8 @@ export default function PlanCanvas({
 
         onPanResponderTerminate: () => {
           gesture.current.drag = null;
+          gesture.current.rectDraft = null;
+          gesture.current.openingDraft = null;
           setRectDraft(null);
           setOpeningDraft(null);
           setPointer(null);
@@ -436,7 +620,7 @@ export default function PlanCanvas({
     // Recreated whenever the drawing context changes so the closure never
     // captures stale rooms/draft state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tool, rooms, openings, draft, snapToGrid, width, height, suppliedPixelsPerMeter, rectDraft, openingDraft, selectedRoom, selection],
+    [tool, rooms, openings, draft, snapToGrid, width, height, suppliedPixelsPerMeter, selectedRoom, selection, roomEdgeType, curveSettings],
   );
 
   const gridLines = useMemo(() => {
@@ -451,6 +635,18 @@ export default function PlanCanvas({
   }, [gridStep, height, width]);
 
   const snappedPointer = pointer && (tool === "room" || tool === "rect") ? snapPoint(pointer) : pointer;
+  const curvePreview = roomEdgeType === "rounded" && tool === "room" && draft.length && snappedPointer
+    ? buildCurveGeometry(draft[draft.length - 1], snappedPointer, curveSettings)
+    : null;
+  const draftPreviewPoints = [
+    ...draft,
+    ...(tool === "room" && snappedPointer
+      ? curvePreview?.samples || [snappedPointer]
+      : []),
+  ];
+  const visibleWidth = width / viewport.zoom;
+  const visibleHeight = height / viewport.zoom;
+  const viewBox = `${viewport.x} ${viewport.y} ${visibleWidth} ${visibleHeight}`;
 
   const rectPreview = rectDraft
     ? {
@@ -463,9 +659,11 @@ export default function PlanCanvas({
 
   return (
     <View style={[styles.canvas, { width, height }]} {...responder.panHandlers}>
-      {imageUri ? <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} resizeMode="stretch" /> : null}
-      <Svg width={width} height={height}>
+      <Svg width={width} height={height} viewBox={viewBox} preserveAspectRatio="none">
         <Rect x={0} y={0} width={width} height={height} fill={imageUri ? "rgba(255,255,255,0.08)" : COLORS.surface} />
+        {imageUri ? (
+          <SvgImage href={{ uri: imageUri }} x={0} y={0} width={width} height={height} preserveAspectRatio="xMinYMin meet" opacity={0.78} />
+        ) : null}
         <G opacity={imageUri ? 0.18 : 0.6}>
           {gridLines.map((line) => (
             <Line
@@ -507,6 +705,14 @@ export default function PlanCanvas({
         {openings.map((opening, index) => {
           const spec = OPENING_SPECS[opening.kind] || OPENING_SPECS.door;
           const active = selection?.kind === "opening" && selection.index === index;
+          const midpoint = [
+            (opening.points[0][0] + opening.points[1][0]) / 2,
+            (opening.points[0][1] + opening.points[1][1]) / 2,
+          ];
+          const openingWidth = metres(Math.hypot(
+            opening.points[1][0] - opening.points[0][0],
+            opening.points[1][1] - opening.points[0][1],
+          ));
           return (
             <G key={`opening-${index}`}>
               <Line
@@ -527,6 +733,18 @@ export default function PlanCanvas({
                 strokeWidth={active ? 7 : 5}
                 strokeLinecap="round"
               />
+              {active && (
+                <SvgText
+                  x={midpoint[0]}
+                  y={midpoint[1] - 9}
+                  fill={spec.color}
+                  fontSize={9.5}
+                  fontWeight="700"
+                  textAnchor="middle"
+                >
+                  {`${opening.variant || spec.label} · ${openingWidth.toFixed(1)} m`}
+                </SvgText>
+              )}
             </G>
           );
         })}
@@ -612,7 +830,7 @@ export default function PlanCanvas({
         {draft.length > 0 && (
           <G>
             <Polyline
-              points={[...draft, ...(snappedPointer && tool === "room" ? [snappedPointer] : [])].map((point) => point.join(",")).join(" ")}
+              points={draftPreviewPoints.map((point) => point.join(",")).join(" ")}
               fill="none"
               stroke={COLORS.primaryDark}
               strokeWidth={2.5}
@@ -658,6 +876,35 @@ export default function PlanCanvas({
         )}
       </Svg>
 
+      <View style={styles.viewportControls}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Zoom out"
+          style={[styles.viewportButton, viewport.zoom <= 1 && styles.viewportButtonDisabled]}
+          disabled={viewport.zoom <= 1}
+          onPress={() => zoomAt(viewportRef.current.zoom / 1.35)}
+        >
+          <Text style={styles.viewportButtonText}>−</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Reset plan view"
+          style={styles.viewportValue}
+          onPress={() => updateViewport({ zoom: 1, x: 0, y: 0 })}
+        >
+          <Text style={styles.viewportValueText}>{Math.round(viewport.zoom * 100)}%</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Zoom in"
+          style={[styles.viewportButton, viewport.zoom >= 4 && styles.viewportButtonDisabled]}
+          disabled={viewport.zoom >= 4}
+          onPress={() => zoomAt(viewportRef.current.zoom * 1.35)}
+        >
+          <Text style={styles.viewportButtonText}>+</Text>
+        </Pressable>
+      </View>
+
       {rooms.length === 0 && draft.length === 0 && !rectDraft && !imageUri && (
         <View style={styles.empty} pointerEvents="none">
           <Text style={styles.emptyTitle}>
@@ -676,7 +923,7 @@ export default function PlanCanvas({
       )}
 
       <View style={styles.scaleBadge} pointerEvents="none">
-        <View style={[styles.scaleBar, { width: gridStep * 2 }]} />
+        <View style={[styles.scaleBar, { width: Math.min(width * 0.34, gridStep * 2 * viewport.zoom) }]} />
         <Text style={styles.scaleLabel}>1 m</Text>
       </View>
     </View>
@@ -685,11 +932,12 @@ export default function PlanCanvas({
 
 const styles = StyleSheet.create({
   canvas: {
-    borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.xl,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderStrong,
     backgroundColor: COLORS.surface,
+    ...SHADOW.md,
   },
   empty: {
     ...StyleSheet.absoluteFillObject,
@@ -699,6 +947,30 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { ...TYPE.bodyStrong, color: COLORS.textSecondary },
   emptyBody: { ...TYPE.caption, color: COLORS.textTertiary },
+  viewportControls: {
+    position: "absolute",
+    right: 10,
+    top: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: RADIUS.pill,
+    padding: 3,
+    backgroundColor: "rgba(255,255,255,0.94)",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  viewportButton: {
+    width: 32,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surfaceSunken,
+  },
+  viewportButtonDisabled: { opacity: 0.36 },
+  viewportButtonText: { ...TYPE.h3, color: COLORS.textPrimary, lineHeight: 21 },
+  viewportValue: { minWidth: 52, height: 30, alignItems: "center", justifyContent: "center" },
+  viewportValueText: { ...TYPE.caption, color: COLORS.textSecondary, fontSize: 10 },
   scaleBadge: {
     position: "absolute",
     left: 10,

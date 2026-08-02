@@ -17,6 +17,7 @@ import COLORS from "../../constants/colors";
 import Loader from "../../components/Loader";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { apiUrl } from "../../configs/api";
 
 export default function Collection() {
   const { token } = useAuthStore();
@@ -42,7 +43,7 @@ export default function Collection() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
+        const res = await fetch(apiUrl("/api/users/me"), {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
@@ -66,7 +67,7 @@ export default function Collection() {
       else if (pageNum === 1) setLoading(true);
 
       const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs?page=${pageNum}&limit=5`,
+        apiUrl(`/api/designs?page=${pageNum}&limit=5`),
         {
           headers: { Authorization: token ? `Bearer ${token}` : "" }
         }
@@ -94,7 +95,7 @@ export default function Collection() {
   // DELETE design
   const handleDeleteDesign = async () => {
     try {
-      await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/${selectedDesignId}`, {
+      await fetch(apiUrl(`/api/designs/${selectedDesignId}`), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });

@@ -20,6 +20,7 @@ import COLORS from "../../constants/colors";
 import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, MOTION, ms } from "../../constants/theme";
 import { useAuthStore } from "../../authStore";
 import InteriorImg from "../../assets/images/onboarding/i2.png";
+import { apiUrl } from "../../configs/api";
 
 // --- Google Mobile Ads (App Open) ---
 import { AppOpenAd, AdEventType, TestIds } from "react-native-google-mobile-ads";
@@ -116,7 +117,7 @@ export default function Create() {
     const fetchUserStatus = async () => {
       if (!token) return;
       try {
-        const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+        const res = await fetch(apiUrl("/api/users/me"), {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         });
         if (!res.ok) return;

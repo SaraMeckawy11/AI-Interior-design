@@ -8,6 +8,7 @@ import ProfileHeader from '../../components/profile/ProfileHeader';
 import SubscriptionSection from '../../components/profile/SubscriptionSection';
 import { Ionicons } from '@expo/vector-icons';
 import COLORS from '../../constants/colors';
+import { apiUrl } from '../../configs/api';
 
 export default function Profile() {
   const { token } = useAuthStore();
@@ -18,7 +19,7 @@ export default function Profile() {
     const fetchUserStatus = async () => {
       if (!token) return;
 
-      const url = `${process.env.EXPO_PUBLIC_SERVER_URI}/me`;
+      const url = apiUrl('/api/users/me');
 
       try {
         const res = await fetch(url, {

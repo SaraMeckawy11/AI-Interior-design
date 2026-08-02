@@ -14,7 +14,7 @@ import {
 } from "@expo-google-fonts/poppins";
 
 export default function RootLayout() {
-  const { user, token, isCheckingAuth, checkAuth, fetchUserFromDB } = useAuthStore();
+  const { user, token, isCheckingAuth, checkAuth, fetchUser } = useAuthStore();
 
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
@@ -44,7 +44,7 @@ export default function RootLayout() {
       let currentUser = user;
       if ((!user || !user._id) && token) {
         console.log("Fetching user from DB...");
-        currentUser = await fetchUserFromDB();
+        currentUser = await fetchUser();
       }
 
       if (!currentUser || !currentUser._id) {

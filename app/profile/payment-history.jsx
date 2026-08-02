@@ -5,6 +5,7 @@ import { useAuthStore } from '../../authStore';
 import Loader from '../../components/Loader';
 import COLORS from '../../constants/colors';
 import { scale, verticalScale } from 'react-native-size-matters';
+import { apiUrl } from '../../configs/api';
 
 export default function PaymentHistory() {
   const { token } = useAuthStore();
@@ -16,7 +17,7 @@ export default function PaymentHistory() {
 
     const fetchHistory = async () => {
       try {
-        const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/history`, {
+        const response = await fetch(apiUrl('/api/orders/history'), {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',

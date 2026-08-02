@@ -7,6 +7,7 @@ import purchases, { LOG_LEVEL } from 'react-native-purchases';
 import styles from '../../assets/styles/upgrade.styles';
 import { useAuthStore } from '../../authStore';
 import COLORS from '../../constants/colors';
+import { apiUrl } from '../../configs/api';
 
 // ✅ Create the rewarded ad only once (outside component)
 // const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
@@ -36,7 +37,7 @@ export default function Upgrade() {
 
         let user = null;
         if (token) {
-          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`, {
+          const res = await fetch(apiUrl('/api/users/me'), {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           });
           if (res.ok) {
@@ -96,7 +97,7 @@ export default function Upgrade() {
       listeners.push(
         rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
           try {
-            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`, {
+            const res = await fetch(apiUrl('/api/users/watch-ad'), {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             });
@@ -184,7 +185,7 @@ export default function Upgrade() {
         autoRenew: true,
       };
 
-      const endpoint = `${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders`;
+      const endpoint = apiUrl('/api/orders');
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

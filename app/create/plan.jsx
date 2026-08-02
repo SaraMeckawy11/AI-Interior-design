@@ -41,6 +41,7 @@ import styles from "../../assets/styles/create/create.styles";
 import { useAuthStore } from "../../authStore";
 import RoomTypeSelector from "../../components/create/RoomTypeSelector";
 import COLORS from "../../constants/colors";
+import { apiUrl } from "../../configs/api";
 
 const { width, height } = Dimensions.get("window");
 const scale = (size) => (width / 375) * size;
@@ -909,7 +910,7 @@ export default function PlanEditor() {
           async () => {
             try {
               const res = await fetch(
-                `${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`,
+                apiUrl("/api/users/watch-ad"),
                 {
                   method: "POST",
                   headers: {
@@ -953,7 +954,7 @@ export default function PlanEditor() {
       const fetchUserStatus = async () => {
         if (!token) return;
         try {
-          const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+          const res = await fetch(apiUrl("/api/users/me"), {
             headers: {
               Authorization: `Bearer ${token}`,
               "Content-Type": "application/json",
@@ -1352,7 +1353,7 @@ export default function PlanEditor() {
       };
 
       const response = await fetch(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs`,
+        apiUrl("/api/designs"),
         {
           method: "POST",
           headers: {

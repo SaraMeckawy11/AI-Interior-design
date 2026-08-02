@@ -15,6 +15,7 @@ import SignupForm from "./signup";
 import LoginForm from "./login"; // ✅ new component
 import styles from "../../assets/styles/authModal.styles";
 import COLORS from "@/constants/colors";
+import { apiUrl } from "../../configs/api";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
@@ -45,7 +46,7 @@ export default function AuthModal({ setModalVisible }) {
       const signedToken = JWT.encode(user, JWT_SECRET);
 
       const res = await axios.post(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/login`,
+        apiUrl("/api/auth/login"),
         { signedToken }
       );
 

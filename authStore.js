@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
+import { apiUrl } from "./configs/api";
 
 export const useAuthStore = create((set) => ({
   user: null,
@@ -42,7 +43,7 @@ export const useAuthStore = create((set) => ({
       set({ isLoading: true });
 
       const res = await axios.post(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/login`,
+        apiUrl("/api/auth/login"),
         { email, password }
       );
 
@@ -75,7 +76,7 @@ export const useAuthStore = create((set) => ({
       set({ isLoading: true });
 
       const res = await axios.post(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/auth/signup`,
+        apiUrl("/api/auth/signup"),
         { username, email, password }
       );
 
@@ -142,22 +143,38 @@ export const useAuthStore = create((set) => ({
     // Fetch user data from backend and update store
   fetchUser: async () => {
     const { token } = useAuthStore.getState();
-    if (!token) return;
+    if (!token) return null;
 
     try {
       const res = await axios.get(
-        `${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/me`,
+        apiUrl("/api/users/me"),
         {
           headers: { Authorization: `Bearer ${token}` },
+          timeout: 60000,
         }
       );
 
       if (res.data?.user) {
         await AsyncStorage.setItem("user", JSON.stringify(res.data.user));
         useAuthStore.setState({ user: res.data.user });
+        return res.data.user;
       }
+      return null;
     } catch (error) {
-      console.error(" fetchUser error:", error.response?.data || error.message);
+      if (error.response?.status === 401) {
+        await AsyncStorage.multiRemove(["token", "user"]);
+        useAuthStore.setState({ token: null, user: null });
+        console.warn("Stored session is no longer valid. Please sign in again.");
+        return null;
+      }
+
+      console.error(
+        "fetchUser error:",
+        error.response?.data || error.message,
+        "URL:",
+        apiUrl("/api/users/me")
+      );
+      return null;
     }
   },
 

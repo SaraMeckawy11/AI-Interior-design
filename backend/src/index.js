@@ -7,6 +7,7 @@ import orderRoutes from "./routes/orderRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import floorplanRoutes from "./routes/floorplanRoutes.js";
+import walkthroughRoutes from "./routes/walkthroughRoutes.js";
 import job from "./lib/cron.js";
 
 
@@ -27,6 +28,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/floorplans", floorplanRoutes);
+app.use("/api/walkthrough", walkthroughRoutes);
 
 app.get("/me", isAuthenticated, async (req, res, next) => {
   try {

@@ -1,6 +1,7 @@
 import React, {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -12,6 +13,7 @@ import { WebView } from "react-native-webview";
 import COLORS from "../../constants/colors";
 import { RADIUS, SPACING, TYPE } from "../../constants/theme";
 import { buildWalkthroughHtml } from "../../lib/walkthroughScene";
+import { buildExactWalkthroughHtml } from "../../lib/exactWalkthroughScene";
 
 /**
  * Hosts the three.js walkthrough document and forwards camera / scene commands
@@ -27,6 +29,9 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     layout,
     roomConfigs,
     settings,
+    furnitureEdits = {},
+    exactScene = null,
+    exactBaseUrl = "",
     mode = "walk",
     roomIndex = 0,
     night = false,
@@ -35,6 +40,7 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     onError,
     onSnapshot,
     onComposition,
+    onFurnitureChange,
   },
   ref,
 ) {
@@ -43,11 +49,18 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
   const [message, setMessage] = useState("");
 
   const html = useMemo(
-    () => buildWalkthroughHtml({ layout, roomConfigs, settings, mode, roomIndex, night }),
+    () => exactScene
+      ? buildExactWalkthroughHtml({ scene: exactScene, settings, furnitureEdits, mode, roomIndex, night })
+      : buildWalkthroughHtml({ layout, roomConfigs, settings, furnitureEdits, mode, roomIndex, night }),
     // Deliberately excludes mode/roomIndex/night — see the note above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layout, roomConfigs, settings],
+    [exactScene, layout, roomConfigs, settings],
   );
+
+  useEffect(() => {
+    setStatus("loading");
+    setMessage("");
+  }, [html]);
 
   const run = useCallback((expression) => {
     webRef.current?.injectJavaScript(`try{${expression}}catch(e){};true;`);
@@ -88,20 +101,22 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         onComposition?.(data.composition);
       } else if (data.type === "snapshot") {
         onSnapshot?.(data.image, data.purpose, data.composition);
+      } else if (data.type === "furnitureChange") {
+        onFurnitureChange?.(data.id, data.transform || null);
       } else if (data.type === "error") {
         setStatus("error");
         setMessage(data.message);
         onError?.(data.message);
       }
     },
-    [onComposition, onError, onReady, onSelect, onSnapshot],
+    [onComposition, onError, onFurnitureChange, onReady, onSelect, onSnapshot],
   );
 
   return (
     <View style={styles.container}>
       <WebView
         ref={webRef}
-        source={{ html, baseUrl: "https://livinai.local/" }}
+        source={{ html, baseUrl: exactScene && exactBaseUrl ? `${exactBaseUrl.replace(/\/$/, "")}/` : "https://livinai.local/" }}
         originWhitelist={["*"]}
         style={styles.web}
         containerStyle={styles.web}
@@ -116,8 +131,10 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         setBuiltInZoomControls={false}
         mediaPlaybackRequiresUserAction={false}
         onError={() => {
+          const errorMessage = "The 3D view failed to load on this device.";
           setStatus("error");
-          setMessage("The 3D view failed to load on this device.");
+          setMessage(errorMessage);
+          onError?.(errorMessage);
         }}
       />
 
@@ -126,9 +143,11 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
           {status === "loading" ? (
             <>
               <ActivityIndicator color={COLORS.primaryDark} size="large" />
-              <Text style={styles.overlayTitle}>Building your interior</Text>
+              <Text style={styles.overlayTitle}>{exactScene ? "Opening exact Livinai scene" : "Building your interior"}</Text>
               <Text style={styles.overlayBody}>
-                Extruding measured walls, cutting your openings and furnishing every room.
+                {exactScene
+                  ? "Loading the same Interior_Plan furniture, dimensions and placement used by Livinai_web."
+                  : "Preparing the measured offline preview while the exact scene is unavailable."}
               </Text>
             </>
           ) : (

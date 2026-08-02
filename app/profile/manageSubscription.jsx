@@ -15,6 +15,7 @@ import Purchases from 'react-native-purchases';
 import styles from '../../assets/styles/upgrade.styles';
 import { useAuthStore } from '../../authStore';
 import Loader from '../../components/Loader';
+import { apiUrl } from '../../configs/api';
 
 export default function Subscription() {
   const router = useRouter();
@@ -52,7 +53,7 @@ export default function Subscription() {
     let mounted = true;
     async function fetchUserSubscription() {
       try {
-        const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/latest`, {
+        const response = await fetch(apiUrl('/api/orders/latest'), {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -115,7 +116,7 @@ export default function Subscription() {
         await Linking.openURL('https://play.google.com/store/account/subscriptions');
       }
 
-      await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/orders/cancel-latest`, {
+      await fetch(apiUrl('/api/orders/cancel-latest'), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

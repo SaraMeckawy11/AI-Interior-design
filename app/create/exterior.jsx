@@ -25,6 +25,7 @@ import ColorToneSelector from '../../components/create/ColorToneSelector';
 import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ExtTypeSelector from '../../components/create/extTypeSelector';
 import COLORS from '../../constants/colors';
+import { apiUrl } from '../../configs/api';
 
 const { width, height } = Dimensions.get("window");
 
@@ -88,7 +89,7 @@ export default function Exterior() {
       listeners.push(
         rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
           try {
-            const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/users/watch-ad`, {
+            const res = await fetch(apiUrl('/api/users/watch-ad'), {
               method: 'POST',
               headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             });
@@ -133,7 +134,7 @@ export default function Exterior() {
          if (!token) return;
  
          try {
-           const res = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/me`, {
+           const res = await fetch(apiUrl('/api/users/me'), {
              headers: {
                Authorization: `Bearer ${token}`,
                'Content-Type': 'application/json',
@@ -304,7 +305,7 @@ export default function Exterior() {
         requestBody.image = imageDataUrl;
       }
 
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs`, {
+      const response = await fetch(apiUrl('/api/designs'), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
