@@ -41,6 +41,7 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     onSnapshot,
     onComposition,
     onFurnitureChange,
+    onDiagnostic,
   },
   ref,
 ) {
@@ -94,7 +95,20 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
       }
       if (data.type === "ready") {
         setStatus("ready");
+        // Whether the real furniture models loaded is otherwise invisible: when
+        // they don't, the procedural families render in their place and the
+        // scene looks like the catalogue was never wired up.
+        if (__DEV__) {
+          console.log(
+            `[walkthrough] engine=${data.engine} three=r${data.threeVersion} `
+            + `models ${data.catalogLoaded}/${data.catalogRequested} loaded, ${data.catalogUsed} placed`,
+          );
+        }
         onReady?.(data);
+      } else if (data.type === "diagnostic") {
+         
+        console.warn(`[walkthrough] ${data.message}`);
+        onDiagnostic?.(data.message);
       } else if (data.type === "select") {
         onSelect?.(data.info);
       } else if (data.type === "composition") {
@@ -109,7 +123,7 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         onError?.(data.message);
       }
     },
-    [onComposition, onError, onFurnitureChange, onReady, onSelect, onSnapshot],
+    [onComposition, onDiagnostic, onError, onFurnitureChange, onReady, onSelect, onSnapshot],
   );
 
   return (

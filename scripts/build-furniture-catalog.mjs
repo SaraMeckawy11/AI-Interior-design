@@ -54,9 +54,28 @@ const CATALOG = {
   modernChair: "chair-modern.glb",
 };
 
+/**
+ * Which of those the room programme can actually reach.
+ *
+ * Livinai_web declares a path for `sofa`, `compactSofa`, `armchair`,
+ * `coffeeTable`, `diningTable` and `bed`, but `roomFurniture` never emits those
+ * model names — living rooms and bedrooms use the style-aware procedural
+ * families instead. The web pays nothing for the unused entries because it
+ * fetches lazily over HTTP; inlining them here would put ~4 MB of
+ * `sofa-modern.glb` into the JS bundle that no scene can ever draw.
+ *
+ * The files stay in assets/models so the package is complete; only the bundle
+ * is trimmed, and nothing that renders is affected.
+ */
+const REACHABLE = new Set([
+  "island", "fridge", "vanity", "toilet", "shower", "bathtub",
+  "diningChair", "tvUnit", "workDesk", "bookcase", "modernChair",
+]);
+
 const catalogue = {};
 const report = [];
 for (const [key, file] of Object.entries(CATALOG)) {
+  if (!REACHABLE.has(key)) continue;
   const source = path.join(MODELS_DIR, file);
   if (!fs.existsSync(source)) {
     console.warn(`skip ${key}: ${file} not found`);

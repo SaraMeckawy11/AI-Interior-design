@@ -1166,6 +1166,7 @@ export default function WalkthroughScreen() {
           onSnapshot={handleSnapshot}
           onComposition={setComposition}
           onFurnitureChange={updateFurnitureEdit}
+          onDiagnostic={setNotice}
           onExactError={(message) => {
             setExactScene(null);
             setExactSceneError(message || "The exact scene could not be opened. Showing the offline preview.");
@@ -1659,6 +1660,7 @@ function WalkthroughStage({
   onSnapshot,
   onComposition,
   onFurnitureChange,
+  onDiagnostic,
   onExactError,
   onChangeMode,
   onToggleNight,
@@ -1705,6 +1707,7 @@ function WalkthroughStage({
         onSnapshot={onSnapshot}
         onComposition={onComposition}
         onFurnitureChange={onFurnitureChange}
+        onDiagnostic={onDiagnostic}
         onError={exactScene ? onExactError : undefined}
       />
 
@@ -1924,11 +1927,19 @@ function WalkthroughStage({
                 ? `${sceneInfo.objects} exact Livinai pieces`
                 : exactSceneLoading
                   ? "Syncing exact Livinai scene…"
-                  : exactSceneError
-                    ? "Offline preview"
-                    : sceneInfo
-                      ? `${sceneInfo.rooms} rooms ready`
-                      : "Building scene…"}
+                  : sceneInfo
+                    // Say which furniture is actually on screen. "12 pieces · 4
+                    // Livinai models" and "12 pieces · procedural only" look
+                    // identical in the viewport, and that ambiguity is exactly
+                    // what makes a catalogue that failed to load undiagnosable.
+                    ? `${sceneInfo.objects} pieces · ${
+                        sceneInfo.catalogUsed
+                          ? `${sceneInfo.catalogUsed} Livinai models`
+                          : sceneInfo.catalogRequested
+                            ? "procedural only"
+                            : "procedural"
+                      }`
+                    : "Building scene…"}
             </Text>
           </View>
           <Pressable style={styles.aiButton} onPress={() => onSetPanel(panel === "ai" ? null : "ai")}>
