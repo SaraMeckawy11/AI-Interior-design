@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,7 +18,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -56,7 +57,6 @@ import {
   ROOM_TYPES,
   WALKTHROUGH_STYLES,
   WALL_FINISHES,
-  WALKTHROUGH_RENDERER_REVISION,
   buildLayout,
 } from "../../lib/walkthroughScene";
 
@@ -186,17 +186,13 @@ export default function WalkthroughScreen() {
   const [snapshotKind, setSnapshotKind] = useState("capture");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
-  const [exactScene, setExactScene] = useState(null);
-  const [exactSceneBaseUrl, setExactSceneBaseUrl] = useState("");
-  const [exactSceneLoading, setExactSceneLoading] = useState(false);
-  const [exactSceneError, setExactSceneError] = useState("");
 
   // The sheet is the measured drawing surface; the canvas is only the window
   // onto it. Keeping the sheet device-independent is what makes a room's area
   // identical on every phone and keeps furniture in proportion to the room.
   const sheetWidth = SHEET_WIDTH;
   const sheetHeight = Math.round(sheetWidth * canvasAspect);
-  const canvasWidth = Math.round(canvasFocus ? LAYOUT.screenWidth : LAYOUT.screenWidth - SPACING.md * 2);
+  const canvasWidth = Math.round(canvasFocus ? LAYOUT.screenWidth : LAYOUT.screenWidth - SPACING.base * 2);
   const canvasHeight = Math.round(
     canvasFocus
       ? Math.max(320, LAYOUT.screenHeight * 0.66)
@@ -226,59 +222,10 @@ export default function WalkthroughScreen() {
   const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
   const currentRender = aiRenders[aiKey];
 
-  useEffect(() => {
-    if (stage !== STAGES.length - 1 || !layout.rooms.length) return undefined;
-    const rendererRoot = (process.env.EXPO_PUBLIC_WALKTHROUGH_SERVER_URI || process.env.EXPO_PUBLIC_SERVER_URI || "").replace(/\/$/, "");
-    if (!rendererRoot) {
-      setExactScene(null);
-      setExactSceneError("Exact renderer URL is not configured.");
-      return undefined;
-    }
-    const controller = new AbortController();
-    setExactScene(null);
-    setExactSceneBaseUrl("");
-    setSceneInfo(null);
-    setExactSceneLoading(true);
-    setExactSceneError("");
-    (async () => {
-      try {
-        const response = await fetch(`${rendererRoot}/api/walkthrough/realtime/session`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            rendererRevision: WALKTHROUGH_RENDERER_REVISION,
-            rooms: layout.rooms,
-            doors: layout.doors.map((opening) => opening.slice(0, 2)),
-            windows: layout.windows.map((opening) => opening.slice(0, 2)),
-            balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
-            pixelsPerMeter: layout.pixelsPerMeter,
-            roomConfigs,
-            settings: { ...settings, useCatalog: true },
-            width: 960,
-            height: 600,
-          }),
-          signal: controller.signal,
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || data.message || "The exact Livinai scene is unavailable.");
-        if (!data.modelUrl || !Array.isArray(data.furniture)) throw new Error("The exact renderer returned an incomplete scene.");
-        if (controller.signal.aborted) return;
-        const origin = rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
-        setExactScene(data);
-        setExactSceneBaseUrl(origin);
-      } catch (error) {
-        if (error.name === "AbortError") return;
-        setExactScene(null);
-        setExactSceneError(error.message || "The exact Livinai scene is unavailable.");
-      } finally {
-        if (!controller.signal.aborted) setExactSceneLoading(false);
-      }
-    })();
-    return () => controller.abort();
-  }, [layout, roomConfigs, settings, stage, token]);
+  // The walkthrough is built entirely on the device: the plan you drew, the
+  // Livinai furniture package that ships with the app, and the same room
+  // programme the web studio uses. There is no renderer service to reach, so
+  // there is nothing here to fail, wait on, or fall back from.
 
   // ── Autosave ─────────────────────────────────────────────────────────────
   // Drawing a home takes real effort; geometry is saved in normalized canvas
@@ -1145,10 +1092,6 @@ export default function WalkthroughScreen() {
           roomConfigs={roomConfigs}
           settings={settings}
           furnitureEdits={furnitureEdits}
-          exactScene={exactScene}
-          exactSceneBaseUrl={exactSceneBaseUrl}
-          exactSceneLoading={exactSceneLoading}
-          exactSceneError={exactSceneError}
           viewMode={viewMode}
           night={night}
           selectedRoom={selectedRoom}
@@ -1162,16 +1105,12 @@ export default function WalkthroughScreen() {
           rendering={rendering}
           busy={busy}
           onReady={setSceneInfo}
+          onSceneUpdate={setSceneInfo}
           onSelect={setInspected}
           onSnapshot={handleSnapshot}
           onComposition={setComposition}
           onFurnitureChange={updateFurnitureEdit}
           onDiagnostic={setNotice}
-          onNotice={setNotice}
-          onExactError={(message) => {
-            setExactScene(null);
-            setExactSceneError(message || "The exact scene could not be opened. Showing the offline preview.");
-          }}
           onChangeMode={changeViewMode}
           onToggleNight={toggleNight}
           onFocusRoom={focusRoom}
@@ -1634,16 +1573,22 @@ export default function WalkthroughScreen() {
 }
 
 // ── Walkthrough stage ──────────────────────────────────────────────────────
+/**
+ * The Explore screen.
+ *
+ * Everything on top of the 3D view lives in one overlay column that is pinned
+ * to the safe area and split into a top and a bottom cluster. Controls used to
+ * be positioned individually at hand-tuned offsets, which is why they collided
+ * with each other, sat under the home indicator on tall phones, and moved
+ * whenever anything above them changed height. Laying them out in flow instead
+ * means each cluster stacks predictably and nothing needs a magic number.
+ */
 function WalkthroughStage({
   viewerRef,
   layout,
   roomConfigs,
   settings,
   furnitureEdits,
-  exactScene,
-  exactSceneBaseUrl,
-  exactSceneLoading,
-  exactSceneError,
   viewMode,
   night,
   selectedRoom,
@@ -1657,13 +1602,12 @@ function WalkthroughStage({
   rendering,
   busy,
   onReady,
+  onSceneUpdate,
   onSelect,
   onSnapshot,
   onComposition,
   onFurnitureChange,
   onDiagnostic,
-  onExactError,
-  onNotice,
   onChangeMode,
   onToggleNight,
   onFocusRoom,
@@ -1675,21 +1619,18 @@ function WalkthroughStage({
   onSetOutputMode,
   onSaveRender,
 }) {
-  const hold = useRef(null);
-  const stopMove = useCallback(() => {
-    if (hold.current) clearInterval(hold.current);
-    hold.current = null;
-  }, []);
-  const startMove = (direction) => {
-    stopMove();
-    viewerRef.current?.move(direction);
-    hold.current = setInterval(() => viewerRef.current?.move(direction), 110);
-  };
-  // A finger lifted outside the pad, or a mid-gesture unmount, would otherwise
-  // leave the repeat timer walking the camera forever.
-  useEffect(() => stopMove, [stopMove]);
-
+  const insets = useSafeAreaInsets();
   const showingAi = outputMode === "ai" && currentRender;
+  const sheetOpen = !!inspected || panel === "ai";
+  const showStick = viewMode === "walk" && !showingAi && !sheetOpen;
+  const showRooms = roomConfigs.length > 1 && !showingAi;
+
+  const drive = useCallback(
+    (x, y) => viewerRef.current?.setJoystick(x, y),
+    [viewerRef],
+  );
+
+  const status = describeScene(sceneInfo);
 
   return (
     <View style={styles.viewerWrap}>
@@ -1699,42 +1640,28 @@ function WalkthroughStage({
         roomConfigs={roomConfigs}
         settings={settings}
         furnitureEdits={furnitureEdits}
-        exactScene={exactScene}
-        exactBaseUrl={exactSceneBaseUrl}
         mode={viewMode}
         roomIndex={selectedRoom}
         night={night}
         onReady={onReady}
+        onSceneUpdate={onSceneUpdate}
         onSelect={onSelect}
         onSnapshot={onSnapshot}
         onComposition={onComposition}
         onFurnitureChange={onFurnitureChange}
         onDiagnostic={onDiagnostic}
-        onError={exactScene ? onExactError : undefined}
       />
 
       {showingAi && (
         <View style={styles.aiLayer}>
           <Image source={{ uri: currentRender.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-          <View style={styles.aiLayerBar}>
-            <View style={styles.aiLayerCopy}>
-              <Text style={styles.aiLayerTag}>AI STATIC RENDER</Text>
-              <Text style={styles.aiLayerLabel} numberOfLines={1}>{currentRender.label}</Text>
-            </View>
-            <Pressable style={styles.aiLayerButton} onPress={() => onSaveRender(currentRender.image)}>
-              <Ionicons name="download-outline" size={16} color={COLORS.white} />
-            </Pressable>
-            <Pressable style={styles.aiLayerButton} onPress={() => onSetOutputMode("live")}>
-              <Ionicons name="cube-outline" size={16} color={COLORS.white} />
-            </Pressable>
-          </View>
         </View>
       )}
 
       {rendering && (
         <View style={styles.renderOverlay}>
           <ActivityIndicator size="large" color={COLORS.white} />
-          <Text style={styles.renderTitle}>Rendering this exact view with AI</Text>
+          <Text style={styles.renderTitle}>Rendering this view with AI</Text>
           <Text style={styles.renderBody}>
             {composition
               ? `${composition.viewpoint === "user" ? "Your viewpoint" : "Designer camera"} · ${composition.visibleFurnitureCount} of ${composition.furnitureCount} pieces framed · ${composition.doorCount} doors · ${composition.windowCount} windows`
@@ -1743,242 +1670,386 @@ function WalkthroughStage({
         </View>
       )}
 
-      {/* Top controls */}
-      <View style={styles.viewerTop} pointerEvents="box-none">
-        <View style={styles.segmented}>
-          {VIEW_MODES.map((item) => {
-            const active = viewMode === item.key;
-            return (
-              <Pressable key={item.key} style={[styles.segment, active && styles.segmentActive]} onPress={() => onChangeMode(item.key)}>
-                <Ionicons name={item.icon} size={14} color={active ? COLORS.white : COLORS.textSecondary} />
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{item.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Pressable style={[styles.roundButton, night && styles.roundButtonActive]} onPress={onToggleNight}>
-          <Ionicons name={night ? "moon" : "sunny-outline"} size={17} color={night ? COLORS.white : COLORS.textPrimary} />
-        </Pressable>
-      </View>
-
-      {roomConfigs.length > 1 && viewMode === "walk" && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roomStrip} contentContainerStyle={styles.roomStripContent}>
-          {roomConfigs.map((room, index) => (
-            <Pressable
-              key={`jump-${index}`}
-              style={[styles.roomPill, selectedRoom === index && styles.roomPillActive]}
-              onPress={() => onFocusRoom(index)}
-            >
-              <Text style={[styles.roomPillText, selectedRoom === index && styles.roomPillTextActive]} numberOfLines={1}>
-                {room.name || room.roomType}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      )}
-
-      {!showingAi && !inspected && panel !== "ai" && (
-        <View style={[styles.viewerGuidance, roomConfigs.length > 1 && viewMode === "walk" && styles.viewerGuidanceWithRooms]} pointerEvents="none">
-          <Ionicons name={viewMode === "plan" ? "scan-outline" : "hand-left-outline"} size={14} color={COLORS.white} />
-          <Text style={styles.viewerGuidanceText} numberOfLines={1}>
-            {viewMode === "walk" ? "Drag to look · Tap furniture to edit" : viewMode === "orbit" ? "Drag to orbit · Tap an item to edit" : "Drag to rotate the furnished plan"}
-          </Text>
-        </View>
-      )}
-
-      {inspected && !showingAi && (
-        <View style={styles.inspector}>
-          <View style={styles.inspectorHead}>
-            <View style={styles.inspectorObjectIcon}>
-              <Ionicons name="cube-outline" size={17} color={COLORS.primaryDark} />
-            </View>
-            <View style={styles.inspectorHeadingCopy}>
-              <Text style={styles.inspectorEyebrow}>Selected furniture</Text>
-              <Text style={styles.inspectorTitle} numberOfLines={1}>{inspected.name}</Text>
-            </View>
-            <Pressable style={styles.inspectorClose} onPress={() => onSelect(null)} hitSlop={LAYOUT.hitSlop}>
-              <Ionicons name="close" size={16} color={COLORS.textSecondary} />
-            </Pressable>
-          </View>
-          <Text style={styles.inspectorMeta}>{inspected.material}</Text>
-          <Text style={styles.inspectorBody}>{inspected.detail}</Text>
-
-          <View style={styles.inspectorActions}>
-            <View style={styles.inspectorActionGroup}>
-              <Text style={styles.inspectorActionLabel}>Rotate</Text>
-              <View style={styles.inspectorActionRow}>
-                <Pressable accessibilityLabel="Rotate furniture left" style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(-Math.PI / 12)}>
-                  <Ionicons name="return-up-back-outline" size={17} color={COLORS.textPrimary} />
-                </Pressable>
-                <Pressable accessibilityLabel="Rotate furniture right" style={styles.inspectorIcon} onPress={() => viewerRef.current?.rotateSelected(Math.PI / 12)}>
-                  <Ionicons name="return-up-forward-outline" size={17} color={COLORS.textPrimary} />
-                </Pressable>
-              </View>
-            </View>
-            <View style={[styles.inspectorActionGroup, styles.inspectorPositionGroup]}>
-              <Text style={styles.inspectorActionLabel}>Position</Text>
-              <View style={styles.inspectorActionRow}>
-                {[
-                  { direction: "left", icon: "chevron-back" },
-                  { direction: "forward", icon: "chevron-up" },
-                  { direction: "back", icon: "chevron-down" },
-                  { direction: "right", icon: "chevron-forward" },
-                ].map((item) => (
+      <View
+        style={[
+          styles.viewerOverlay,
+          { paddingTop: SPACING.md, paddingBottom: Math.max(insets.bottom, SPACING.md) },
+        ]}
+        pointerEvents="box-none"
+      >
+        {/* ── Top cluster ────────────────────────────────────────────────── */}
+        <View style={styles.overlayTop} pointerEvents="box-none">
+          <View style={styles.viewControls} pointerEvents="box-none">
+            <View style={styles.segmented}>
+              {VIEW_MODES.map((item) => {
+                const active = viewMode === item.key;
+                return (
                   <Pressable
-                    accessibilityLabel={`Move furniture ${item.direction}`}
-                    key={item.direction}
-                    style={styles.inspectorIcon}
-                    onPress={() => viewerRef.current?.moveSelected(item.direction)}
+                    key={item.key}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.segment, active && styles.segmentActive]}
+                    onPress={() => onChangeMode(item.key)}
                   >
-                    <Ionicons name={item.icon} size={17} color={COLORS.textPrimary} />
+                    <Ionicons name={item.icon} size={15} color={active ? COLORS.white : COLORS.textSecondary} />
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
                   </Pressable>
-                ))}
-              </View>
+                );
+              })}
             </View>
-            <View style={styles.inspectorActionGroup}>
-              <Text style={styles.inspectorActionLabel}>Reset</Text>
-              <Pressable accessibilityLabel="Reset furniture placement" style={styles.inspectorIcon} onPress={() => viewerRef.current?.resetSelected()}>
-                <Ionicons name="refresh-outline" size={17} color={COLORS.textSecondary} />
-              </Pressable>
-            </View>
-          </View>
-          <Text style={styles.inspectorHint}>Every adjustment is saved automatically with this 3D project.</Text>
-        </View>
-      )}
-
-      {/* AI panel */}
-      {panel === "ai" && (
-        <View style={styles.aiPanel}>
-          <View style={styles.aiPanelHead}>
-            <Text style={styles.aiPanelTitle}>AI render</Text>
-            <Pressable onPress={() => onSetPanel(null)} hitSlop={LAYOUT.hitSlop}>
-              <Ionicons name="close" size={17} color={COLORS.textSecondary} />
-            </Pressable>
-          </View>
-
-          <View style={styles.outputToggle}>
-            <Pressable style={[styles.outputOption, outputMode === "live" && styles.outputOptionActive]} onPress={() => onSetOutputMode("live")}>
-              <Ionicons name="cube-outline" size={14} color={outputMode === "live" ? COLORS.white : COLORS.textSecondary} />
-              <Text style={[styles.outputText, outputMode === "live" && styles.outputTextActive]}>Live 3D</Text>
-            </Pressable>
             <Pressable
-              style={[styles.outputOption, outputMode === "ai" && styles.outputOptionActive, !currentRender && styles.outputOptionDisabled]}
-              disabled={!currentRender}
-              onPress={() => onSetOutputMode("ai")}
+              accessibilityRole="switch"
+              accessibilityLabel={night ? "Switch to daylight" : "Switch to evening light"}
+              accessibilityState={{ checked: night }}
+              style={[styles.roundButton, night && styles.roundButtonActive]}
+              onPress={onToggleNight}
             >
-              <Ionicons name="sparkles-outline" size={14} color={outputMode === "ai" ? COLORS.white : COLORS.textSecondary} />
-              <Text style={[styles.outputText, outputMode === "ai" && styles.outputTextActive]}>AI result</Text>
+              <Ionicons name={night ? "moon" : "sunny-outline"} size={19} color={night ? COLORS.white : COLORS.textPrimary} />
             </Pressable>
           </View>
 
-          {viewMode !== "plan" && (
-            <>
-              <Text style={styles.fieldLabel}>Camera</Text>
-              <View style={styles.outputToggle}>
-                <Pressable style={[styles.outputOption, cameraSource === "designer" && styles.outputOptionActive]} onPress={() => onSetCameraSource("designer")}>
-                  <Text style={[styles.outputText, cameraSource === "designer" && styles.outputTextActive]}>Designer</Text>
-                </Pressable>
-                <Pressable style={[styles.outputOption, cameraSource === "current" && styles.outputOptionActive]} onPress={() => onSetCameraSource("current")}>
-                  <Text style={[styles.outputText, cameraSource === "current" && styles.outputTextActive]}>My view</Text>
-                </Pressable>
-              </View>
-              {cameraSource === "designer" && (
-                <Pressable style={styles.previewButton} onPress={onPreviewFraming}>
-                  <Ionicons name="scan-outline" size={14} color={COLORS.primaryDark} />
-                  <Text style={styles.previewButtonText}>Preview designer framing</Text>
-                </Pressable>
-              )}
-            </>
+          {showRooms && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.roomStrip}
+              contentContainerStyle={styles.roomStripContent}
+            >
+              {roomConfigs.map((room, index) => {
+                const active = selectedRoom === index;
+                return (
+                  <Pressable
+                    key={`jump-${index}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.roomPill, active && styles.roomPillActive]}
+                    onPress={() => onFocusRoom(index)}
+                  >
+                    <Text style={[styles.roomPillText, active && styles.roomPillTextActive]} numberOfLines={1}>
+                      {room.name || room.roomType}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           )}
 
-          <Text style={styles.aiNote}>
-            {viewMode === "plan"
-              ? "The furnished, roof-open plan is preserved and rendered without overhead lighting."
-              : composition
-                ? `${composition.viewpoint === "user" ? "Your camera" : "The designer camera"} frames ${composition.visibleFurnitureCount} of ${composition.furnitureCount} pieces and preserves ${composition.doorCount} doors and ${composition.windowCount} windows.`
-                : cameraSource === "designer"
-                  ? "The camera picks the corner that frames the most furniture before rendering."
-                  : "No repositioning — the AI receives the exact frame you are looking at."}
-          </Text>
-
-          <Pressable style={[styles.renderButton, rendering && styles.renderButtonBusy]} disabled={rendering} onPress={onRender}>
-            {rendering ? <ActivityIndicator size="small" color={COLORS.white} /> : <Ionicons name="sparkles" size={16} color={COLORS.white} />}
-            <Text style={styles.renderButtonText}>
-              {rendering ? "Generating…" : viewMode === "plan" ? "Render bird view" : "Render with AI"}
-            </Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/* Bottom controls */}
-      <View style={styles.viewerBottom} pointerEvents="box-none">
-        {viewMode === "walk" && !showingAi && panel !== "ai" && !inspected && (
-          <View style={styles.pad}>
-            <PadButton icon="chevron-up" onIn={() => startMove("forward")} onOut={stopMove} style={styles.padUp} />
-            <PadButton icon="chevron-back" onIn={() => startMove("left")} onOut={stopMove} style={styles.padLeft} />
-            <PadButton icon="chevron-forward" onIn={() => startMove("right")} onOut={stopMove} style={styles.padRight} />
-            <PadButton icon="chevron-down" onIn={() => startMove("back")} onOut={stopMove} style={styles.padDown} />
-          </View>
-        )}
-
-        <View style={styles.actionBar}>
-          {/*
-            Which renderer produced what is on screen.
-
-            Livinai_web shows the Interior_Plan scene exported by its Python
-            renderer; the style-aware procedural families are its *preview*
-            renderer, used only for orbit mode. When the Interior_Plan service
-            is unreachable this app falls back to that preview, and the two are
-            easy to mistake for each other — so the badge says which one it is,
-            and tapping it explains why.
-          */}
-          <Pressable
-            style={styles.sceneBadge}
-            disabled={!exactSceneError}
-            onPress={() => onNotice(
-              `${exactSceneError} Livinai is showing its preview furniture instead of the `
-              + "Interior_Plan models. Point INTERIOR_PLAN_RENDERER_URL at the Livinai_web "
-              + "renderer to get the same furniture as the web app.",
-            )}
-          >
-            <View style={[styles.sceneDot, !sceneInfo?.exact && styles.sceneDotPreview]} />
-            <Text style={styles.sceneBadgeText} numberOfLines={1}>
-              {sceneInfo?.exact
-                ? `${sceneInfo.objects} Interior_Plan pieces`
-                : exactSceneLoading
-                  ? "Syncing Interior_Plan scene…"
-                  : sceneInfo
-                    ? `Preview furniture · ${sceneInfo.objects} pieces`
-                    : "Building scene…"}
-            </Text>
-            {!!exactSceneError && !sceneInfo?.exact && (
-              <Ionicons name="information-circle-outline" size={14} color={COLORS.accentStrong} />
-            )}
-          </Pressable>
-          <Pressable style={styles.aiButton} onPress={() => onSetPanel(panel === "ai" ? null : "ai")}>
-            <Ionicons name="sparkles" size={17} color={COLORS.white} />
-            <Text style={styles.aiButtonText}>Render</Text>
-          </Pressable>
-          <Pressable style={styles.iconAction} onPress={onCapture} disabled={busy === "capture"}>
-            {busy === "capture" ? (
-              <ActivityIndicator color={COLORS.textPrimary} size="small" />
-            ) : (
-              <Ionicons name="camera-outline" size={19} color={COLORS.textPrimary} />
-            )}
-          </Pressable>
+          {!showingAi && !sheetOpen && (
+            <View style={styles.hintPill} pointerEvents="none">
+              <Ionicons name={viewMode === "walk" ? "hand-left-outline" : "sync-outline"} size={14} color={COLORS.white} />
+              <Text style={styles.hintText} numberOfLines={1}>
+                {viewMode === "walk"
+                  ? "Drag to look around · Tap any piece to edit it"
+                  : viewMode === "orbit"
+                    ? "Drag to orbit the home · Tap any piece to edit it"
+                    : "Drag to rotate the furnished plan"}
+              </Text>
+            </View>
+          )}
         </View>
 
+        {/* ── Bottom cluster ─────────────────────────────────────────────── */}
+        <View style={styles.overlayBottom} pointerEvents="box-none">
+          {showingAi && (
+            <View style={styles.aiResultBar}>
+              <View style={styles.aiResultCopy}>
+                <Text style={styles.aiResultTag}>AI RENDER</Text>
+                <Text style={styles.aiResultLabel} numberOfLines={1}>{currentRender.label}</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Save this render"
+                style={styles.aiResultButton}
+                onPress={() => onSaveRender(currentRender.image)}
+              >
+                <Ionicons name="download-outline" size={18} color={COLORS.white} />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Back to the live 3D view"
+                style={styles.aiResultButton}
+                onPress={() => onSetOutputMode("live")}
+              >
+                <Ionicons name="cube-outline" size={18} color={COLORS.white} />
+              </Pressable>
+            </View>
+          )}
+
+          {inspected && !showingAi && (
+            <View style={styles.panelCard}>
+              <View style={styles.panelHead}>
+                <View style={styles.panelIcon}>
+                  <Ionicons name="cube-outline" size={18} color={COLORS.primaryDark} />
+                </View>
+                <View style={styles.panelHeadCopy}>
+                  <Text style={styles.panelEyebrow}>Selected piece</Text>
+                  <Text style={styles.panelTitle} numberOfLines={1}>{inspected.name}</Text>
+                </View>
+                <Pressable
+                  accessibilityLabel="Close"
+                  style={styles.panelClose}
+                  onPress={() => onSelect(null)}
+                  hitSlop={LAYOUT.hitSlop}
+                >
+                  <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+                </Pressable>
+              </View>
+
+              <Text style={styles.panelMeta}>{inspected.material}</Text>
+              <Text style={styles.panelBody} numberOfLines={3}>{inspected.detail}</Text>
+
+              <View style={styles.editorRow}>
+                <View style={styles.editorGroup}>
+                  <Text style={styles.editorLabel}>Move</Text>
+                  <View style={styles.editorButtons}>
+                    {[
+                      { direction: "left", icon: "chevron-back", label: "left" },
+                      { direction: "forward", icon: "chevron-up", label: "forward" },
+                      { direction: "back", icon: "chevron-down", label: "back" },
+                      { direction: "right", icon: "chevron-forward", label: "right" },
+                    ].map((item) => (
+                      <Pressable
+                        key={item.direction}
+                        accessibilityLabel={`Move ${item.label}`}
+                        style={styles.editorButton}
+                        onPress={() => viewerRef.current?.moveSelected(item.direction)}
+                      >
+                        <Ionicons name={item.icon} size={18} color={COLORS.textPrimary} />
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+                <View style={styles.editorGroup}>
+                  <Text style={styles.editorLabel}>Turn</Text>
+                  <View style={styles.editorButtons}>
+                    <Pressable
+                      accessibilityLabel="Turn left"
+                      style={styles.editorButton}
+                      onPress={() => viewerRef.current?.rotateSelected(-Math.PI / 12)}
+                    >
+                      <Ionicons name="return-up-back-outline" size={18} color={COLORS.textPrimary} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Turn right"
+                      style={styles.editorButton}
+                      onPress={() => viewerRef.current?.rotateSelected(Math.PI / 12)}
+                    >
+                      <Ionicons name="return-up-forward-outline" size={18} color={COLORS.textPrimary} />
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                style={styles.panelGhost}
+                onPress={() => viewerRef.current?.resetSelected()}
+              >
+                <Ionicons name="refresh-outline" size={16} color={COLORS.textSecondary} />
+                <Text style={styles.panelGhostText}>Put it back where Livinai placed it</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {panel === "ai" && !showingAi && (
+            <View style={styles.panelCard}>
+              <View style={styles.panelHead}>
+                <View style={[styles.panelIcon, styles.panelIconAccent]}>
+                  <Ionicons name="sparkles" size={18} color={COLORS.accentStrong} />
+                </View>
+                <View style={styles.panelHeadCopy}>
+                  <Text style={styles.panelEyebrow}>Photoreal</Text>
+                  <Text style={styles.panelTitle}>AI render</Text>
+                </View>
+                <Pressable
+                  accessibilityLabel="Close"
+                  style={styles.panelClose}
+                  onPress={() => onSetPanel(null)}
+                  hitSlop={LAYOUT.hitSlop}
+                >
+                  <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+                </Pressable>
+              </View>
+
+              {viewMode !== "plan" && (
+                <>
+                  <Text style={styles.fieldLabel}>Camera</Text>
+                  <View style={styles.toggleGroup}>
+                    <Pressable
+                      accessibilityState={{ selected: cameraSource === "designer" }}
+                      style={[styles.toggleOption, cameraSource === "designer" && styles.toggleOptionActive]}
+                      onPress={() => onSetCameraSource("designer")}
+                    >
+                      <Text style={[styles.toggleText, cameraSource === "designer" && styles.toggleTextActive]}>
+                        Designer
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityState={{ selected: cameraSource === "current" }}
+                      style={[styles.toggleOption, cameraSource === "current" && styles.toggleOptionActive]}
+                      onPress={() => onSetCameraSource("current")}
+                    >
+                      <Text style={[styles.toggleText, cameraSource === "current" && styles.toggleTextActive]}>
+                        My view
+                      </Text>
+                    </Pressable>
+                  </View>
+                  {cameraSource === "designer" && (
+                    <Pressable style={styles.panelGhost} onPress={onPreviewFraming}>
+                      <Ionicons name="scan-outline" size={16} color={COLORS.primaryDark} />
+                      <Text style={[styles.panelGhostText, { color: COLORS.primaryDark }]}>
+                        Preview the designer framing
+                      </Text>
+                    </Pressable>
+                  )}
+                </>
+              )}
+
+              <Text style={styles.panelNote}>
+                {viewMode === "plan"
+                  ? "The furnished, roof-open plan is preserved and rendered without overhead lighting."
+                  : composition
+                    ? `${composition.viewpoint === "user" ? "Your camera" : "The designer camera"} frames ${composition.visibleFurnitureCount} of ${composition.furnitureCount} pieces and preserves ${composition.doorCount} doors and ${composition.windowCount} windows.`
+                    : cameraSource === "designer"
+                      ? "The camera picks the corner that frames the most furniture before rendering."
+                      : "No repositioning — the AI receives the exact frame you are looking at."}
+              </Text>
+
+              <View style={styles.panelActions}>
+                {!!currentRender && (
+                  <Pressable style={styles.panelSecondary} onPress={() => onSetOutputMode("ai")}>
+                    <Ionicons name="image-outline" size={17} color={COLORS.primaryDark} />
+                    <Text style={styles.panelSecondaryText}>Last result</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={[styles.panelPrimary, rendering && styles.panelPrimaryBusy]}
+                  disabled={rendering}
+                  onPress={onRender}
+                >
+                  {rendering
+                    ? <ActivityIndicator size="small" color={COLORS.white} />
+                    : <Ionicons name="sparkles" size={17} color={COLORS.white} />}
+                  <Text style={styles.panelPrimaryText}>
+                    {rendering ? "Generating…" : viewMode === "plan" ? "Render bird view" : "Render this view"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {showStick && <MoveStick onChange={drive} />}
+
+          {!showingAi && (
+            <View style={styles.dock} pointerEvents="box-none">
+              <View style={styles.statusChip}>
+                {status.busy
+                  ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                  : <View style={styles.statusDot} />}
+                <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open AI render options"
+                style={[styles.dockPrimary, panel === "ai" && styles.dockPrimaryActive]}
+                onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
+              >
+                <Ionicons name="sparkles" size={18} color={COLORS.white} />
+                <Text style={styles.dockPrimaryText}>Render</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Take a photo of this view"
+                style={styles.dockIcon}
+                onPress={onCapture}
+                disabled={busy === "capture"}
+              >
+                {busy === "capture"
+                  ? <ActivityIndicator color={COLORS.textPrimary} size="small" />
+                  : <Ionicons name="camera-outline" size={20} color={COLORS.textPrimary} />}
+              </Pressable>
+            </View>
+          )}
+        </View>
       </View>
     </View>
   );
 }
 
+/**
+ * What the status chip says.
+ *
+ * The chip used to report which renderer had produced the scene, which meant
+ * shipping an environment variable name to people who are decorating a flat.
+ * It now says what someone standing in the room would want to know: whether the
+ * home is still being furnished, and how much is in it.
+ */
+function describeScene(sceneInfo) {
+  if (!sceneInfo) return { busy: true, label: "Furnishing your home…" };
+  // "Settled", not "loaded": a model that failed to parse is still finished,
+  // and the chip must not claim to be loading for the rest of the session.
+  const streaming = (sceneInfo.catalogSettled ?? 0) < (sceneInfo.catalogRequested ?? 0);
+  if (streaming) return { busy: true, label: "Adding furniture detail…" };
+  const rooms = sceneInfo.rooms === 1 ? "1 room" : `${sceneInfo.rooms} rooms`;
+  return { busy: false, label: `${rooms} · ${sceneInfo.objects} pieces` };
+}
+
 // ── Small building blocks ──────────────────────────────────────────────────
-function PadButton({ icon, onIn, onOut, style }) {
+/**
+ * Analog movement stick.
+ *
+ * This replaces four separate arrow buttons that each stepped the camera a
+ * fixed distance on a repeat timer: walking anywhere took a sustained press on
+ * a 42pt target, and moving diagonally was impossible. One stick gives
+ * proportional speed and any direction from a single thumb, and the scene
+ * already accepted a joystick vector — only the UI was missing.
+ */
+function MoveStick({ onChange }) {
+  const travel = ms(34); // how far the knob can leave centre
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const latest = useRef(onChange);
+  latest.current = onChange;
+
+  const responder = useMemo(
+    () => {
+      const release = () => {
+        setKnob({ x: 0, y: 0 });
+        latest.current(0, 0);
+      };
+      const apply = (dx, dy) => {
+        const distance = Math.hypot(dx, dy) || 1;
+        const reach = Math.min(distance, travel);
+        const x = (dx / distance) * reach;
+        const y = (dy / distance) * reach;
+        setKnob({ x, y });
+        latest.current(x / travel, y / travel);
+      };
+      return PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => apply(0, 0),
+        onPanResponderMove: (_, gesture) => apply(gesture.dx, gesture.dy),
+        onPanResponderRelease: release,
+        onPanResponderTerminate: release,
+      });
+    },
+    [travel],
+  );
+
+  // A finger lifted outside the stick, or a mode change mid-gesture, would
+  // otherwise leave the camera walking forward forever.
+  useEffect(() => () => latest.current(0, 0), []);
+
   return (
-    <Pressable style={[styles.padButton, style]} onPressIn={onIn} onPressOut={onOut}>
-      <Ionicons name={icon} size={20} color={COLORS.textPrimary} />
-    </Pressable>
+    <View style={styles.stickBase} {...responder.panHandlers}>
+      <Ionicons name="chevron-up" size={13} color={COLORS.textTertiary} style={styles.stickUp} />
+      <Ionicons name="chevron-down" size={13} color={COLORS.textTertiary} style={styles.stickDown} />
+      <Ionicons name="chevron-back" size={13} color={COLORS.textTertiary} style={styles.stickLeft} />
+      <Ionicons name="chevron-forward" size={13} color={COLORS.textTertiary} style={styles.stickRight} />
+      <View style={[styles.stickKnob, { transform: [{ translateX: knob.x }, { translateY: knob.y }] }]}>
+        <Ionicons name="walk" size={20} color={COLORS.white} />
+      </View>
+    </View>
   );
 }
 
@@ -2401,7 +2472,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.base },
   headerRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md, paddingTop: SPACING.sm },
   headerButton: {
-    width: ms(36), height: ms(36), borderRadius: RADIUS.md,
+    width: ms(40), height: ms(40), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)",
   },
   headerCopy: { flex: 1 },
@@ -2412,12 +2483,15 @@ const styles = StyleSheet.create({
   step: { flex: 1, gap: 6 },
   stepTrack: { height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)" },
   stepTrackActive: { backgroundColor: COLORS.white },
-  stepLabel: { ...TYPE.caption, color: "rgba(255,255,255,0.6)", fontSize: 10.5 },
+  stepLabel: { ...TYPE.caption, color: "rgba(255,255,255,0.6)" },
   stepLabelActive: { color: COLORS.white },
 
   // Body
-  body: { padding: SPACING.lg, paddingBottom: SPACING.xxxl },
-  planBody: { paddingHorizontal: SPACING.md },
+  // One gutter for the whole flow. The plan stage used to inset by 12 and
+  // everything else by 20, so the canvas and the controls under it did not line
+  // up with each other or with the walkthrough overlay on the next screen.
+  body: { paddingHorizontal: SPACING.base, paddingTop: SPACING.base, paddingBottom: SPACING.xxxl },
+  planBody: { paddingHorizontal: SPACING.base },
   stageCopy: { ...TYPE.small, color: COLORS.textSecondary, marginBottom: SPACING.base },
   projectStatus: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
@@ -2430,7 +2504,7 @@ const styles = StyleSheet.create({
   },
   projectStatusCopy: { flex: 1, minWidth: 0 },
   projectStatusTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  projectStatusMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, fontSize: 9.5 },
+  projectStatusMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
 
   sourceRow: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
   sourcePrimary: {
@@ -2462,14 +2536,14 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
   workspaceCopy: { flex: 1 },
-  workspaceEyebrow: { ...TYPE.overline, color: COLORS.primaryDark, fontSize: 9.5 },
+  workspaceEyebrow: { ...TYPE.overline, color: COLORS.primaryDark },
   workspaceHint: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2, lineHeight: 16 },
   workspaceBadge: {
     minWidth: 48, alignItems: "center", paddingHorizontal: SPACING.sm, paddingVertical: 5,
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
   workspaceBadgeValue: { ...TYPE.bodyStrong, color: COLORS.textPrimary, lineHeight: 18 },
-  workspaceBadgeLabel: { ...TYPE.caption, color: COLORS.textTertiary, fontSize: 9 },
+  workspaceBadgeLabel: { ...TYPE.caption, color: COLORS.textTertiary },
   workspaceExpand: {
     width: 40, height: 40, borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
@@ -2482,14 +2556,13 @@ const styles = StyleSheet.create({
   toolbar: { padding: 5, gap: 4 },
   tool: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    height: ms(40), paddingHorizontal: SPACING.md,
     borderRadius: RADIUS.md, backgroundColor: "transparent",
     borderWidth: 1, borderColor: "transparent",
   },
   toolActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
   toolLabel: { ...TYPE.caption, color: COLORS.textSecondary },
   toolLabelActive: { color: COLORS.white },
-  toolHint: { ...TYPE.caption, color: COLORS.textTertiary, marginBottom: SPACING.md },
 
   curveCard: {
     marginBottom: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg,
@@ -2526,9 +2599,9 @@ const styles = StyleSheet.create({
   },
   curveFlowDotActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
   curveFlowDotComplete: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  curveFlowDotText: { ...TYPE.caption, fontSize: 10, color: COLORS.textTertiary },
+  curveFlowDotText: { ...TYPE.caption, color: COLORS.textTertiary },
   curveFlowDotTextActive: { color: COLORS.white },
-  curveFlowLabel: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary },
+  curveFlowLabel: { ...TYPE.caption, color: COLORS.textTertiary },
   curveFlowLabelActive: { color: COLORS.textPrimary },
   curveApplyRow: { flexDirection: "row", gap: SPACING.sm, marginTop: 2 },
   curveCancel: {
@@ -2575,7 +2648,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
   },
   roomSizeInput: { width: 42, ...TYPE.caption, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
-  roomSizeUnit: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary },
+  roomSizeUnit: { ...TYPE.caption, color: COLORS.textTertiary },
   roomSizeTimes: { ...TYPE.caption, color: COLORS.textTertiary },
   roomSizeArea: { minWidth: 54, ...TYPE.caption, color: COLORS.textSecondary, textAlign: "right" },
 
@@ -2731,7 +2804,7 @@ const styles = StyleSheet.create({
   projectCardTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
   projectCardMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 3 },
   projectCurrentPill: { paddingHorizontal: SPACING.sm, paddingVertical: 4, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
-  projectCurrentText: { ...TYPE.caption, color: COLORS.white, fontSize: 9.5 },
+  projectCurrentText: { ...TYPE.caption, color: COLORS.white },
   projectDelete: { width: 30, height: 30, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.dangerSoft },
   projectEmpty: { alignItems: "center", paddingVertical: SPACING.xxl, paddingHorizontal: SPACING.xl },
   projectEmptyTitle: { ...TYPE.bodyStrong, color: COLORS.textSecondary, marginTop: SPACING.sm },
@@ -2759,125 +2832,282 @@ const styles = StyleSheet.create({
   footerPrimaryDisabled: { backgroundColor: COLORS.disabled, shadowOpacity: 0, elevation: 0 },
   footerPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
 
-  // Viewer
-  viewerWrap: { flex: 1 },
-  viewerTop: {
-    position: "absolute", top: SPACING.md, left: SPACING.base, right: SPACING.base,
-    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+  // ── Viewer ───────────────────────────────────────────────────────────────
+  // One overlay column, pinned to the safe area, holding a top and a bottom
+  // cluster. Nothing here is positioned at a hand-tuned offset: each cluster
+  // stacks in flow, so adding or hiding a control cannot push another one off
+  // screen or under the home indicator.
+  viewerWrap: { flex: 1, backgroundColor: COLORS.surfaceAlt },
+  viewerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between",
+    paddingHorizontal: SPACING.base,
   },
-  segmented: { flex: 1, flexDirection: "row", backgroundColor: "rgba(255,255,255,0.94)", borderRadius: RADIUS.pill, padding: 3, ...SHADOW.sm },
-  segment: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill },
+  overlayTop: { gap: SPACING.sm },
+  overlayBottom: { gap: SPACING.md },
+
+  viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  segmented: {
+    flex: 1,
+    flexDirection: "row",
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.pill,
+    padding: 4,
+    ...SHADOW.md,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: ms(38),
+    borderRadius: RADIUS.pill,
+  },
   segmentActive: { backgroundColor: COLORS.primaryDark },
   segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.white },
-  roundButton: { width: ms(40), height: ms(40), borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.94)", ...SHADOW.sm },
+  roundButton: {
+    width: ms(46),
+    height: ms(46),
+    borderRadius: RADIUS.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+    ...SHADOW.md,
+  },
   roundButtonActive: { backgroundColor: COLORS.brand800 },
 
-  roomStrip: { position: "absolute", top: ms(62), left: 0, right: 0, maxHeight: ms(40) },
-  roomStripContent: { paddingHorizontal: SPACING.base, gap: SPACING.sm, alignItems: "center" },
-  roomPill: { paddingHorizontal: SPACING.base, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.92)", maxWidth: 150 },
-  roomPillActive: { backgroundColor: COLORS.accent },
+  // Negative margins let the strip bleed to the screen edges so a long room
+  // list scrolls off the side instead of stopping inside the gutter.
+  roomStrip: { marginHorizontal: -SPACING.base, flexGrow: 0 },
+  roomStripContent: { paddingHorizontal: SPACING.base, gap: SPACING.sm },
+  roomPill: {
+    justifyContent: "center",
+    height: ms(34),
+    maxWidth: ms(160),
+    paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface,
+    ...SHADOW.sm,
+  },
+  roomPillActive: { backgroundColor: COLORS.primaryDark },
   roomPillText: { ...TYPE.caption, color: COLORS.textSecondary },
   roomPillTextActive: { color: COLORS.white },
 
-  viewerGuidance: {
-    position: "absolute", top: ms(62), left: SPACING.base,
-    maxWidth: "78%", flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: SPACING.md, paddingVertical: 7, borderRadius: RADIUS.pill,
-    backgroundColor: "rgba(25,32,29,0.72)",
+  hintPill: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs + 2,
+    borderRadius: RADIUS.pill,
+    backgroundColor: "rgba(24, 30, 25, 0.74)",
   },
-  viewerGuidanceWithRooms: { top: ms(106) },
-  viewerGuidanceText: { ...TYPE.caption, color: COLORS.white, fontSize: 10 },
+  hintText: { ...TYPE.caption, color: COLORS.white, flexShrink: 1 },
 
-  inspector: {
-    position: "absolute", left: SPACING.base, right: SPACING.base, bottom: ms(94),
-    backgroundColor: "rgba(255,255,255,0.98)", borderRadius: RADIUS.xl, padding: SPACING.base,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.78)", ...SHADOW.lg,
+  // ── Contextual sheet (selection and AI) ──────────────────────────────────
+  panelCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.base,
+    gap: SPACING.md,
+    ...SHADOW.lg,
   },
-  inspectorHead: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  inspectorObjectIcon: { width: 38, height: 38, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint },
-  inspectorHeadingCopy: { flex: 1, minWidth: 0 },
-  inspectorEyebrow: { ...TYPE.overline, color: COLORS.primary, fontSize: 9 },
-  inspectorTitle: { ...TYPE.h3, color: COLORS.textPrimary, textTransform: "capitalize" },
-  inspectorClose: { width: 34, height: 34, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken },
-  inspectorMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: SPACING.sm },
-  inspectorBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: 2, lineHeight: 18 },
-  inspectorActions: { flexDirection: "row", alignItems: "flex-end", gap: SPACING.sm, marginTop: SPACING.md },
-  inspectorActionGroup: { gap: 5 },
-  inspectorPositionGroup: { flex: 1 },
-  inspectorActionLabel: { ...TYPE.overline, color: COLORS.textTertiary, fontSize: 8.5 },
-  inspectorActionRow: { flexDirection: "row", gap: 4 },
-  inspectorIcon: {
-    flex: 1, minWidth: ms(34), height: ms(38), borderRadius: RADIUS.md,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
-    borderWidth: 1, borderColor: COLORS.border,
+  panelHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
+  panelIcon: {
+    width: ms(42),
+    height: ms(42),
+    borderRadius: RADIUS.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primaryTint,
   },
-  inspectorHint: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: SPACING.sm, textAlign: "center" },
+  panelIconAccent: { backgroundColor: COLORS.accentTint },
+  panelHeadCopy: { flex: 1, minWidth: 0 },
+  panelEyebrow: { ...TYPE.overline, color: COLORS.textTertiary },
+  panelTitle: { ...TYPE.h3, color: COLORS.textPrimary, textTransform: "capitalize" },
+  panelClose: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: RADIUS.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surfaceSunken,
+  },
+  panelMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: -SPACING.sm },
+  panelBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: -SPACING.sm },
+  panelNote: { ...TYPE.small, color: COLORS.textTertiary },
 
-  // AI
+  editorRow: { flexDirection: "row", gap: SPACING.md },
+  editorGroup: { gap: SPACING.xs },
+  editorLabel: { ...TYPE.overline, color: COLORS.textTertiary },
+  editorButtons: { flexDirection: "row", gap: SPACING.xs },
+  editorButton: {
+    width: ms(44),
+    height: ms(44),
+    borderRadius: RADIUS.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surfaceSunken,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+  },
+
+  panelGhost: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.sm,
+    height: ms(44),
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surfaceSunken,
+  },
+  panelGhostText: { ...TYPE.caption, color: COLORS.textSecondary },
+
+  toggleGroup: {
+    flexDirection: "row",
+    gap: SPACING.xs,
+    backgroundColor: COLORS.surfaceSunken,
+    borderRadius: RADIUS.pill,
+    padding: 4,
+  },
+  toggleOption: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    height: ms(38),
+    borderRadius: RADIUS.pill,
+  },
+  toggleOptionActive: { backgroundColor: COLORS.primaryDark },
+  toggleText: { ...TYPE.caption, color: COLORS.textSecondary },
+  toggleTextActive: { color: COLORS.white },
+
+  panelActions: { flexDirection: "row", gap: SPACING.sm },
+  panelSecondary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.xs,
+    height: ms(48),
+    paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.primaryTint,
+  },
+  panelSecondaryText: { ...TYPE.caption, color: COLORS.primaryDark },
+  panelPrimary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.sm,
+    height: ms(48),
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accent,
+  },
+  panelPrimaryBusy: { opacity: 0.75 },
+  panelPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+
+  // ── AI result ────────────────────────────────────────────────────────────
   aiLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.surfaceInverse },
-  aiLayerBar: {
-    position: "absolute", left: SPACING.base, right: SPACING.base, bottom: SPACING.xl,
-    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    backgroundColor: COLORS.overlay, borderRadius: RADIUS.lg, padding: SPACING.md,
+  aiResultBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.md,
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.overlay,
   },
-  aiLayerCopy: { flex: 1 },
-  aiLayerTag: { ...TYPE.overline, color: "rgba(255,255,255,0.62)", fontSize: 9 },
-  aiLayerLabel: { ...TYPE.bodyStrong, color: COLORS.white },
-  aiLayerButton: { width: ms(36), height: ms(36), borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.18)" },
+  aiResultCopy: { flex: 1, minWidth: 0 },
+  aiResultTag: { ...TYPE.overline, color: "rgba(255,255,255,0.66)" },
+  aiResultLabel: { ...TYPE.bodyStrong, color: COLORS.white },
+  aiResultButton: {
+    width: ms(44),
+    height: ms(44),
+    borderRadius: RADIUS.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
 
   renderOverlay: {
-    ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.overlay,
-    alignItems: "center", justifyContent: "center", paddingHorizontal: SPACING.xxl, gap: SPACING.md,
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.overlay,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: SPACING.xxl,
+    gap: SPACING.md,
   },
   renderTitle: { ...TYPE.h3, color: COLORS.white, textAlign: "center" },
-  renderBody: { ...TYPE.small, color: "rgba(255,255,255,0.78)", textAlign: "center" },
+  renderBody: { ...TYPE.small, color: "rgba(255,255,255,0.80)", textAlign: "center" },
 
-  aiPanel: {
-    position: "absolute", left: SPACING.base, right: SPACING.base, bottom: ms(92),
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.base, ...SHADOW.lg,
+  // ── Movement stick ───────────────────────────────────────────────────────
+  stickBase: {
+    alignSelf: "flex-end",
+    width: ms(116),
+    height: ms(116),
+    borderRadius: RADIUS.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.86)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.9)",
+    ...SHADOW.md,
   },
-  aiPanelHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: SPACING.md },
-  aiPanelTitle: { ...TYPE.h3, color: COLORS.textPrimary },
-  outputToggle: { flexDirection: "row", gap: SPACING.xs, backgroundColor: COLORS.surfaceSunken, borderRadius: RADIUS.pill, padding: 3, marginBottom: SPACING.md },
-  outputOption: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill },
-  outputOptionActive: { backgroundColor: COLORS.primaryDark },
-  outputOptionDisabled: { opacity: 0.45 },
-  outputText: { ...TYPE.caption, color: COLORS.textSecondary },
-  outputTextActive: { color: COLORS.white },
-  previewButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint, marginBottom: SPACING.md },
-  previewButtonText: { ...TYPE.caption, color: COLORS.primaryDark },
-  aiNote: { ...TYPE.caption, color: COLORS.textTertiary, marginBottom: SPACING.md },
-  renderButton: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.accent,
+  stickKnob: {
+    width: ms(48),
+    height: ms(48),
+    borderRadius: RADIUS.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primaryDark,
+    ...SHADOW.sm,
   },
-  renderButtonBusy: { opacity: 0.8 },
-  renderButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
+  stickUp: { position: "absolute", top: ms(8) },
+  stickDown: { position: "absolute", bottom: ms(8) },
+  stickLeft: { position: "absolute", left: ms(8) },
+  stickRight: { position: "absolute", right: ms(8) },
 
-  viewerBottom: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: SPACING.base, paddingBottom: SPACING.lg },
-  pad: { width: ms(126), height: ms(126), alignSelf: "flex-end", marginBottom: SPACING.md },
-  padButton: {
-    position: "absolute", width: ms(42), height: ms(42), borderRadius: RADIUS.pill,
-    alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.94)", ...SHADOW.sm,
+  // ── Dock ─────────────────────────────────────────────────────────────────
+  dock: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  statusChip: {
+    flex: 1,
+    minWidth: 0,
+    height: ms(48),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface,
+    ...SHADOW.md,
   },
-  padUp: { top: 0, left: ms(42) },
-  padDown: { bottom: 0, left: ms(42) },
-  padLeft: { left: 0, top: ms(42) },
-  padRight: { right: 0, top: ms(42) },
-
-  actionBar: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  aiButton: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.base, height: ms(44), borderRadius: RADIUS.pill, backgroundColor: COLORS.accent, ...SHADOW.md,
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
+  statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
+  dockPrimary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.sm,
+    height: ms(48),
+    paddingHorizontal: SPACING.lg,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accent,
+    ...SHADOW.md,
   },
-  aiButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
-  iconAction: { width: ms(44), height: ms(44), borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.94)", ...SHADOW.sm },
-
-  sceneBadge: { flex: 1, minWidth: 0, height: ms(44), flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.94)", ...SHADOW.sm },
-  sceneDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.success },
-  sceneDotPreview: { backgroundColor: COLORS.accentStrong },
-  sceneBadgeText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, fontSize: 10 },
+  dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
+  dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  dockIcon: {
+    width: ms(48),
+    height: ms(48),
+    borderRadius: RADIUS.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+    ...SHADOW.md,
+  },
 
   // Snapshot sheet
   sheetBackdrop: { flex: 1, backgroundColor: COLORS.scrim, justifyContent: "flex-end" },

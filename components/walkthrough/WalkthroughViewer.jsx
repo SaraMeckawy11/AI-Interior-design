@@ -12,8 +12,8 @@ import { WebView } from "react-native-webview";
 
 import COLORS from "../../constants/colors";
 import { RADIUS, SPACING, TYPE } from "../../constants/theme";
-import { buildWalkthroughHtml } from "../../lib/walkthroughScene";
-import { buildExactWalkthroughHtml } from "../../lib/exactWalkthroughScene";
+import { buildWalkthroughHtml, catalogKeysFor } from "../../lib/walkthroughScene";
+import { loadFurnitureModel } from "../../lib/furnitureCatalog";
 
 /**
  * Hosts the three.js walkthrough document and forwards camera / scene commands
@@ -23,19 +23,33 @@ import { buildExactWalkthroughHtml } from "../../lib/exactWalkthroughScene";
  * design settings). Mode, night lighting and the active room are pushed in as
  * imperative commands instead, because rebuilding the document for those would
  * throw away the whole GPU scene and re-run the furnishing pass on every toggle.
+ *
+ * Furniture models are not part of the document. They are streamed in once the
+ * scene reports itself ready — see `streamCatalog` — so the document stays a
+ * few hundred kilobytes rather than the nine megabytes the full .glb catalogue
+ * would add to it.
  */
+
+/**
+ * How much base64 to hand over per `injectJavaScript` call.
+ *
+ * The bridge copies the whole string, so a 5 MB model sent in one call stalls
+ * the UI thread visibly. 96 KB is small enough to stay imperceptible and large
+ * enough that even the biggest model is under sixty calls.
+ */
+const CHUNK_SIZE = 96 * 1024;
+
 const WalkthroughViewer = forwardRef(function WalkthroughViewer(
   {
     layout,
     roomConfigs,
     settings,
     furnitureEdits = {},
-    exactScene = null,
-    exactBaseUrl = "",
     mode = "walk",
     roomIndex = 0,
     night = false,
     onReady,
+    onSceneUpdate,
     onSelect,
     onError,
     onSnapshot,
@@ -50,13 +64,13 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
   const [message, setMessage] = useState("");
 
   const html = useMemo(
-    () => exactScene
-      ? buildExactWalkthroughHtml({ scene: exactScene, settings, furnitureEdits, mode, roomIndex, night })
-      : buildWalkthroughHtml({ layout, roomConfigs, settings, furnitureEdits, mode, roomIndex, night }),
+    () => buildWalkthroughHtml({ layout, roomConfigs, settings, furnitureEdits, mode, roomIndex, night }),
     // Deliberately excludes mode/roomIndex/night — see the note above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [exactScene, layout, roomConfigs, settings],
+    [layout, roomConfigs, settings],
   );
+
+  const catalogKeys = useMemo(() => catalogKeysFor(roomConfigs), [roomConfigs]);
 
   useEffect(() => {
     setStatus("loading");
@@ -66,6 +80,43 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
   const run = useCallback((expression) => {
     webRef.current?.injectJavaScript(`try{${expression}}catch(e){};true;`);
   }, []);
+
+  // Cancels an in-flight stream when the scene is rebuilt or the screen closes,
+  // so models from the previous document never land in the new one.
+  const streamToken = useRef(0);
+
+  const streamCatalog = useCallback(() => {
+    const token = (streamToken.current += 1);
+    const keys = [...catalogKeys];
+
+    const sendNext = () => {
+      if (token !== streamToken.current) return;
+      const key = keys.shift();
+      if (!key) return;
+      const base64 = loadFurnitureModel(key);
+      if (!base64) {
+        sendNext();
+        return;
+      }
+      let offset = 0;
+      const sendChunk = () => {
+        if (token !== streamToken.current) return;
+        const chunk = base64.slice(offset, offset + CHUNK_SIZE);
+        offset += CHUNK_SIZE;
+        const last = offset >= base64.length;
+        run(`window.LivinaiScene.installModel(${JSON.stringify(key)},${JSON.stringify(chunk)},${last})`);
+        // Yielding between chunks keeps the bridge — and the touch handlers the
+        // user is already using to look around — responsive while a large model
+        // is being sent.
+        setTimeout(last ? sendNext : sendChunk, last ? 24 : 0);
+      };
+      sendChunk();
+    };
+
+    sendNext();
+  }, [catalogKeys, run]);
+
+  useEffect(() => () => { streamToken.current += 1; }, []);
 
   useImperativeHandle(ref, () => ({
     move: (direction, amount) => run(`window.LivinaiScene.move(${JSON.stringify(direction)},${amount || 0.36})`),
@@ -95,19 +146,20 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
       }
       if (data.type === "ready") {
         setStatus("ready");
-        // Whether the real furniture models loaded is otherwise invisible: when
-        // they don't, the procedural families render in their place and the
-        // scene looks like the catalogue was never wired up.
         if (__DEV__) {
           console.log(
             `[walkthrough] engine=${data.engine} three=r${data.threeVersion} `
-            + `models ${data.catalogLoaded}/${data.catalogRequested} loaded, ${data.catalogUsed} placed`,
+            + `${data.objects} pieces staged, ${data.catalogRequested} models queued`,
           );
         }
         onReady?.(data);
+        streamCatalog();
+      } else if (data.type === "sceneUpdate") {
+        // A model finished streaming and swapped in. Same shape as `ready`, so
+        // the furniture counters stay live as the room sharpens.
+        onSceneUpdate?.(data);
       } else if (data.type === "diagnostic") {
-         
-        console.warn(`[walkthrough] ${data.message}`);
+        if (__DEV__) console.warn(`[walkthrough] ${data.message}`);
         onDiagnostic?.(data.message);
       } else if (data.type === "select") {
         onSelect?.(data.info);
@@ -123,14 +175,14 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         onError?.(data.message);
       }
     },
-    [onComposition, onDiagnostic, onError, onFurnitureChange, onReady, onSelect, onSnapshot],
+    [onComposition, onDiagnostic, onError, onFurnitureChange, onReady, onSceneUpdate, onSelect, onSnapshot, streamCatalog],
   );
 
   return (
     <View style={styles.container}>
       <WebView
         ref={webRef}
-        source={{ html, baseUrl: exactScene && exactBaseUrl ? `${exactBaseUrl.replace(/\/$/, "")}/` : "https://livinai.local/" }}
+        source={{ html, baseUrl: "https://livinai.local/" }}
         originWhitelist={["*"]}
         style={styles.web}
         containerStyle={styles.web}
@@ -145,7 +197,7 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         setBuiltInZoomControls={false}
         mediaPlaybackRequiresUserAction={false}
         onError={() => {
-          const errorMessage = "The 3D view failed to load on this device.";
+          const errorMessage = "The 3D view could not start on this device.";
           setStatus("error");
           setMessage(errorMessage);
           onError?.(errorMessage);
@@ -157,11 +209,9 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
           {status === "loading" ? (
             <>
               <ActivityIndicator color={COLORS.primaryDark} size="large" />
-              <Text style={styles.overlayTitle}>{exactScene ? "Opening exact Livinai scene" : "Building your interior"}</Text>
+              <Text style={styles.overlayTitle}>Building your interior</Text>
               <Text style={styles.overlayBody}>
-                {exactScene
-                  ? "Loading the same Interior_Plan furniture, dimensions and placement used by Livinai_web."
-                  : "Preparing the measured offline preview while the exact scene is unavailable."}
+                Measuring the rooms you drew and furnishing them to your chosen style.
               </Text>
             </>
           ) : (
