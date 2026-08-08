@@ -5,6 +5,53 @@ apply plugin: "com.facebook.react"
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
+ * Upload-key credentials, resolved from outside version control.
+ *
+ * These used to be string literals a few lines further down. This file is
+ * tracked, so every password written in it was published the moment it was
+ * pushed — and stayed published, because deleting a line does not remove it
+ * from the history it was already committed to.
+ *
+ * Values are read, in order, from:
+ *   1. android/keystore.properties  — gitignored, the normal local setup
+ *   2. the environment              — how CI supplies them
+ *   3. Gradle properties            — e.g. ~/.gradle/gradle.properties
+ *
+ * When none of them answer, `present` is false and the build simply skips the
+ * upload key rather than failing at configuration time.
+ */
+def uploadKeystore = { ->
+    def props = new Properties()
+    def propsFile = rootProject.file("keystore.properties")
+    if (propsFile.exists()) {
+        propsFile.withInputStream { props.load(it) }
+    }
+
+    def read = { String key ->
+        def value = props.getProperty(key) ?: System.getenv(key) ?: project.findProperty(key)
+        value?.toString()?.trim() ?: null
+    }
+
+    def path = read("LIVINAI_UPLOAD_STORE_FILE") ?: "../credentials/android/keystore.jks"
+    def storeFile = rootProject.file(path)
+    def storePassword = read("LIVINAI_UPLOAD_STORE_PASSWORD")
+    def keyAlias = read("LIVINAI_UPLOAD_KEY_ALIAS")
+    def keyPassword = read("LIVINAI_UPLOAD_KEY_PASSWORD") ?: storePassword
+
+    [
+        present: storeFile.exists() && storePassword && keyAlias && keyPassword,
+        file: storeFile,
+        storePassword: storePassword,
+        keyAlias: keyAlias,
+        keyPassword: keyPassword,
+    ]
+}()
+
+if (!uploadKeystore.present) {
+    logger.lifecycle("Livinai: upload keystore not configured — see android/keystore.properties.example")
+}
+
+/**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
@@ -97,37 +144,45 @@ android {
     }
     signingConfigs {
         debug {
+            // Android's stock debug keystore. Its password is 'android' on every
+            // machine in the world, so there is nothing here worth hiding.
             storeFile file('debug.keystore')
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
         release {
-            storeFile file("credentials/android/keystore.jks")
-            storePassword "970f6503d9acf3c781fd580397097c87"
-            keyAlias "3ba779c9cd2f5a78c894029bd70ab06d"
-            keyPassword "4d9a6373cebcdeb44e0fb984db267544"
+            if (uploadKeystore.present) {
+                storeFile uploadKeystore.file
+                storePassword uploadKeystore.storePassword
+                keyAlias uploadKeystore.keyAlias
+                keyPassword uploadKeystore.keyPassword
+            }
         }
         // Google Sign-In resolves its OAuth client by package name + signing SHA-1.
-        // The debug keystore's fingerprint is not registered, so debug builds fail with
-        // DEVELOPER_ERROR. Sign them with the real upload keystore instead.
+        // The debug keystore's fingerprint is not registered, so debug builds fail
+        // with DEVELOPER_ERROR. Sign them with the real upload key instead.
         debugWithReleaseKey {
-            storeFile rootProject.file("../credentials/android/keystore.jks")
-            storePassword "970f6503d9acf3c781fd580397097c87"
-            keyAlias "3ba779c9cd2f5a78c894029bd70ab06d"
-            keyPassword "4d9a6373cebcdeb44e0fb984db267544"
+            if (uploadKeystore.present) {
+                storeFile uploadKeystore.file
+                storePassword uploadKeystore.storePassword
+                keyAlias uploadKeystore.keyAlias
+                keyPassword uploadKeystore.keyPassword
+            }
         }
     }
 
     buildTypes {
         debug {
-            // Fall back to the plain debug keystore when credentials/ is not checked out.
-            signingConfig signingConfigs.debugWithReleaseKey.storeFile?.exists()
-                ? signingConfigs.debugWithReleaseKey
-                : signingConfigs.debug
+            // Fall back to the stock debug key when the upload key is not available;
+            // sign-in will not work against it, but the app still builds and runs.
+            signingConfig uploadKeystore.present ? signingConfigs.debugWithReleaseKey : signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release  // ✅ use release keystore
+            // Deliberately left unsigned rather than falling back to the debug key:
+            // a debug-signed release bundle is rejected by Play with a far more
+            // confusing error than an unsigned one.
+            signingConfig uploadKeystore.present ? signingConfigs.release : null
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"

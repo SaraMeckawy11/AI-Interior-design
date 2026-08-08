@@ -87,6 +87,10 @@ yarn-error.*
 credentials.json
 credentials/
 
+# Signing credentials. The tracked example file documents the keys; the real
+# values never enter the repository.
+android/keystore.properties
+
 # Python bytecode from the AI services
 __pycache__/
 *.py[cod]
