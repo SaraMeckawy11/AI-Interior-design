@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import COLORS from "../../constants/colors";
 import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, MOTION, ms } from "../../constants/theme";
+import { TAB_BAR_CLEARANCE } from "../../components/navigation/FloatingTabBar";
 import { useAuthStore } from "../../authStore";
 import InteriorImg from "../../assets/images/onboarding/i2.png";
 import { apiUrl } from "../../configs/api";
@@ -158,7 +159,7 @@ export default function Create() {
     <View style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: SPACING.xxl }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_CLEARANCE + SPACING.sm }}
       >
         <Animated.View style={{ opacity: reveal }}>
           <LinearGradient
@@ -184,7 +185,7 @@ export default function Create() {
 
             <Text style={styles.headline}>Design your space</Text>
             <Text style={styles.subhead}>
-              Four ways to go from what you have to what it could be.
+              Three ways to go from what you have to what it could be.
             </Text>
           </LinearGradient>
         </Animated.View>

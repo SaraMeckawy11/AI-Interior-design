@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, View, Text, StyleSheet, Linking, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import COLORS from '../../constants/colors';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const Contact = () => {
   return (
@@ -9,8 +10,8 @@ const Contact = () => {
       colors={[COLORS.background, '#ffffff']} // gradient background
       style={styles.gradient}
     >
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Contact Us</Text>
+      <ScreenHeader title="Contact Us" />
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
 
         <Text style={styles.text}>
           Have a question, feedback, or need help with LIVINAI?  

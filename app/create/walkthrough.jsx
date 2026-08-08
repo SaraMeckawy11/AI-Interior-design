@@ -20,8 +20,6 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import PlanCanvas, {
   DEFAULT_CURVE_SETTINGS,
   GRID_METERS,
@@ -59,46 +57,65 @@ import {
   WALL_FINISHES,
   buildLayout,
 } from "../../lib/walkthroughScene";
+import {
+  createProjectId,
+  deleteProject as deleteStoredProject,
+  loadLibrary,
+  loadProjectData,
+  renameProject as renameStoredProject,
+  saveLocally,
+  syncProject,
+} from "../../lib/walkthroughProjects";
 
+/**
+ * The four things a person actually does, in the order they do them.
+ *
+ * Choosing where the plan comes from used to be crammed into the first step
+ * alongside the drawing surface, which meant the upload button and the canvas
+ * competed for the same screen and the saved-plans list was buried in a modal
+ * behind a folder icon. That decision now happens on its own screen — the
+ * library — so every step here is one job.
+ */
 const STAGES = [
   {
-    key: "plan",
-    label: "Plan",
-    title: "Create your floor plan",
-    copy: "Upload a plan to detect editable rooms, or draw a measured plan from scratch.",
+    key: "draw",
+    label: "Draw",
+    title: "Draw the floor plan",
+    copy: "Place rooms, then add the doors, windows and balconies between them.",
   },
   {
     key: "rooms",
     label: "Rooms",
-    title: "Assign every room",
-    copy: "Name each space and choose its function. Room area stays visible while you make each choice.",
+    title: "Name every room",
+    copy: "Give each space a name and a function. Its measured area stays visible while you choose.",
   },
   {
     key: "style",
     label: "Style",
-    title: "Coordinate the whole home",
-    copy: "Choose the shared finishes and mood before Livinai builds the exact furnished scene.",
+    title: "Set the direction",
+    copy: "One brief for the whole home, so every room is furnished to match.",
   },
   {
     key: "walk",
     label: "Explore",
-    title: "Explore and edit",
-    copy: "Walk, orbit or use the bird view. Tap any furniture item to adjust it.",
+    title: "Walk through it",
+    copy: "Walk, orbit or look from above. Tap any piece of furniture to move it.",
   },
 ];
 
 const CANVAS_RATIO = PLAN_HEIGHT_METERS / PLAN_WIDTH_METERS;
-const STORAGE_KEY = "livinai-walkthrough-plan";
-const PROJECTS_KEY = "livinai-walkthrough-project-library-v1";
-const MAX_SAVED_PROJECTS = 12;
 
-const createWalkthroughProjectId = () => `walkthrough-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-// Ordered the way a plan is actually built: rooms first, then openings, then
-// corrections. "Edit" used to be armed on an empty canvas, so a first-time user
-// could drag all over the grid and nothing would ever appear.
+/**
+ * The drawing tools, ordered the way a plan is built: the two ways to make a
+ * room, the three things that go in its walls, then the two ways to correct what
+ * is already there.
+ *
+ * They fill a fixed 4-column grid, so the order below is also the reading order
+ * on screen. This replaced a horizontal scroll strip, where the Edit tool sat off
+ * the right edge and was therefore never found.
+ */
 const TOOLS = [
-  { key: "rect", icon: "square-outline", label: "Room" },
+  { key: "rect", icon: "square-outline", label: "Box" },
   { key: "room", icon: "shapes-outline", label: "Outline" },
   { key: "door", icon: "log-in-outline", label: "Door" },
   { key: "window", icon: "browsers-outline", label: "Window" },
@@ -108,13 +125,13 @@ const TOOLS = [
 ];
 
 const TOOL_HINTS = {
-  pan: "Drag to move around the plan. Two fingers pan and pinch at any time, in any tool.",
-  rect: "Drag on the grid to draw a rectangular room. The size in metres is shown as you drag.",
-  room: "Tap each corner, then tap the first corner again — or use Finish room — to close it.",
-  door: "Tap a wall for a standard door, or drag along it for a wider door or open passage.",
-  window: "Tap a wall for a standard window, or drag along it to set its exact length.",
+  pan: "Drag to move around the plan. Two fingers pan and pinch in any tool.",
+  rect: "Drag on the grid to draw a rectangular room. Its size in metres shows as you drag.",
+  room: "Tap each corner, then tap the first corner again to close the room.",
+  door: "Tap a wall for a standard door, or drag along it for a wider opening.",
+  window: "Tap a wall for a standard window, or drag along it to set its length.",
   balcony: "Tap an outside wall for a balcony door, or drag along it for a wide slider.",
-  select: "Tap a room or opening, then drag the shape or one of its handles to adjust it.",
+  select: "Tap a room or opening, then drag the shape or one of its handles.",
 };
 
 const VIEW_MODES = [
@@ -135,6 +152,11 @@ export default function WalkthroughScreen() {
   const router = useRouter();
   const { token } = useAuthStore();
   const viewerRef = useRef(null);
+
+  // ── Where we are ─────────────────────────────────────────────────────────
+  // 'library' is the front door: saved plans plus the two ways to start a new
+  // one. 'editor' is the four-step flow.
+  const [view, setView] = useState("library");
 
   // ── Plan state ───────────────────────────────────────────────────────────
   const [stage, setStage] = useState(0);
@@ -159,14 +181,18 @@ export default function WalkthroughScreen() {
   const [planError, setPlanError] = useState("");
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
-  const [projectId, setProjectId] = useState(createWalkthroughProjectId);
-  const [projectTitle, setProjectTitle] = useState("New 3D plan");
+
+  // ── Library / project state ──────────────────────────────────────────────
+  const [projectId, setProjectId] = useState(createProjectId);
+  const [remoteId, setRemoteId] = useState(null);
+  const [projectTitle, setProjectTitle] = useState("Untitled 3D plan");
   const [projects, setProjects] = useState([]);
-  const [projectsOpen, setProjectsOpen] = useState(false);
-  const [projectReady, setProjectReady] = useState(false);
-  const [saveTick, setSaveTick] = useState(0);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [cloudSynced, setCloudSynced] = useState(false);
+  const [syncState, setSyncState] = useState("idle"); // 'idle' | 'saving' | 'saved'
+  const [renaming, setRenaming] = useState(null); // null | 'current' | project
+  const [pendingDelete, setPendingDelete] = useState(null);
   const draftStepsRef = useRef([]);
-  const explicitSaveRef = useRef(false);
 
   // ── Viewer state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("walk");
@@ -175,7 +201,6 @@ export default function WalkthroughScreen() {
   const [sceneInfo, setSceneInfo] = useState(null);
   const [panel, setPanel] = useState(null); // null | 'ai'
   const [cameraSource, setCameraSource] = useState("designer"); // 'designer' | 'current'
-  const [composition, setComposition] = useState(null);
   const [aiRenders, setAiRenders] = useState({});
   const [outputMode, setOutputMode] = useState("live"); // 'live' | 'ai'
   const [rendering, setRendering] = useState(false);
@@ -186,6 +211,10 @@ export default function WalkthroughScreen() {
   const [snapshotKind, setSnapshotKind] = useState("capture");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+
+  // The style step asks seven questions. Four of them decide how a home reads;
+  // the rest are refinements, so they stay folded away until asked for.
+  const [styleExpanded, setStyleExpanded] = useState(false);
 
   // The sheet is the measured drawing surface; the canvas is only the window
   // onto it. Keeping the sheet device-independent is what makes a room's area
@@ -267,80 +296,104 @@ export default function WalkthroughScreen() {
     setFuture([]);
   }, [sheetWidth]);
 
-  useEffect(() => {
-    if (restored.current) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const values = await AsyncStorage.multiGet([PROJECTS_KEY, STORAGE_KEY]);
-        if (cancelled) return;
-        const savedProjects = JSON.parse(values[0][1] || "[]")
-          .filter((project) => project?.id && project?.data)
-          .sort((one, two) => String(two.updatedAt).localeCompare(String(one.updatedAt)));
-        setProjects(savedProjects);
-        if (savedProjects[0]) {
-          setProjectId(savedProjects[0].id);
-          setProjectTitle(savedProjects[0].title || "3D walkthrough");
-          restoreSavedPlan(savedProjects[0].data);
-        } else if (values[1][1]) {
-          restoreSavedPlan(JSON.parse(values[1][1]));
-        }
-      } catch {}
-      restored.current = true;
-      setProjectReady(true);
-    })();
-    return () => { cancelled = true; };
-  }, [restoreSavedPlan]);
+  /** Everything needed to reopen this plan, in device-independent coordinates. */
+  const planData = useCallback(() => {
+    const normalize = (point) => [point[0] / sheetWidth, point[1] / sheetHeight];
+    return {
+      coordinateSpace: "normalized",
+      canvasAspect,
+      pixelsPerMeterRatio: pixelsPerMeter / sheetWidth,
+      planImage,
+      rooms: rooms.map((room) => room.map(normalize)),
+      roomConfigs,
+      openings: openings.map((opening) => ({ ...opening, points: opening.points.map(normalize) })),
+      settings,
+      furnitureEdits,
+      selectedRoom,
+      stage,
+      aiRenders,
+      savedAt: new Date().toISOString(),
+    };
+  }, [aiRenders, canvasAspect, furnitureEdits, openings, pixelsPerMeter, planImage, roomConfigs, rooms, selectedRoom, settings, sheetHeight, sheetWidth, stage]);
+
+  /** The library row for the plan currently open in the editor. */
+  const projectRecord = useCallback(() => ({
+    id: projectId,
+    remoteId,
+    title: projectTitle.trim() || "Untitled 3D plan",
+    source: planImage ? "upload" : "blank",
+    roomCount: rooms.length,
+    openingCount: openings.length,
+    areaMeters: Number(totalArea.toFixed(2)),
+    planImage,
+    thumbnail: Object.values(aiRenders).find((render) => render?.image)?.image || planImage || null,
+    updatedAt: new Date().toISOString(),
+    data: planData(),
+  }), [aiRenders, openings.length, planData, planImage, projectId, projectTitle, remoteId, rooms.length, totalArea]);
+
+  const refreshLibrary = useCallback(async () => {
+    setLibraryLoading(true);
+    const { projects: found, synced } = await loadLibrary(token);
+    setProjects(found);
+    setCloudSynced(synced);
+    setLibraryLoading(false);
+    return found;
+  }, [token]);
 
   useEffect(() => {
-    if (!restored.current || !projectReady || detecting || rendering) return undefined;
-    const timer = setTimeout(async () => {
-      const normalize = (point) => [point[0] / sheetWidth, point[1] / sheetHeight];
-      const savedAt = new Date().toISOString();
-      const data = {
-        coordinateSpace: "normalized",
-        canvasAspect,
-        pixelsPerMeterRatio: pixelsPerMeter / sheetWidth,
-        planImage,
-        rooms: rooms.map((room) => room.map(normalize)),
-        roomConfigs,
-        openings: openings.map((opening) => ({ ...opening, points: opening.points.map(normalize) })),
-        settings,
-        furnitureEdits,
-        selectedRoom,
-        stage,
-        aiRenders,
-        savedAt,
-      };
-      try {
-        const rawProjects = await AsyncStorage.getItem(PROJECTS_KEY);
-        const storedProjects = JSON.parse(rawProjects || "[]").filter((project) => project?.id !== projectId);
-        const project = {
-          id: projectId,
-          title: projectTitle.trim() || `${rooms.length || "New"} room walkthrough`,
-          updatedAt: savedAt,
-          thumbnail: Object.values(aiRenders).find((render) => render?.image)?.image || planImage || null,
-          roomCount: rooms.length,
-          data,
-        };
-        const nextProjects = [project, ...storedProjects]
-          .sort((one, two) => String(two.updatedAt).localeCompare(String(one.updatedAt)))
-          .slice(0, MAX_SAVED_PROJECTS);
-        await AsyncStorage.multiSet([
-          [STORAGE_KEY, JSON.stringify(data)],
-          [PROJECTS_KEY, JSON.stringify(nextProjects)],
-        ]);
-        setProjects(nextProjects);
-        if (explicitSaveRef.current) {
-          explicitSaveRef.current = false;
-          setNotice("3D plan saved to Projects.");
-        }
-      } catch {
-        setNotice("This 3D plan could not be saved on this device.");
-      }
+    restored.current = true;
+    refreshLibrary();
+  }, [refreshLibrary]);
+
+  /**
+   * Autosave, on the device only.
+   *
+   * Drawing a home takes real effort, so the local copy is written constantly
+   * and never asks permission. The account copy is not: pushing the whole
+   * geometry on every dragged corner would be rude to both the user's data plan
+   * and the server, so that happens when they save or leave the editor.
+   */
+  useEffect(() => {
+    if (view !== "editor" || !restored.current || detecting || rendering) return undefined;
+    const timer = setTimeout(() => {
+      saveLocally(projectRecord()).catch(() => {});
     }, 700);
     return () => clearTimeout(timer);
-  }, [aiRenders, canvasAspect, detecting, furnitureEdits, openings, pixelsPerMeter, planImage, projectId, projectReady, projectTitle, rendering, roomConfigs, rooms, saveTick, selectedRoom, settings, sheetHeight, sheetWidth, stage]);
+  }, [detecting, projectRecord, rendering, view]);
+
+  const pushToCloud = useCallback(async ({ announce } = {}) => {
+    const record = projectRecord();
+    await saveLocally(record).catch(() => {});
+
+    if (!token) {
+      if (announce) setNotice("Saved on this device. Sign in to keep this plan on your account.");
+      await refreshLibrary();
+      return;
+    }
+
+    setSyncState("saving");
+    try {
+      const saved = await syncProject(token, record);
+      if (saved?.id) setRemoteId(saved.id);
+      setSyncState("saved");
+      if (announce) setNotice("3D plan saved to your account.");
+    } catch (error) {
+      setSyncState("idle");
+      setNotice(
+        error?.message === "offline"
+          ? "Saved on this device. It will reach your account the next time you save with a connection."
+          : error?.message || "Saved on this device, but your account copy could not be updated.",
+      );
+    }
+    await refreshLibrary();
+  }, [projectRecord, refreshLibrary, token]);
+
+  // The tick on the save button is a confirmation, not a state to live in.
+  useEffect(() => {
+    if (syncState !== "saved") return undefined;
+    const timer = setTimeout(() => setSyncState("idle"), 1800);
+    return () => clearTimeout(timer);
+  }, [syncState]);
 
   // ── Plan editing ─────────────────────────────────────────────────────────
   const configFor = (index) => ({
@@ -637,46 +690,8 @@ export default function WalkthroughScreen() {
     if (kind === "room") setSelectedRoom(index);
   }, []);
 
-  const startBlankPlan = useCallback(() => {
-    setPlanImage(null);
-    setCanvasAspect(CANVAS_RATIO);
-    setDetectedPixelsPerMeter(null);
-    setPlanError("");
-    setRooms([]);
-    setOpenings([]);
-    setRoomConfigs([]);
-    setDraft([]);
-    setCurveControl(null);
-    setSelection(null);
-    setSelectedRoom(0);
-    setHistory([]);
-    setFuture([]);
-    setFurnitureEdits({});
-    setTool("rect");
-  }, []);
-
-  const saveCurrentProject = useCallback(() => {
-    explicitSaveRef.current = true;
-    setSaveTick((value) => value + 1);
-  }, []);
-
-  const openSavedProject = useCallback((project) => {
-    if (!project?.data) return;
-    setProjectId(project.id);
-    setProjectTitle(project.title || "3D walkthrough");
-    restoreSavedPlan(project.data);
-    setProjectsOpen(false);
-    setViewMode("walk");
-    setOutputMode("live");
-    setPanel(null);
-    setInspected(null);
-    setSceneInfo(null);
-    setNotice("Saved 3D plan opened.");
-  }, [restoreSavedPlan]);
-
-  const newWalkthroughProject = useCallback(() => {
-    setProjectId(createWalkthroughProjectId());
-    setProjectTitle("New 3D plan");
+  /** Wipe the editor back to an empty sheet. Shared by every "start new" path. */
+  const resetEditor = useCallback(() => {
     setStage(0);
     setTool("rect");
     setRooms([]);
@@ -689,6 +704,7 @@ export default function WalkthroughScreen() {
     setSelectedRoom(0);
     setSelection(null);
     setPlanImage(null);
+    setPlanError("");
     setCanvasAspect(CANVAS_RATIO);
     setDetectedPixelsPerMeter(null);
     setHistory([]);
@@ -696,23 +712,54 @@ export default function WalkthroughScreen() {
     setAiRenders({});
     setViewMode("walk");
     setOutputMode("live");
-    setProjectsOpen(false);
-    setNotice("New 3D plan ready.");
+    setPanel(null);
+    setInspected(null);
+    setSceneInfo(null);
   }, []);
+
+  const openSavedProject = useCallback(async (project) => {
+    try {
+      const data = await loadProjectData(token, project);
+      if (!data) {
+        setNotice("That plan's drawing could not be found on this device or your account.");
+        return;
+      }
+      resetEditor();
+      setProjectId(project.id);
+      setRemoteId(project.remoteId || null);
+      setProjectTitle(project.title || "Untitled 3D plan");
+      restoreSavedPlan(data);
+      setView("editor");
+    } catch (error) {
+      setNotice(error?.message || "That 3D plan could not be opened.");
+    }
+  }, [resetEditor, restoreSavedPlan, token]);
 
   const removeSavedProject = useCallback(async (project) => {
     if (!project?.id) return;
-    try {
-      const nextProjects = projects.filter((item) => item.id !== project.id);
-      await AsyncStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects));
-      setProjects(nextProjects);
-      if (project.id === projectId) newWalkthroughProject();
-    } catch {
-      setNotice("This saved plan could not be removed.");
+    setPendingDelete(null);
+    setProjects((current) => current.filter((item) => item.id !== project.id));
+    // The editor still holds this plan's id, and its autosave would write the
+    // row straight back. Handing it a fresh id makes the deletion stick.
+    if (project.id === projectId) {
+      setProjectId(createProjectId());
+      setRemoteId(null);
     }
-  }, [newWalkthroughProject, projectId, projects]);
+    await deleteStoredProject(token, project);
+    await refreshLibrary();
+  }, [projectId, refreshLibrary, token]);
 
-  const uploadPlan = useCallback(async () => {
+  const renameSavedProject = useCallback(async (project, title) => {
+    const trimmed = title.trim().slice(0, 60);
+    if (!trimmed) return;
+    if (project === "current" || project?.id === projectId) setProjectTitle(trimmed);
+    if (project !== "current") {
+      await renameStoredProject(token, project, trimmed);
+      await refreshLibrary();
+    }
+  }, [projectId, refreshLibrary, token]);
+
+  const uploadPlan = useCallback(async (targetProjectId = projectId) => {
     let result;
     try {
       result = await ImagePicker.launchImageLibraryAsync({
@@ -722,9 +769,9 @@ export default function WalkthroughScreen() {
       });
     } catch {
       setPlanError("Livinai could not open your photo library. Check photo access in device settings and try again.");
-      return;
+      return false;
     }
-    if (result.canceled || !result.assets?.[0]) return;
+    if (result.canceled || !result.assets?.[0]) return false;
     const asset = result.assets[0];
     const sourceWidth = Math.max(1, asset.width || 1200);
     const sourceHeight = Math.max(1, asset.height || 800);
@@ -736,7 +783,7 @@ export default function WalkthroughScreen() {
       if (FileSystem.documentDirectory) {
         // Each saved project owns its source image. Reusing one filename made
         // a later upload silently replace the plan underneath older projects.
-        stableUri = `${FileSystem.documentDirectory}livinai-walkthrough-plan-${projectId}.${extension}`;
+        stableUri = `${FileSystem.documentDirectory}livinai-walkthrough-plan-${targetProjectId}.${extension}`;
         await FileSystem.deleteAsync(stableUri, { idempotent: true });
         await FileSystem.copyAsync({ from: asset.uri, to: stableUri });
       }
@@ -804,7 +851,31 @@ export default function WalkthroughScreen() {
       if (detectionTimeout) clearTimeout(detectionTimeout);
       setDetecting(false);
     }
+    return true;
   }, [projectId, sheetWidth, token]);
+
+  /**
+   * Start a new plan.
+   *
+   * It always begins on the empty grid. Tracing a photo instead is offered on the
+   * canvas itself, where the effect is visible — asking here as well would mean
+   * the same question in two places, and a first-time user committing to an
+   * answer before seeing what either option looks like.
+   */
+  const startNewProject = useCallback(() => {
+    resetEditor();
+    setProjectId(createProjectId());
+    setRemoteId(null);
+    setProjectTitle("New 3D plan");
+    setView("editor");
+  }, [resetEditor]);
+
+  /** Leave the editor, pushing the plan to the account on the way out. */
+  const exitToLibrary = useCallback(async () => {
+    if (rooms.length || openings.length) await pushToCloud();
+    else await refreshLibrary();
+    setView("library");
+  }, [openings.length, pushToCloud, refreshLibrary, rooms.length]);
 
   const updateRoom = useCallback((index, key, value) => {
     setRoomConfigs((current) => current.map((room, i) => (i === index ? { ...room, [key]: value } : room)));
@@ -826,21 +897,15 @@ export default function WalkthroughScreen() {
     });
   }, []);
 
-  const adjustCalculatedArea = useCallback((multiplier) => {
-    setDetectedPixelsPerMeter(Math.max(10, Math.min(240, pixelsPerMeter / Math.sqrt(multiplier))));
-    setFurnitureEdits({});
-  }, [pixelsPerMeter]);
-
-  const resetCalculatedScale = useCallback(() => {
-    setDetectedPixelsPerMeter(null);
-    setFurnitureEdits({});
-  }, []);
+  // A "drawing scale" card used to sit here with Smaller / Larger / Reset
+  // buttons that moved every room's area by 10% at a time. It asked the user to
+  // reason in pixels-per-metre to fix a number they can simply type on the room
+  // itself, so it is gone: `resizeRoom` is the one honest way to set a size.
 
   // ── Viewer actions ───────────────────────────────────────────────────────
   const changeViewMode = (mode) => {
     setViewMode(mode);
     setOutputMode("live");
-    setComposition(null);
     viewerRef.current?.setMode(mode);
   };
 
@@ -853,14 +918,7 @@ export default function WalkthroughScreen() {
   const focusRoom = (index) => {
     setSelectedRoom(index);
     setOutputMode("live");
-    setComposition(null);
     viewerRef.current?.setRoom(index);
-  };
-
-  const previewFraming = () => {
-    setCameraSource("designer");
-    setOutputMode("live");
-    viewerRef.current?.frameRoom(selectedRoom);
   };
 
   // ── AI render (mirrors the web studio's generateAiRender) ────────────────
@@ -954,7 +1012,6 @@ export default function WalkthroughScreen() {
   const handleSnapshot = useCallback(
     (image, purpose, frame) => {
       if (purpose === "ai") {
-        setComposition(frame || null);
         runAiRender(image, frame);
       } else {
         setSnapshotKind("capture");
@@ -1034,518 +1091,556 @@ export default function WalkthroughScreen() {
 
   // ── Navigation ───────────────────────────────────────────────────────────
   const canContinue = stage === 0 ? rooms.length > 0 || draft.length >= 3 : true;
+
   const goNext = () => {
     if (stage === 0 && draft.length >= 3) closeRoom();
     setStage((current) => Math.min(STAGES.length - 1, current + 1));
   };
+
   const goBack = () => {
-    if (stage === 0) return router.back();
+    if (stage === 0) return exitToLibrary();
     setStage((current) => current - 1);
   };
 
   const current = STAGES[stage];
+  const activeTool = TOOLS.find((item) => item.key === tool);
 
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <View style={styles.screen}>
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <SafeAreaView edges={["top"]} style={styles.header}>
-          <View style={styles.headerRow}>
-            <Pressable onPress={goBack} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
-              <Ionicons name="chevron-back" size={20} color={COLORS.white} />
-            </Pressable>
-            <View style={styles.headerCopy}>
-              <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
-              <Text style={styles.headerTitle}>{current.title}</Text>
-            </View>
-            <Pressable accessibilityLabel="Open saved 3D projects" onPress={() => setProjectsOpen(true)} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
-              <Ionicons name="folder-open-outline" size={19} color={COLORS.white} />
-            </Pressable>
-            <Pressable accessibilityLabel="Save 3D plan" onPress={saveCurrentProject} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
-              <Ionicons name="save-outline" size={19} color={COLORS.white} />
-            </Pressable>
-          </View>
-
-          <View style={styles.stepper}>
-            {STAGES.map((item, index) => (
-              <Pressable
-                key={item.key}
-                style={styles.step}
-                disabled={index > stage && !rooms.length}
-                onPress={() => setStage(index)}
-              >
-                <View style={[styles.stepTrack, index <= stage && styles.stepTrackActive]} />
-                <Text style={[styles.stepLabel, index === stage && styles.stepLabelActive]} numberOfLines={1}>
-                  {item.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-
-      {/* ── Body ───────────────────────────────────────────────────────── */}
-      {stage === STAGES.length - 1 ? (
-        <WalkthroughStage
-          viewerRef={viewerRef}
-          layout={layout}
-          roomConfigs={roomConfigs}
-          settings={settings}
-          furnitureEdits={furnitureEdits}
-          viewMode={viewMode}
-          night={night}
-          selectedRoom={selectedRoom}
-          inspected={inspected}
-          sceneInfo={sceneInfo}
-          panel={panel}
-          cameraSource={cameraSource}
-          composition={composition}
-          currentRender={currentRender}
-          outputMode={outputMode}
-          rendering={rendering}
-          busy={busy}
-          onReady={setSceneInfo}
-          onSceneUpdate={setSceneInfo}
-          onSelect={setInspected}
-          onSnapshot={handleSnapshot}
-          onComposition={setComposition}
-          onFurnitureChange={updateFurnitureEdit}
-          onDiagnostic={setNotice}
-          onChangeMode={changeViewMode}
-          onToggleNight={toggleNight}
-          onFocusRoom={focusRoom}
-          onCapture={() => requestCapture("photo")}
-          onRender={() => requestCapture("ai")}
-          onPreviewFraming={previewFraming}
-          onSetPanel={setPanel}
-          onSetCameraSource={setCameraSource}
-          onSetOutputMode={setOutputMode}
-          onSaveRender={(image) => {
-            setSnapshotKind("ai");
-            setSnapshot(image);
-          }}
+      {view === "library" ? (
+        <PlanLibrary
+          projects={projects}
+          loading={libraryLoading}
+          synced={cloudSynced}
+          signedIn={!!token}
+          onBack={() => router.back()}
+          onRefresh={refreshLibrary}
+          onStart={startNewProject}
+          onOpen={openSavedProject}
+          onRename={setRenaming}
+          onDelete={setPendingDelete}
         />
       ) : (
-        <ScrollView contentContainerStyle={[styles.body, stage === 0 && styles.planBody]} showsVerticalScrollIndicator={false}>
-          {!(stage === 0 && canvasFocus) && <Text style={styles.stageCopy}>{current.copy}</Text>}
+        <>
+          {/* ── Header ─────────────────────────────────────────────────── */}
+          <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+            <SafeAreaView edges={["top"]} style={styles.header}>
+              <View style={styles.headerRow}>
+                {/* One back button with one meaning: go back a step, and on the
+                    first step leave the editor. The Explore step has no footer,
+                    so without this it would have been a room with no door. */}
+                <Pressable
+                  accessibilityLabel={stage === 0 ? "Back to your 3D plans" : `Back to ${STAGES[stage - 1].label}`}
+                  onPress={goBack}
+                  hitSlop={LAYOUT.hitSlop}
+                  style={styles.headerButton}
+                >
+                  <Ionicons name="chevron-back" size={20} color={COLORS.white} />
+                </Pressable>
 
-          {!(stage === 0 && canvasFocus) && <Pressable style={styles.projectStatus} onPress={() => setProjectsOpen(true)}>
-            <View style={styles.projectStatusIcon}>
-              <Ionicons name="folder-open-outline" size={17} color={COLORS.primaryDark} />
-            </View>
-            <View style={styles.projectStatusCopy}>
-              <Text style={styles.projectStatusTitle} numberOfLines={1}>{projectTitle || "New 3D plan"}</Text>
-              <Text style={styles.projectStatusMeta}>{rooms.length} rooms · {openings.length} openings · Autosaves on this device</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={17} color={COLORS.textTertiary} />
-          </Pressable>}
-
-          {stage === 0 && (
-            <>
-              {!canvasFocus && <>
-              <View style={styles.sourceRow}>
-                <Pressable style={styles.sourcePrimary} onPress={uploadPlan} disabled={detecting}>
-                  {detecting
-                    ? <ActivityIndicator size="small" color={COLORS.white} />
-                    : <Ionicons name="cloud-upload-outline" size={19} color={COLORS.white} />}
-                  <View style={styles.sourceCopy}>
-                    <Text style={styles.sourcePrimaryTitle}>{detecting ? "Detecting plan…" : planImage ? "Replace plan" : "Upload floor plan"}</Text>
-                    <Text style={styles.sourcePrimaryMeta}>JPG, PNG or WEBP</Text>
+                <Pressable style={styles.headerCopy} onPress={() => setRenaming("current")}>
+                  <Text style={styles.headerEyebrow} numberOfLines={1}>{current.title}</Text>
+                  <View style={styles.headerTitleRow}>
+                    <Text style={styles.headerTitle} numberOfLines={1}>{projectTitle}</Text>
+                    <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.7)" />
                   </View>
                 </Pressable>
-                <Pressable style={styles.sourceSecondary} onPress={startBlankPlan} disabled={detecting}>
-                  <Ionicons name="create-outline" size={19} color={COLORS.primaryDark} />
-                  <Text style={styles.sourceSecondaryText}>Blank canvas</Text>
-                </Pressable>
-              </View>
 
-              {!!planError && (
-                <View style={styles.planNotice}>
-                  <Ionicons name="information-circle-outline" size={17} color={COLORS.accentStrong} />
-                  <Text style={styles.planNoticeText}>{planError}</Text>
-                </View>
-              )}
-              </>}
-
-              <View style={styles.workspaceHeader}>
-                <View style={styles.workspaceIcon}>
-                  <Ionicons name="grid-outline" size={18} color={COLORS.primaryDark} />
-                </View>
-                <View style={styles.workspaceCopy}>
-                  <Text style={styles.workspaceEyebrow}>Plan workspace · {TOOLS.find((item) => item.key === tool)?.label}</Text>
-                  <Text style={styles.workspaceHint}>{TOOL_HINTS[tool]}</Text>
-                </View>
-                <View style={styles.workspaceBadge}>
-                  <Text style={styles.workspaceBadgeValue}>{rooms.length}</Text>
-                  <Text style={styles.workspaceBadgeLabel}>rooms</Text>
-                </View>
                 <Pressable
-                  accessibilityLabel={canvasFocus ? "Exit canvas focus mode" : "Focus canvas editor"}
-                  style={[styles.workspaceExpand, canvasFocus && styles.workspaceExpandActive]}
-                  onPress={() => setCanvasFocus((value) => !value)}
+                  accessibilityLabel="Save this 3D plan"
+                  onPress={() => pushToCloud({ announce: true })}
+                  hitSlop={LAYOUT.hitSlop}
+                  style={styles.headerButton}
+                  disabled={syncState === "saving"}
                 >
-                  <Ionicons name={canvasFocus ? "contract-outline" : "expand-outline"} size={17} color={canvasFocus ? COLORS.white : COLORS.primaryDark} />
+                  {syncState === "saving" ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <Ionicons
+                      name={syncState === "saved" ? "checkmark" : "save-outline"}
+                      size={18}
+                      color={COLORS.white}
+                    />
+                  )}
                 </Pressable>
               </View>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.toolbar}
-                style={styles.toolbarWrap}
-              >
-                {TOOLS.map((item) => {
-                  const active = tool === item.key;
+              {/* Numbered dots joined by a connector, which is how a stepper is
+                  normally read. Four full-width bars each with a label under it
+                  said very little at a glance — on the first step nothing was
+                  filled, so the whole row looked like an empty placeholder — and
+                  the labels repeated the title directly above them. */}
+              <View style={styles.stepper} accessibilityRole="tablist">
+                {STAGES.map((item, index) => {
+                  const done = index < stage;
+                  const active = index === stage;
+                  const reachable = index <= stage || rooms.length > 0;
                   return (
-                    <Pressable key={item.key} style={[styles.tool, active && styles.toolActive]} onPress={() => setTool(item.key)}>
-                      <Ionicons name={item.icon} size={15} color={active ? COLORS.white : COLORS.textSecondary} />
-                      <Text style={[styles.toolLabel, active && styles.toolLabelActive]}>{item.label}</Text>
-                    </Pressable>
+                    <React.Fragment key={item.key}>
+                      {index > 0 && (
+                        <View style={[styles.stepConnector, index <= stage && styles.stepConnectorDone]} />
+                      )}
+                      <Pressable
+                        disabled={!reachable}
+                        accessibilityRole="tab"
+                        accessibilityLabel={`Step ${index + 1}, ${item.label}`}
+                        accessibilityState={{ selected: active, disabled: !reachable }}
+                        hitSlop={8}
+                        style={[
+                          styles.step,
+                          (done || active) && styles.stepReached,
+                          active && styles.stepActive,
+                        ]}
+                        onPress={() => setStage(index)}
+                      >
+                        {done ? (
+                          <Ionicons name="checkmark" size={13} color={COLORS.brand800} />
+                        ) : (
+                          <Text style={[styles.stepNumber, active && styles.stepNumberActive]}>
+                            {index + 1}
+                          </Text>
+                        )}
+                      </Pressable>
+                    </React.Fragment>
                   );
                 })}
-              </ScrollView>
-
-              {tool === "room" && (
-                <CurveControls
-                  edgeType={roomEdgeType}
-                  onChangeEdgeType={(value) => {
-                    setRoomEdgeType(value);
-                    if (value !== "rounded") setCurveControl(null);
-                  }}
-                  settings={curveSettings}
-                  onChangeSettings={setCurveSettings}
-                  stage={!draft.length ? 0 : curveControl ? 2 : 1}
-                  curveStaged={!!curveControl}
-                  onApplyCurve={applyCurve}
-                  onCancelCurve={cancelCurve}
-                />
-              )}
-
-              <View style={[styles.canvasFrame, canvasFocus && styles.canvasFrameFocused]}>
-                <PlanCanvas
-                  width={canvasWidth}
-                  height={canvasHeight}
-                  sheetWidth={sheetWidth}
-                  sheetHeight={sheetHeight}
-                  pixelsPerMeter={pixelsPerMeter}
-                  imageUri={planImage}
-                  detecting={detecting}
-                  tool={tool}
-                  rooms={rooms}
-                  roomLabels={roomConfigs.map((room) => room.name)}
-                  openings={openings}
-                  draft={draft}
-                  snapToGrid={snapToGrid}
-                  roomEdgeType={roomEdgeType}
-                  curveSettings={curveSettings}
-                  curveControl={curveControl}
-                  selectedRoom={selectedRoom}
-                  selection={selection}
-                  onAddVertex={addVertex}
-                  onCloseRoom={closeRoom}
-                  onAddRoom={commitRoom}
-                  onAddOpening={addOpening}
-                  onRemoveOpening={removeOpening}
-                  onSelectRoom={setSelectedRoom}
-                  onMoveRoom={moveRoom}
-                  onMoveVertex={moveVertex}
-                  onInsertVertex={insertVertex}
-                  onMoveOpening={moveOpening}
-                  onMoveOpeningPoint={moveOpeningPoint}
-                  onSelectShape={selectShape}
-                  onSetCurveControl={setCurveControl}
-                  onBeginEdit={rememberPlan}
-                />
+                <Text style={styles.stepCaption} numberOfLines={1}>
+                  {current.label}
+                </Text>
               </View>
+            </SafeAreaView>
+          </LinearGradient>
 
-              {(draft.length > 0 || !!curveControl) && (
-                <View style={styles.drawingBar}>
-                  <Ionicons name="pencil-outline" size={15} color={COLORS.primaryDark} />
-                  <Text style={styles.drawingBarText} numberOfLines={2}>
-                    {curveControl
-                      ? "Shape the rounded wall above, then add it."
-                      : draft.length < 3
-                        ? `${draft.length} of at least 3 corners placed.`
-                        : "Tap the first corner again, or finish the room."}
-                  </Text>
-                  {curveControl ? (
-                    <Pressable style={styles.drawingBarPrimary} onPress={applyCurve}>
-                      <Text style={styles.drawingBarPrimaryText}>Add wall</Text>
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      style={[styles.drawingBarPrimary, draft.length < 3 && styles.drawingBarPrimaryDisabled]}
-                      disabled={draft.length < 3}
-                      onPress={() => closeRoom()}
-                    >
-                      <Text style={styles.drawingBarPrimaryText}>Finish</Text>
-                    </Pressable>
+          {/* ── Body ───────────────────────────────────────────────────── */}
+          {stage === STAGES.length - 1 ? (
+            <WalkthroughStage
+              viewerRef={viewerRef}
+              layout={layout}
+              roomConfigs={roomConfigs}
+              settings={settings}
+              furnitureEdits={furnitureEdits}
+              viewMode={viewMode}
+              night={night}
+              selectedRoom={selectedRoom}
+              inspected={inspected}
+              sceneInfo={sceneInfo}
+              panel={panel}
+              cameraSource={cameraSource}
+              currentRender={currentRender}
+              outputMode={outputMode}
+              rendering={rendering}
+              busy={busy}
+              onReady={setSceneInfo}
+              onSceneUpdate={setSceneInfo}
+              onSelect={setInspected}
+              onSnapshot={handleSnapshot}
+              onFurnitureChange={updateFurnitureEdit}
+              onDiagnostic={setNotice}
+              onChangeMode={changeViewMode}
+              onToggleNight={toggleNight}
+              onFocusRoom={focusRoom}
+              onCapture={() => requestCapture("photo")}
+              onRender={() => requestCapture("ai")}
+              onSetPanel={setPanel}
+              onSetCameraSource={setCameraSource}
+              onSetOutputMode={setOutputMode}
+              onSaveRender={(image) => {
+                setSnapshotKind("ai");
+                setSnapshot(image);
+              }}
+            />
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.body}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* The Draw step's instruction is the tool hint, which is specific
+                  and changes with the tool; a second generic sentence above it
+                  said less and cost a whole line. */}
+              {stage > 0 && <Text style={styles.stageCopy}>{current.copy}</Text>}
+
+              {/* ── Step 1 · Draw ────────────────────────────────────── */}
+              {stage === 0 && (
+                <>
+                  {!canvasFocus && (
+                    <PlanSourceBar
+                      planImage={planImage}
+                      detecting={detecting}
+                      error={planError}
+                      onUpload={() => uploadPlan()}
+                      onClear={() => {
+                        setPlanImage(null);
+                        setCanvasAspect(CANVAS_RATIO);
+                        setDetectedPixelsPerMeter(null);
+                        setPlanError("");
+                      }}
+                    />
                   )}
-                </View>
-              )}
 
-              {tool === "select" && selection && (
-                <View style={styles.selectionBar}>
-                  <View style={[
-                    styles.roomSwatch,
-                    { backgroundColor: selection.kind === "room"
-                      ? ROOM_TINTS[selection.index % ROOM_TINTS.length].stroke
-                      : (OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).color },
-                  ]} />
-                  <Text style={styles.selectionName} numberOfLines={1}>
-                    {selection.kind === "room"
-                      ? roomConfigs[selection.index]?.name || `Room ${selection.index + 1}`
-                      : `${(OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).label} · ${(
-                          Math.hypot(
-                            (openings[selection.index]?.points?.[1]?.[0] || 0) - (openings[selection.index]?.points?.[0]?.[0] || 0),
-                            (openings[selection.index]?.points?.[1]?.[1] || 0) - (openings[selection.index]?.points?.[0]?.[1] || 0),
-                          ) / pixelsPerMeter
-                        ).toFixed(1)} m`}
-                  </Text>
-                  <Pressable style={styles.selectionAction} onPress={deleteSelection}>
-                    <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
-                    <Text style={[styles.selectionActionText, { color: COLORS.danger }]}>Delete</Text>
-                  </Pressable>
-                </View>
-              )}
+                  <ToolPalette
+                    tool={tool}
+                    onChange={setTool}
+                    snapToGrid={snapToGrid}
+                    onToggleSnap={() => setSnapToGrid((value) => !value)}
+                  />
 
-              {tool === "select" && selection?.kind === "opening" && openings[selection.index] && (
-                <View style={styles.openingEditor}>
-                  <View style={styles.openingEditorHead}>
-                    <View style={styles.openingEditorIcon}>
-                      <Ionicons
-                        name={openings[selection.index].kind === "door" ? "log-in-outline" : openings[selection.index].kind === "window" ? "browsers-outline" : "sunny-outline"}
-                        size={18}
-                        color={(OPENING_SPECS[openings[selection.index].kind] || OPENING_SPECS.door).color}
+                  <View style={styles.hintRow}>
+                    <Text style={styles.hintRowText}>
+                      <Text style={styles.hintRowTool}>{activeTool?.label} · </Text>
+                      {TOOL_HINTS[tool]}
+                    </Text>
+                  </View>
+
+                  {tool === "room" && (
+                    <CurveControls
+                      edgeType={roomEdgeType}
+                      onChangeEdgeType={(value) => {
+                        setRoomEdgeType(value);
+                        if (value !== "rounded") setCurveControl(null);
+                      }}
+                      settings={curveSettings}
+                      onChangeSettings={setCurveSettings}
+                      stage={!draft.length ? 0 : curveControl ? 2 : 1}
+                      curveStaged={!!curveControl}
+                      onApplyCurve={applyCurve}
+                      onCancelCurve={cancelCurve}
+                    />
+                  )}
+
+                  <View style={[styles.canvasFrame, canvasFocus && styles.canvasFrameFocused]}>
+                    <PlanCanvas
+                      width={canvasWidth}
+                      height={canvasHeight}
+                      sheetWidth={sheetWidth}
+                      sheetHeight={sheetHeight}
+                      pixelsPerMeter={pixelsPerMeter}
+                      imageUri={planImage}
+                      detecting={detecting}
+                      tool={tool}
+                      rooms={rooms}
+                      roomLabels={roomConfigs.map((room) => room.name)}
+                      openings={openings}
+                      draft={draft}
+                      snapToGrid={snapToGrid}
+                      roomEdgeType={roomEdgeType}
+                      curveSettings={curveSettings}
+                      curveControl={curveControl}
+                      selectedRoom={selectedRoom}
+                      selection={selection}
+                      onAddVertex={addVertex}
+                      onCloseRoom={closeRoom}
+                      onAddRoom={commitRoom}
+                      onAddOpening={addOpening}
+                      onRemoveOpening={removeOpening}
+                      onSelectRoom={setSelectedRoom}
+                      onMoveRoom={moveRoom}
+                      onMoveVertex={moveVertex}
+                      onInsertVertex={insertVertex}
+                      onMoveOpening={moveOpening}
+                      onMoveOpeningPoint={moveOpeningPoint}
+                      onSelectShape={selectShape}
+                      onSetCurveControl={setCurveControl}
+                      onBeginEdit={rememberPlan}
+                    />
+                  </View>
+
+                  {/* The only bar that ever sits directly under the canvas.
+                      Anything else competing for that spot pushed the drawing
+                      instructions off screen exactly when they were needed. */}
+                  {(draft.length > 0 || !!curveControl) && (
+                    <View style={styles.drawingBar}>
+                      <Ionicons name="pencil-outline" size={15} color={COLORS.primaryDark} />
+                      <Text style={styles.drawingBarText} numberOfLines={2}>
+                        {curveControl
+                          ? "Shape the rounded wall, then add it."
+                          : draft.length < 3
+                            ? `${draft.length} of at least 3 corners placed.`
+                            : "Tap the first corner again, or finish the room."}
+                      </Text>
+                      <Pressable
+                        style={styles.drawingBarGhost}
+                        onPress={() => {
+                          setDraft([]);
+                          setCurveControl(null);
+                        }}
+                      >
+                        <Ionicons name="close" size={15} color={COLORS.textSecondary} />
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.drawingBarPrimary,
+                          !curveControl && draft.length < 3 && styles.drawingBarPrimaryDisabled,
+                        ]}
+                        disabled={!curveControl && draft.length < 3}
+                        onPress={curveControl ? applyCurve : () => closeRoom()}
+                      >
+                        <Text style={styles.drawingBarPrimaryText}>
+                          {curveControl ? "Add wall" : "Finish"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+
+                  {selection && (
+                    <View style={styles.selectionBar}>
+                      <View style={[
+                        styles.roomSwatch,
+                        { backgroundColor: selection.kind === "room"
+                          ? ROOM_TINTS[selection.index % ROOM_TINTS.length].stroke
+                          : (OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).color },
+                      ]} />
+                      <Text style={styles.selectionName} numberOfLines={1}>
+                        {selection.kind === "room"
+                          ? roomConfigs[selection.index]?.name || `Room ${selection.index + 1}`
+                          : `${(OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).label} · ${(
+                              Math.hypot(
+                                (openings[selection.index]?.points?.[1]?.[0] || 0) - (openings[selection.index]?.points?.[0]?.[0] || 0),
+                                (openings[selection.index]?.points?.[1]?.[1] || 0) - (openings[selection.index]?.points?.[0]?.[1] || 0),
+                              ) / pixelsPerMeter
+                            ).toFixed(1)} m`}
+                      </Text>
+                      <Pressable style={styles.selectionAction} onPress={deleteSelection}>
+                        <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
+                        <Text style={styles.selectionActionText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  )}
+
+                  {/* Type and width, and nothing else. A "Presets" row of named
+                      widths sat under the width field and set the same number a
+                      second way, so the two controls could disagree on screen. */}
+                  {selection?.kind === "opening" && openings[selection.index] && (
+                    <View style={styles.openingEditor}>
+                      <ChipRow
+                        label="Type"
+                        options={["door", "window", "balcony"]}
+                        value={openings[selection.index].kind}
+                        formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
+                        onChange={(kind) => editOpening(selection.index, { kind })}
+                      />
+                      <OpeningWidthControl
+                        widthMeters={openingWidthMeters(openings[selection.index], pixelsPerMeter)}
+                        onChange={(meters) => editOpening(selection.index, { meters })}
                       />
                     </View>
-                    <View style={styles.openingEditorCopy}>
-                      <Text style={styles.openingEditorTitle}>Opening settings</Text>
-                      <Text style={styles.openingEditorText}>
-                        Set any width the wall will take — a wide opening becomes a real wall
-                        opening, not a door. Changing the type keeps the width.
+                  )}
+
+                  {/* Four equal cells. They used to be pill buttons sized by
+                      their own labels, so "Clear plan" was twice the width of
+                      "Undo" and the row read as four unrelated things. */}
+                  <View style={styles.actionRow}>
+                    <ActionButton
+                      icon="arrow-undo-outline"
+                      label="Undo"
+                      disabled={!draft.length && !history.length && !curveControl}
+                      onPress={undo}
+                    />
+                    <ActionButton icon="arrow-redo-outline" label="Redo" disabled={!future.length} onPress={redo} />
+                    <ActionButton
+                      icon={canvasFocus ? "contract-outline" : "expand-outline"}
+                      label={canvasFocus ? "Shrink" : "Expand"}
+                      active={canvasFocus}
+                      onPress={() => setCanvasFocus((value) => !value)}
+                    />
+                    <ActionButton
+                      icon="trash-outline"
+                      label="Clear"
+                      tone="danger"
+                      disabled={!rooms.length && !openings.length && !draft.length}
+                      onPress={clearPlanLines}
+                    />
+                  </View>
+
+                  {!!rooms.length && (
+                    <View style={styles.card}>
+                      <View style={styles.cardTitleRow}>
+                        <Text style={styles.cardSectionTitle}>Room sizes</Text>
+                        {/* The three metric tiles that used to sit above this
+                            card said the same thing in three boxes. */}
+                        <Text style={styles.cardTitleMeta}>
+                          {rooms.length} · {openings.length} openings · {totalArea.toFixed(1)} m²
+                        </Text>
+                      </View>
+                      {rooms.map((room, index) => (
+                        <RoomSizeRow
+                          key={`size-${index}`}
+                          index={index}
+                          label={roomConfigs[index]?.name || `Room ${index + 1}`}
+                          room={room}
+                          pixelsPerMeter={pixelsPerMeter}
+                          active={selectedRoom === index}
+                          onFocus={() => {
+                            setSelectedRoom(index);
+                            setSelection({ kind: "room", index });
+                          }}
+                          onResize={resizeRoom}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </>
+              )}
+
+              {/* ── Step 2 · Rooms ───────────────────────────────────── */}
+              {stage === 1 && (
+                <>
+                  {roomConfigs.length === 0 ? (
+                    <EmptyState text="Go back and draw at least one room." />
+                  ) : (
+                    <View style={styles.summaryBar}>
+                      <Ionicons name="home-outline" size={17} color={COLORS.primaryDark} />
+                      <Text style={styles.summaryBarText}>
+                        {roomConfigs.length} {roomConfigs.length === 1 ? "room" : "rooms"} · {totalArea.toFixed(1)} m² measured
                       </Text>
                     </View>
-                  </View>
-                  <ChipRow
-                    label="Opening type"
-                    options={["door", "window", "balcony"]}
-                    value={openings[selection.index].kind}
-                    formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
-                    onChange={(kind) => editOpening(selection.index, { kind })}
-                  />
-                  <OpeningWidthControl
-                    widthMeters={openingWidthMeters(openings[selection.index], pixelsPerMeter)}
-                    onChange={(meters) => editOpening(selection.index, { meters })}
-                  />
-                  <ChipRow
-                    label="Presets"
-                    options={OPENING_VARIANTS[openings[selection.index].kind].map((item) => item.label)}
-                    value={openings[selection.index].variant || OPENING_VARIANTS[openings[selection.index].kind][0].label}
-                    formatOption={(option) => {
-                      const preset = OPENING_VARIANTS[openings[selection.index].kind]
-                        .find((item) => item.label === option);
-                      return preset ? `${option} · ${preset.meters.toFixed(1)} m` : option;
-                    }}
-                    onChange={(variant) => editOpening(selection.index, { variant })}
-                  />
-                </View>
-              )}
+                  )}
 
-              <View style={styles.canvasActions}>
-                <GhostButton icon="checkmark-done-outline" label="Finish room" disabled={draft.length < 3} onPress={() => closeRoom()} />
-                <GhostButton icon="arrow-undo-outline" label="Undo" disabled={!draft.length && !history.length && !curveControl} onPress={undo} />
-                {!!draft.length && <GhostButton icon="close-outline" label="Cancel room" tone="danger" onPress={() => { setDraft([]); setCurveControl(null); }} />}
-                <GhostButton icon="arrow-redo-outline" label="Redo" disabled={!future.length} onPress={redo} />
-                <GhostButton icon="options-outline" label={snapToGrid ? "Grid snap" : "Free move"} active={snapToGrid} onPress={() => setSnapToGrid((v) => !v)} />
-                <GhostButton icon="trash-outline" label="Clear lines" tone="danger" disabled={!rooms.length && !openings.length && !draft.length} onPress={clearPlanLines} />
-              </View>
-
-              <View style={styles.metrics}>
-                <Metric value={rooms.length} label="Rooms" />
-                <Metric value={openings.length} label="Openings" />
-                <Metric value={`${totalArea.toFixed(1)} m²`} label="Area" />
-              </View>
-
-              {!!rooms.length && (
-                <View style={styles.roomSizeList}>
-                  <Text style={styles.cardSectionTitle}>Room sizes</Text>
-                  <Text style={styles.cardSectionCopy}>
-                    Type the real dimensions of any room. The plan, the area and the furniture that
-                    Livinai places all follow these numbers.
-                  </Text>
-                  {rooms.map((room, index) => (
-                    <RoomSizeRow
-                      key={`size-${index}`}
-                      index={index}
-                      label={roomConfigs[index]?.name || `Room ${index + 1}`}
-                      room={room}
-                      pixelsPerMeter={pixelsPerMeter}
-                      active={selectedRoom === index}
-                      onFocus={() => {
-                        setSelectedRoom(index);
-                        setSelection({ kind: "room", index });
-                      }}
-                      onResize={resizeRoom}
-                    />
+                  {roomConfigs.map((room, index) => (
+                    <View key={`config-${index}`} style={styles.card}>
+                      <View style={styles.cardHead}>
+                        <View style={[styles.roomSwatch, { backgroundColor: ROOM_TINTS[index % ROOM_TINTS.length].stroke }]} />
+                        <TextInput
+                          style={styles.roomName}
+                          value={room.name}
+                          onChangeText={(value) => updateRoom(index, "name", value)}
+                          placeholder={`Room ${index + 1}`}
+                          placeholderTextColor={COLORS.placeholderText}
+                        />
+                        {/* The area used to be printed here as well as on the
+                            size row two lines below it. */}
+                        <Pressable
+                          accessibilityLabel={`Delete ${room.name || `room ${index + 1}`}`}
+                          onPress={() => removeRoom(index)}
+                          hitSlop={LAYOUT.hitSlop}
+                          style={styles.roomDelete}
+                        >
+                          <Ionicons name="trash-outline" size={17} color={COLORS.danger} />
+                        </Pressable>
+                      </View>
+                      <RoomSizeRow
+                        index={index}
+                        label="Exact size"
+                        room={rooms[index] || []}
+                        pixelsPerMeter={pixelsPerMeter}
+                        active
+                        compact
+                        onFocus={() => setSelectedRoom(index)}
+                        onResize={resizeRoom}
+                      />
+                      <ChipRow label="Room type" options={ROOM_TYPES} value={room.roomType} onChange={(v) => updateRoom(index, "roomType", v)} />
+                      <ChipRow label="Style" options={WALKTHROUGH_STYLES} value={room.style} onChange={(v) => updateRoom(index, "style", v)} />
+                    </View>
                   ))}
-                </View>
+                </>
               )}
 
-              {!!rooms.length && (
-                <View style={styles.scaleEditor}>
-                  <View style={styles.scaleEditorCopy}>
-                    <Text style={styles.scaleEditorTitle}>Drawing scale</Text>
-                    <Text style={styles.scaleEditorText}>
-                      1 metre = {pixelsPerMeter.toFixed(0)} px on the sheet. Only change this if an
-                      uploaded plan was detected at the wrong scale — every room area moves with it.
-                    </Text>
-                  </View>
-                  <View style={styles.scaleEditorActions}>
-                    <GhostButton icon="remove-outline" label="Smaller" onPress={() => adjustCalculatedArea(0.9)} />
-                    <GhostButton icon="add-outline" label="Larger" onPress={() => adjustCalculatedArea(1.1)} />
-                    <GhostButton
-                      icon="refresh-outline"
-                      label="Reset"
-                      disabled={!detectedPixelsPerMeter}
-                      onPress={resetCalculatedScale}
-                    />
-                  </View>
-                </View>
-              )}
+              {/* ── Step 3 · Style ───────────────────────────────────── */}
+              {stage === 2 && (
+                roomConfigs.length === 0 ? (
+                  <EmptyState text="Draw and name a room first." />
+                ) : (
+                  <>
+                    <View style={styles.card}>
+                      <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
+                      <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
+                      <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
+                      <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
+                    </View>
 
-            </>
-          )}
-
-          {stage === 1 && (
-            <>
-              {roomConfigs.length === 0 && <EmptyState text="Go back and draw at least one room." />}
-              {!!roomConfigs.length && (
-                <View style={styles.stageSummary}>
-                  <View style={styles.stageSummaryIcon}>
-                    <Ionicons name="home-outline" size={19} color={COLORS.primaryDark} />
-                  </View>
-                  <View style={styles.stageSummaryCopy}>
-                    <Text style={styles.stageSummaryTitle}>{roomConfigs.length} rooms ready to assign</Text>
-                    <Text style={styles.stageSummaryText}>{totalArea.toFixed(1)} m² total measured area</Text>
-                  </View>
-                </View>
-              )}
-              {roomConfigs.map((room, index) => (
-                <View key={`config-${index}`} style={styles.card}>
-                  <View style={styles.cardHead}>
-                    <View style={[styles.roomSwatch, { backgroundColor: ROOM_TINTS[index % ROOM_TINTS.length].stroke }]} />
-                    <TextInput
-                      style={styles.roomName}
-                      value={room.name}
-                      onChangeText={(value) => updateRoom(index, "name", value)}
-                      placeholder={`Room ${index + 1}`}
-                      placeholderTextColor={COLORS.placeholderText}
-                    />
-                    <Text style={styles.roomArea}>
-                      {(polygonArea(rooms[index] || []) / (pixelsPerMeter * pixelsPerMeter)).toFixed(1)} m²
-                    </Text>
-                    <Pressable onPress={() => removeRoom(index)} hitSlop={LAYOUT.hitSlop}>
-                      <Ionicons name="trash-outline" size={17} color={COLORS.textTertiary} />
+                    <Pressable
+                      style={styles.disclosure}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: styleExpanded }}
+                      onPress={() => setStyleExpanded((value) => !value)}
+                    >
+                      <Text style={styles.disclosureText}>Soft furnishings and decor</Text>
+                      <Ionicons
+                        name={styleExpanded ? "chevron-up" : "chevron-down"}
+                        size={17}
+                        color={COLORS.primaryDark}
+                      />
                     </Pressable>
-                  </View>
-                  <RoomSizeRow
-                    index={index}
-                    label="Exact size"
-                    room={rooms[index] || []}
-                    pixelsPerMeter={pixelsPerMeter}
-                    active
-                    compact
-                    onFocus={() => setSelectedRoom(index)}
-                    onResize={resizeRoom}
-                  />
-                  <ChipRow label="Room type" options={ROOM_TYPES} value={room.roomType} onChange={(v) => updateRoom(index, "roomType", v)} />
-                  <ChipRow label="Style" options={WALKTHROUGH_STYLES} value={room.style} onChange={(v) => updateRoom(index, "style", v)} />
-                </View>
-              ))}
 
-            </>
+                    {styleExpanded && (
+                      <View style={styles.card}>
+                        <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
+                        <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
+                        <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
+                        <Text style={[styles.fieldLabel, { marginTop: SPACING.lg }]}>Notes (optional)</Text>
+                        <TextInput
+                          style={styles.notes}
+                          value={settings.notes}
+                          onChangeText={(value) => updateSetting("notes", value)}
+                          placeholder="Natural materials, calm lighting, no glossy surfaces…"
+                          placeholderTextColor={COLORS.placeholderText}
+                          multiline
+                          maxLength={240}
+                        />
+                      </View>
+                    )}
+
+                    <Pressable
+                      style={styles.settingToggle}
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: settings.freeExplore }}
+                      onPress={() => updateSetting("freeExplore", !settings.freeExplore)}
+                    >
+                      <View style={[styles.settingToggleIcon, settings.freeExplore && styles.settingToggleIconActive]}>
+                        {settings.freeExplore && <Ionicons name="checkmark" size={13} color={COLORS.white} />}
+                      </View>
+                      <View style={styles.settingToggleCopy}>
+                        <Text style={styles.settingToggleTitle}>Walk through walls</Text>
+                        <Text style={styles.settingToggleText}>Useful for reviewing furniture without using the doors.</Text>
+                      </View>
+                    </Pressable>
+                  </>
+                )
+              )}
+            </ScrollView>
           )}
 
-          {stage === 2 && (
-            <>
-              {!!roomConfigs.length && (
-                <View style={styles.exactSourceCard}>
-                  <View style={styles.exactSourceIcon}>
-                    <Ionicons name="shield-checkmark-outline" size={22} color={COLORS.primaryDark} />
-                  </View>
-                  <View style={styles.exactSourceCopy}>
-                    <Text style={styles.exactSourceTitle}>Exact Livinai furniture engine</Text>
-                    <Text style={styles.exactSourceText}>
-                      Explore loads the same Interior_Plan models, dimensions and placement used by Livinai_web.
-                    </Text>
-                  </View>
-                </View>
-              )}
-              {!!roomConfigs.length && (
-                <View style={styles.card}>
-                  <Text style={styles.cardSectionTitle}>Whole-home direction</Text>
-                  <Text style={styles.cardSectionCopy}>A short, focused brief keeps every room coordinated.</Text>
-                  <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
-                  <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
-                  <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
-                  <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
-                  <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
-                  <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
-                  <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
-                  <Pressable style={styles.settingToggle} onPress={() => updateSetting("freeExplore", !settings.freeExplore)}>
-                    <View style={[styles.settingToggleIcon, settings.freeExplore && styles.settingToggleIconActive]}>
-                      {settings.freeExplore && <Ionicons name="checkmark" size={13} color={COLORS.white} />}
-                    </View>
-                    <View style={styles.settingToggleCopy}>
-                      <Text style={styles.settingToggleTitle}>Free explore</Text>
-                      <Text style={styles.settingToggleText}>Walk through walls while reviewing furniture placement.</Text>
-                    </View>
-                    <Ionicons name="move-outline" size={18} color={COLORS.textTertiary} />
-                  </Pressable>
-                  <Text style={[styles.fieldLabel, { marginTop: SPACING.lg }]}>Optional notes</Text>
-                  <TextInput
-                    style={styles.notes}
-                    value={settings.notes}
-                    onChangeText={(value) => updateSetting("notes", value)}
-                    placeholder="Natural materials, calm lighting, no glossy surfaces…"
-                    placeholderTextColor={COLORS.placeholderText}
-                    multiline
-                    maxLength={240}
-                  />
-                </View>
-              )}
-            </>
+          {/* ── Footer ─────────────────────────────────────────────────────
+              Two buttons of equal width and equal height. Back used to be sized
+              by its own label next to a flexing Continue, which made the pair
+              look like a mistake rather than a choice. */}
+          {stage < STAGES.length - 1 && (
+            <SafeAreaView edges={["bottom"]} style={styles.footer}>
+              <Pressable style={[styles.footerButton, styles.footerGhost]} onPress={goBack}>
+                <Ionicons name="arrow-back" size={16} color={COLORS.textPrimary} />
+                <Text style={styles.footerGhostText}>Back</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.footerButton, styles.footerPrimary, !canContinue && styles.footerPrimaryDisabled]}
+                disabled={!canContinue}
+                onPress={goNext}
+              >
+                <Text style={styles.footerPrimaryText} numberOfLines={1}>
+                  {stage === STAGES.length - 2 ? "Walk through" : "Continue"}
+                </Text>
+                <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
+              </Pressable>
+            </SafeAreaView>
           )}
-
-        </ScrollView>
+        </>
       )}
 
-      {/* ── Footer ─────────────────────────────────────────────────────── */}
-      {stage < STAGES.length - 1 && (
-        <SafeAreaView edges={["bottom"]} style={styles.footer}>
-          <Pressable style={styles.footerGhost} onPress={goBack}>
-            <Ionicons name="arrow-back" size={16} color={COLORS.textPrimary} />
-            <Text style={styles.footerGhostText}>Back</Text>
-          </Pressable>
-          <Pressable style={[styles.footerPrimary, !canContinue && styles.footerPrimaryDisabled]} disabled={!canContinue} onPress={goNext}>
-            <Text style={styles.footerPrimaryText}>{stage === STAGES.length - 2 ? "Open exact walkthrough" : "Continue"}</Text>
-            <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
-          </Pressable>
-        </SafeAreaView>
-      )}
+      {/* ── Dialogs shared by both views ────────────────────────────────── */}
+      <RenameSheet
+        target={renaming}
+        currentTitle={projectTitle}
+        onClose={() => setRenaming(null)}
+        onSubmit={(title) => {
+          renameSavedProject(renaming, title);
+          setRenaming(null);
+        }}
+      />
 
-      <ProjectLibraryModal
-        visible={projectsOpen}
-        projects={projects}
-        currentId={projectId}
-        title={projectTitle}
-        onChangeTitle={setProjectTitle}
-        onClose={() => setProjectsOpen(false)}
-        onSave={saveCurrentProject}
-        onOpen={openSavedProject}
-        onNew={newWalkthroughProject}
-        onRemove={removeSavedProject}
+      <ConfirmSheet
+        project={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => removeSavedProject(pendingDelete)}
       />
 
       <SnapshotModal
@@ -1596,7 +1691,6 @@ function WalkthroughStage({
   sceneInfo,
   panel,
   cameraSource,
-  composition,
   currentRender,
   outputMode,
   rendering,
@@ -1605,7 +1699,6 @@ function WalkthroughStage({
   onSceneUpdate,
   onSelect,
   onSnapshot,
-  onComposition,
   onFurnitureChange,
   onDiagnostic,
   onChangeMode,
@@ -1613,7 +1706,6 @@ function WalkthroughStage({
   onFocusRoom,
   onCapture,
   onRender,
-  onPreviewFraming,
   onSetPanel,
   onSetCameraSource,
   onSetOutputMode,
@@ -1647,7 +1739,6 @@ function WalkthroughStage({
         onSceneUpdate={onSceneUpdate}
         onSelect={onSelect}
         onSnapshot={onSnapshot}
-        onComposition={onComposition}
         onFurnitureChange={onFurnitureChange}
         onDiagnostic={onDiagnostic}
       />
@@ -1661,11 +1752,9 @@ function WalkthroughStage({
       {rendering && (
         <View style={styles.renderOverlay}>
           <ActivityIndicator size="large" color={COLORS.white} />
-          <Text style={styles.renderTitle}>Rendering this view with AI</Text>
+          <Text style={styles.renderTitle}>Rendering this view</Text>
           <Text style={styles.renderBody}>
-            {composition
-              ? `${composition.viewpoint === "user" ? "Your viewpoint" : "Designer camera"} · ${composition.visibleFurnitureCount} of ${composition.furnitureCount} pieces framed · ${composition.doorCount} doors · ${composition.windowCount} windows`
-              : "Preserving the plan, camera, furniture and design direction…"}
+            Your walls, openings and furniture are kept exactly where they are.
           </Text>
         </View>
       )}
@@ -1894,25 +1983,20 @@ function WalkthroughStage({
                       </Text>
                     </Pressable>
                   </View>
-                  {cameraSource === "designer" && (
-                    <Pressable style={styles.panelGhost} onPress={onPreviewFraming}>
-                      <Ionicons name="scan-outline" size={16} color={COLORS.primaryDark} />
-                      <Text style={[styles.panelGhostText, { color: COLORS.primaryDark }]}>
-                        Preview the designer framing
-                      </Text>
-                    </Pressable>
-                  )}
                 </>
               )}
 
+              {/* One line, and only the line that answers "what will I get?".
+                  This used to report how many of the furniture pieces the camera
+                  had framed and how many doors and windows were preserved —
+                  numbers that describe the renderer's bookkeeping, not the
+                  picture the user is about to be handed. */}
               <Text style={styles.panelNote}>
                 {viewMode === "plan"
-                  ? "The furnished, roof-open plan is preserved and rendered without overhead lighting."
-                  : composition
-                    ? `${composition.viewpoint === "user" ? "Your camera" : "The designer camera"} frames ${composition.visibleFurnitureCount} of ${composition.furnitureCount} pieces and preserves ${composition.doorCount} doors and ${composition.windowCount} windows.`
-                    : cameraSource === "designer"
-                      ? "The camera picks the corner that frames the most furniture before rendering."
-                      : "No repositioning — the AI receives the exact frame you are looking at."}
+                  ? "The plan is rendered from above with the roof open."
+                  : cameraSource === "designer"
+                    ? "The camera moves to the corner that shows the most of this room."
+                    : "Rendered from exactly the view you are looking at."}
               </Text>
 
               <View style={styles.panelActions}>
@@ -2050,22 +2134,6 @@ function MoveStick({ onChange }) {
         <Ionicons name="walk" size={20} color={COLORS.white} />
       </View>
     </View>
-  );
-}
-
-function GhostButton({ icon, label, onPress, disabled, active, tone }) {
-  const color = disabled
-    ? COLORS.textTertiary
-    : tone === "danger"
-      ? COLORS.danger
-      : active
-        ? COLORS.primaryDark
-        : COLORS.textPrimary;
-  return (
-    <Pressable style={[styles.ghost, active && styles.ghostActive, disabled && styles.ghostDisabled]} onPress={onPress} disabled={disabled}>
-      <Ionicons name={icon} size={14} color={color} />
-      <Text style={[styles.ghostText, { color }]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -2208,11 +2276,11 @@ function CurveControls({
   const update = (key, value) => onChangeSettings((current) => ({ ...current, [key]: value }));
   return (
     <View style={styles.curveCard}>
+      {/* A label and a two-way switch on one line. This used to be a title, a
+          sentence about how curves are stored, and a full-width segmented
+          control stacked below them — three rows to answer straight or not. */}
       <View style={styles.curveHead}>
-        <View style={styles.curveHeadCopy}>
-          <Text style={styles.curveTitle}>Wall shape</Text>
-          <Text style={styles.curveCopy}>Rounded walls are stored as editable plan points and carry into 3D.</Text>
-        </View>
+        <Text style={styles.curveTitle}>Walls</Text>
         <View style={styles.curveSegmented}>
           {[
             ["straight", "Straight"],
@@ -2220,6 +2288,8 @@ function CurveControls({
           ].map(([value, label]) => (
             <Pressable
               key={value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: edgeType === value }}
               style={[styles.curveSegment, edgeType === value && styles.curveSegmentActive]}
               onPress={() => onChangeEdgeType(value)}
             >
@@ -2230,29 +2300,11 @@ function CurveControls({
       </View>
       {edgeType === "rounded" && (
         <View style={styles.curveSettings}>
-          {/* Same three-step flow as the web studio: start point, end point,
-              then shape the wall before it is committed. */}
-          <View style={styles.curveFlow}>
-            {["Start point", "End point", "Shape wall"].map((label, index) => (
-              <View key={label} style={styles.curveFlowStep}>
-                <View style={[
-                  styles.curveFlowDot,
-                  stage === index && styles.curveFlowDotActive,
-                  stage > index && styles.curveFlowDotComplete,
-                ]}>
-                  {stage > index
-                    ? <Ionicons name="checkmark" size={10} color={COLORS.white} />
-                    : <Text style={[styles.curveFlowDotText, stage === index && styles.curveFlowDotTextActive]}>{index + 1}</Text>}
-                </View>
-                <Text style={[styles.curveFlowLabel, stage === index && styles.curveFlowLabelActive]} numberOfLines={1}>{label}</Text>
-              </View>
-            ))}
-          </View>
           <Text style={styles.curveCopy}>
             {stage === 0
               ? "Tap the first corner of the room."
               : curveStaged
-                ? "Adjust the shape below. Tap the canvas again to move the wall's end point."
+                ? "Adjust the shape, then add the wall."
                 : "Tap where this wall ends, or tap the first corner to close the room."}
           </Text>
 
@@ -2309,95 +2361,351 @@ function CurveStepper({ label, value, min, max, step, suffix, onChange }) {
   );
 }
 
-function ProjectLibraryModal({ visible, projects, currentId, title, onChangeTitle, onClose, onSave, onOpen, onNew, onRemove }) {
+/**
+ * The library — the screen the 3D walkthrough opens on.
+ *
+ * It answers exactly one question: which plan? Either an existing one, or a new
+ * one. Where a new plan's outline comes from — a traced photo or an empty grid —
+ * is asked once, inside the editor, next to the canvas it affects. It used to be
+ * asked here as well, so the same decision appeared twice in a two-screen flow
+ * and the answer given on the first screen could be silently changed on the
+ * second.
+ */
+function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, onStart, onOpen, onRename, onDelete }) {
   return (
-    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.projectBackdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <SafeAreaView edges={["bottom"]} style={styles.projectSheet}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.projectHead}>
-            <View style={styles.projectHeadCopy}>
-              <Text style={styles.projectEyebrow}>Saved on this device</Text>
-              <Text style={styles.projectTitle}>3D projects</Text>
+    <View style={styles.libraryScreen}>
+      <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <SafeAreaView edges={["top"]} style={styles.libraryHeader}>
+          <View style={styles.headerRow}>
+            <Pressable accessibilityLabel="Back" onPress={onBack} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
+              <Ionicons name="chevron-back" size={20} color={COLORS.white} />
+            </Pressable>
+            <View style={styles.headerCopy}>
+              <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
+              <Text style={styles.headerTitle}>Your plans</Text>
             </View>
-            <Pressable style={styles.projectClose} onPress={onClose}>
-              <Ionicons name="close" size={20} color={COLORS.textPrimary} />
+            <Pressable
+              accessibilityLabel="Refresh your saved plans"
+              style={styles.headerButton}
+              onPress={onRefresh}
+              disabled={loading}
+            >
+              {loading
+                ? <ActivityIndicator size="small" color={COLORS.white} />
+                : <Ionicons name="refresh-outline" size={18} color={COLORS.white} />}
             </Pressable>
           </View>
-
-          <View style={styles.currentProjectCard}>
-            <Text style={styles.fieldLabel}>Current project name</Text>
-            <TextInput
-              value={title}
-              onChangeText={onChangeTitle}
-              style={styles.projectNameInput}
-              placeholder="Name this 3D plan"
-              placeholderTextColor={COLORS.placeholderText}
-              maxLength={60}
-            />
-            <View style={styles.currentProjectActions}>
-              <Pressable style={styles.projectSaveButton} onPress={onSave}>
-                <Ionicons name="save-outline" size={16} color={COLORS.white} />
-                <Text style={styles.projectSaveText}>Save current plan</Text>
-              </Pressable>
-              <Pressable style={styles.projectNewButton} onPress={onNew}>
-                <Ionicons name="add" size={17} color={COLORS.primaryDark} />
-                <Text style={styles.projectNewText}>New plan</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <ScrollView style={styles.projectList} contentContainerStyle={styles.projectListContent} showsVerticalScrollIndicator={false}>
-            {projects.length ? projects.map((project) => (
-              <Pressable key={project.id} style={[styles.projectCard, project.id === currentId && styles.projectCardActive]} onPress={() => onOpen(project)}>
-                <View style={styles.projectThumbnail}>
-                  {project.thumbnail
-                    ? <Image source={{ uri: project.thumbnail }} style={styles.projectThumbnailImage} resizeMode="cover" />
-                    : <Ionicons name="cube-outline" size={23} color={COLORS.primaryDark} />}
-                </View>
-                <View style={styles.projectCardCopy}>
-                  <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title || "3D walkthrough"}</Text>
-                  <Text style={styles.projectCardMeta}>
-                    {project.roomCount || project.data?.rooms?.length || 0} rooms · {new Date(project.updatedAt).toLocaleDateString()}
-                  </Text>
-                </View>
-                {project.id === currentId ? (
-                  <View style={styles.projectCurrentPill}><Text style={styles.projectCurrentText}>Current</Text></View>
-                ) : (
-                  <Ionicons name="chevron-forward" size={17} color={COLORS.textTertiary} />
-                )}
-                <Pressable
-                  hitSlop={LAYOUT.hitSlop}
-                  style={styles.projectDelete}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    onRemove(project);
-                  }}
-                >
-                  <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
-                </Pressable>
-              </Pressable>
-            )) : (
-              <View style={styles.projectEmpty}>
-                <Ionicons name="folder-open-outline" size={27} color={COLORS.textTertiary} />
-                <Text style={styles.projectEmptyTitle}>No saved 3D plans yet</Text>
-                <Text style={styles.projectEmptyText}>Save the current plan, then reopen it here whenever you want.</Text>
-              </View>
-            )}
-          </ScrollView>
         </SafeAreaView>
+      </LinearGradient>
+
+      <ScrollView
+        contentContainerStyle={styles.libraryBody}
+        showsVerticalScrollIndicator={false}
+      >
+        {loading && !projects.length ? (
+          <View style={styles.libraryLoading}>
+            <ActivityIndicator color={COLORS.primaryDark} />
+          </View>
+        ) : projects.length ? (
+          projects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onOpen={() => onOpen(project)}
+              onRename={() => onRename(project)}
+              onDelete={() => onDelete(project)}
+            />
+          ))
+        ) : (
+          <View style={styles.libraryEmpty}>
+            <Ionicons name="cube-outline" size={30} color={COLORS.textTertiary} />
+            <Text style={styles.libraryEmptyTitle}>No plans yet</Text>
+            <Text style={styles.libraryEmptyText}>
+              Draw your home to scale, walk through it, then render it with AI.
+            </Text>
+          </View>
+        )}
+
+        {/* One line about where plans live, and only once there is a plan to
+            worry about losing. */}
+        {!!projects.length && (
+          <View style={styles.syncNote}>
+            <Ionicons
+              name={synced ? "cloud-done-outline" : signedIn ? "cloud-offline-outline" : "phone-portrait-outline"}
+              size={13}
+              color={synced ? COLORS.success : COLORS.textTertiary}
+            />
+            <Text style={styles.syncNoteText}>
+              {synced
+                ? "Saved to your account."
+                : signedIn
+                  ? "Saved on this device — your account copy updates on the next save."
+                  : "Saved on this device. Sign in to keep your plans on your account."}
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* One primary action, docked, always reachable however long the list is. */}
+      <SafeAreaView edges={["bottom"]} style={styles.libraryFooter}>
+        <Pressable
+          style={styles.libraryPrimary}
+          accessibilityRole="button"
+          accessibilityLabel="Start a new 3D plan"
+          onPress={onStart}
+        >
+          <Ionicons name="add" size={20} color={COLORS.white} />
+          <Text style={styles.libraryPrimaryText}>New plan</Text>
+        </Pressable>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+function ProjectCard({ project, onOpen, onRename, onDelete }) {
+  const updated = project.updatedAt ? new Date(project.updatedAt) : null;
+  const meta = [
+    `${project.roomCount || 0} ${project.roomCount === 1 ? "room" : "rooms"}`,
+    project.areaMeters ? `${Number(project.areaMeters).toFixed(1)} m²` : null,
+    updated && !Number.isNaN(updated.valueOf()) ? updated.toLocaleDateString() : null,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <Pressable style={styles.projectCard} onPress={onOpen} accessibilityRole="button">
+      <View style={styles.projectThumbnail}>
+        {project.thumbnail ? (
+          <Image source={{ uri: project.thumbnail }} style={styles.projectThumbnailImage} resizeMode="cover" />
+        ) : (
+          <Ionicons name="cube-outline" size={22} color={COLORS.primaryDark} />
+        )}
       </View>
+
+      {/* Name and one line of facts. A row of "Traced"/"Drawn"/"This device"
+          tags used to sit under this, repeating what the thumbnail shows and what
+          the note at the foot of the list already says once for every plan. */}
+      <View style={styles.projectCardCopy}>
+        <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
+        <Text style={styles.projectCardMeta} numberOfLines={1}>{meta}</Text>
+      </View>
+
+      <View style={styles.projectActions}>
+        <Pressable
+          accessibilityLabel={`Rename ${project.title}`}
+          hitSlop={LAYOUT.hitSlop}
+          style={styles.projectAction}
+          onPress={onRename}
+        >
+          <Ionicons name="create-outline" size={16} color={COLORS.textSecondary} />
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`Delete ${project.title}`}
+          hitSlop={LAYOUT.hitSlop}
+          style={[styles.projectAction, styles.projectActionDanger]}
+          onPress={onDelete}
+        >
+          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Where the plan being traced comes from — the one place that question is asked.
+ *
+ * A single line: what the canvas is showing, and the one action that changes it.
+ * The state and the action used to be spread over an icon, a title, a subtitle,
+ * a button and a clear button; four of those five described something the user
+ * can see for themselves on the canvas directly below.
+ */
+function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
+  return (
+    <View style={styles.sourceBar}>
+      <View style={styles.sourceBarRow}>
+        {detecting
+          ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+          : <Ionicons name={planImage ? "image" : "grid-outline"} size={16} color={COLORS.primaryDark} />}
+        <Text style={styles.sourceBarTitle} numberOfLines={1}>
+          {detecting ? "Reading your plan…" : planImage ? "Tracing your plan" : "Blank grid"}
+        </Text>
+        <Pressable style={styles.sourceBarButton} onPress={onUpload} disabled={detecting} hitSlop={LAYOUT.hitSlop}>
+          <Text style={styles.sourceBarButtonText}>{planImage ? "Replace" : "Trace a photo"}</Text>
+        </Pressable>
+        {!!planImage && (
+          <Pressable
+            accessibilityLabel="Remove the uploaded plan"
+            onPress={onClear}
+            hitSlop={LAYOUT.hitSlop}
+          >
+            <Ionicons name="close-circle" size={18} color={COLORS.textTertiary} />
+          </Pressable>
+        )}
+      </View>
+      {!!error && <Text style={styles.sourceBarError}>{error}</Text>}
+    </View>
+  );
+}
+
+/**
+ * The drawing tools: one 4×2 grid, every cell the same size.
+ *
+ * The previous palette had a header, three labelled groups and pill buttons
+ * sized by their own text, so eight controls occupied five stacked rows of
+ * mismatched widths. A fixed grid says the same thing in two rows, and equal
+ * cells make it read as one control rather than eight competing ones. Grid
+ * snapping lives here too — it changes what a tap does, so it belongs with the
+ * tools, not with undo and delete.
+ */
+function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap }) {
+  return (
+    <View style={styles.palette}>
+      {TOOLS.map((item) => {
+        const active = tool === item.key;
+        return (
+          <Pressable
+            key={item.key}
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
+            accessibilityState={{ selected: active }}
+            style={styles.toolCell}
+            onPress={() => onChange(item.key)}
+          >
+            <View style={[styles.tool, active && styles.toolActive]}>
+              <Ionicons name={item.icon} size={18} color={active ? COLORS.white : COLORS.textSecondary} />
+              <Text style={[styles.toolLabel, active && styles.toolLabelActive]} numberOfLines={1}>
+                {item.label}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
+
+      <Pressable
+        accessibilityRole="switch"
+        accessibilityLabel="Snap to the grid"
+        accessibilityState={{ checked: snapToGrid }}
+        style={styles.toolCell}
+        onPress={onToggleSnap}
+      >
+        <View style={[styles.tool, snapToGrid && styles.toolSnapActive]}>
+          <Ionicons
+            name={snapToGrid ? "magnet" : "magnet-outline"}
+            size={18}
+            color={snapToGrid ? COLORS.primaryDark : COLORS.textTertiary}
+          />
+          <Text
+            style={[styles.toolLabel, snapToGrid && styles.toolSnapActiveLabel]}
+            numberOfLines={1}
+          >
+            Snap
+          </Text>
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+/** One cell of the equal-width action row under the canvas. */
+function ActionButton({ icon, label, onPress, disabled, active, tone }) {
+  const color = disabled
+    ? COLORS.textTertiary
+    : tone === "danger"
+      ? COLORS.danger
+      : active
+        ? COLORS.primaryDark
+        : COLORS.textSecondary;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled, selected: !!active }}
+      style={styles.actionCell}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <View style={[styles.action, active && styles.actionActive, disabled && styles.actionDisabled]}>
+        <Ionicons name={icon} size={17} color={color} />
+        <Text style={[styles.actionLabel, { color }]} numberOfLines={1}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Both dialogs are the app's existing confirm dialog, the one the Collection
+ * screen uses to confirm deleting a design: a centred card, centred copy, and two
+ * equal-width buttons — outlined Cancel beside a filled confirm. They previously
+ * had their own shape, with a content-sized Cancel next to a flexing confirm, so
+ * two screens asked the same question in two different visual languages.
+ */
+function ConfirmDialog({ visible, title, message, confirmLabel, confirmDisabled, onCancel, onConfirm, children }) {
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onCancel}>
+      <Pressable style={styles.dialogOverlay} onPress={onCancel}>
+        <Pressable style={styles.dialogContent} onPress={() => {}}>
+          <Text style={styles.dialogTitle}>{title}</Text>
+          {!!message && <Text style={styles.dialogMessage}>{message}</Text>}
+          {children}
+          <View style={styles.dialogActions}>
+            <Pressable style={[styles.dialogButton, styles.dialogCancel]} onPress={onCancel}>
+              <Text style={styles.dialogCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.dialogButton, styles.dialogConfirm, confirmDisabled && styles.dialogConfirmDisabled]}
+              disabled={confirmDisabled}
+              onPress={onConfirm}
+            >
+              <Text style={styles.dialogConfirmText}>{confirmLabel}</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
 
-function Metric({ value, label }) {
+function RenameSheet({ target, currentTitle, onClose, onSubmit }) {
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (!target) return;
+    setValue(target === "current" ? currentTitle : target.title || "");
+  }, [currentTitle, target]);
+
   return (
-    <View style={styles.metric}>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
+    <ConfirmDialog
+      visible={!!target}
+      title="Name this plan"
+      confirmLabel="Save"
+      confirmDisabled={!value.trim()}
+      onCancel={onClose}
+      onConfirm={() => onSubmit(value)}
+    >
+      <TextInput
+        style={styles.dialogInput}
+        value={value}
+        onChangeText={setValue}
+        placeholder="Untitled 3D plan"
+        placeholderTextColor={COLORS.placeholderText}
+        maxLength={60}
+        autoFocus
+        selectTextOnFocus
+        onSubmitEditing={() => value.trim() && onSubmit(value)}
+      />
+    </ConfirmDialog>
+  );
+}
+
+function ConfirmSheet({ project, onCancel, onConfirm }) {
+  return (
+    <ConfirmDialog
+      visible={!!project}
+      title="Delete Plan"
+      message={`Are you sure you want to delete “${project?.title || "this plan"}”?`}
+      confirmLabel="Delete"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -2468,155 +2776,137 @@ function SheetAction({ icon, label, onPress, loading }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
 
-  // Header
+  // ── Header, shared by the library and the editor ─────────────────────────
   header: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.base },
   headerRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md, paddingTop: SPACING.sm },
   headerButton: {
     width: ms(40), height: ms(40), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)",
   },
-  headerCopy: { flex: 1 },
+  headerCopy: { flex: 1, minWidth: 0 },
   headerEyebrow: { ...TYPE.overline, color: "rgba(255,255,255,0.68)" },
-  headerTitle: { ...TYPE.h2, color: COLORS.white, marginTop: 1 },
+  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  headerTitle: { ...TYPE.h2, color: COLORS.white, marginTop: 1, flexShrink: 1 },
 
-  stepper: { flexDirection: "row", marginTop: SPACING.base, gap: SPACING.sm },
-  step: { flex: 1, gap: 6 },
-  stepTrack: { height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)" },
-  stepTrackActive: { backgroundColor: COLORS.white },
-  stepLabel: { ...TYPE.caption, color: "rgba(255,255,255,0.6)" },
-  stepLabelActive: { color: COLORS.white },
+  stepper: { flexDirection: "row", alignItems: "center", marginTop: SPACING.base },
+  step: {
+    width: ms(22), height: ms(22), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.34)",
+  },
+  stepReached: { backgroundColor: COLORS.white, borderColor: COLORS.white },
+  // The current step is a size larger than the rest, so "where am I" is legible
+  // from the shape alone — a filled dot on its own only says "done".
+  stepActive: { width: ms(27), height: ms(27) },
+  stepConnector: { width: ms(20), height: 2, backgroundColor: "rgba(255,255,255,0.24)" },
+  stepConnectorDone: { backgroundColor: COLORS.white },
+  stepNumber: { ...TYPE.caption, fontSize: 11, color: "rgba(255,255,255,0.72)" },
+  stepNumberActive: { color: COLORS.brand800 },
+  stepCaption: { ...TYPE.caption, color: COLORS.white, marginLeft: SPACING.md, flexShrink: 1 },
 
-  // Body
-  // One gutter for the whole flow. The plan stage used to inset by 12 and
-  // everything else by 20, so the canvas and the controls under it did not line
-  // up with each other or with the walkthrough overlay on the next screen.
+  // ── Library ──────────────────────────────────────────────────────────────
+  libraryScreen: { flex: 1, backgroundColor: COLORS.background },
+  libraryHeader: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.lg },
+  libraryBody: { padding: SPACING.base, paddingBottom: SPACING.xl, gap: SPACING.sm },
+  libraryFooter: {
+    paddingHorizontal: SPACING.base, paddingTop: SPACING.sm + 2, paddingBottom: SPACING.sm + 2,
+    backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border,
+  },
+  libraryPrimary: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.xs + 2,
+    height: ms(46), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+  },
+  libraryPrimaryText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.white },
+
+  syncNote: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.xs, marginBottom: SPACING.xs,
+  },
+  syncNoteText: { flex: 1, ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 16 },
+  libraryLoading: { paddingVertical: SPACING.xxl, alignItems: "center" },
+  libraryEmpty: {
+    alignItems: "center", padding: SPACING.xl, gap: SPACING.xs,
+    borderRadius: RADIUS.xl, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border, borderStyle: "dashed",
+  },
+  libraryEmptyTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  libraryEmptyText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center", lineHeight: 19 },
+
+  projectCard: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+  },
+  projectThumbnail: {
+    width: ms(58), height: ms(58), borderRadius: RADIUS.md, overflow: "hidden",
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  },
+  projectThumbnailImage: { width: "100%", height: "100%" },
+  projectCardCopy: { flex: 1, minWidth: 0, gap: 3 },
+  projectCardTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  projectCardMeta: { ...TYPE.caption, color: COLORS.textTertiary },
+  projectActions: { flexDirection: "row", gap: SPACING.xs },
+  projectAction: {
+    width: ms(32), height: ms(32), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  },
+  projectActionDanger: { backgroundColor: COLORS.dangerSoft },
+
+  // ── Editor body ──────────────────────────────────────────────────────────
+  // One gutter for the whole flow, so the canvas, the controls under it and the
+  // walkthrough overlay on the last step all line up with each other.
   body: { paddingHorizontal: SPACING.base, paddingTop: SPACING.base, paddingBottom: SPACING.xxxl },
-  planBody: { paddingHorizontal: SPACING.base },
-  stageCopy: { ...TYPE.small, color: COLORS.textSecondary, marginBottom: SPACING.base },
-  projectStatus: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    marginBottom: SPACING.base, padding: SPACING.md, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
-  },
-  projectStatusIcon: {
-    width: 36, height: 36, alignItems: "center", justifyContent: "center",
-    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
-  },
-  projectStatusCopy: { flex: 1, minWidth: 0 },
-  projectStatusTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  projectStatusMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
+  stageCopy: { ...TYPE.small, color: COLORS.textSecondary, marginBottom: SPACING.md },
 
-  sourceRow: { flexDirection: "row", gap: SPACING.sm, marginBottom: SPACING.md },
-  sourcePrimary: {
-    flex: 1.35, minHeight: ms(64), flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    paddingHorizontal: SPACING.base, borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryDark, ...SHADOW.brand,
+  sourceBar: {
+    marginBottom: SPACING.sm, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm + 2,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  sourceCopy: { flex: 1 },
-  sourcePrimaryTitle: { ...TYPE.bodyStrong, color: COLORS.white },
-  sourcePrimaryMeta: { ...TYPE.caption, color: "rgba(255,255,255,0.68)", marginTop: 2 },
-  sourceSecondary: {
-    flex: 1, minHeight: ms(64), alignItems: "center", justifyContent: "center", gap: 5,
-    paddingHorizontal: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryTint,
-    borderWidth: 1, borderColor: COLORS.primarySoft,
+  sourceBarRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  sourceBarTitle: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
+  sourceBarButton: {
+    paddingHorizontal: SPACING.base, height: ms(34), justifyContent: "center",
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint,
   },
-  sourceSecondaryText: { ...TYPE.caption, color: COLORS.primaryDark, textAlign: "center" },
-  planNotice: {
-    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm, marginBottom: SPACING.md,
-    padding: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.accentTint,
-    borderWidth: 1, borderColor: COLORS.accentSoft,
+  sourceBarButtonText: { ...TYPE.caption, color: COLORS.primaryDark },
+  sourceBarError: {
+    ...TYPE.caption, color: COLORS.accentStrong, lineHeight: 17,
+    marginTop: SPACING.sm, paddingTop: SPACING.sm,
+    borderTopWidth: 1, borderTopColor: COLORS.border,
   },
-  planNoticeText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 18 },
 
-  workspaceHeader: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    marginBottom: SPACING.sm, paddingHorizontal: SPACING.xs,
+  palette: {
+    flexDirection: "row", flexWrap: "wrap",
+    marginBottom: SPACING.sm, padding: SPACING.xs,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  workspaceIcon: {
-    width: 40, height: 40, borderRadius: RADIUS.md,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
-  },
-  workspaceCopy: { flex: 1 },
-  workspaceEyebrow: { ...TYPE.overline, color: COLORS.primaryDark },
-  workspaceHint: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2, lineHeight: 16 },
-  workspaceBadge: {
-    minWidth: 48, alignItems: "center", paddingHorizontal: SPACING.sm, paddingVertical: 5,
+  // A quarter each, so two rows of four line up exactly and no label's length
+  // can change a button's size.
+  toolCell: { width: "25%", padding: 3 },
+  tool: {
+    height: ms(52), alignItems: "center", justifyContent: "center", gap: 3,
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
-  workspaceBadgeValue: { ...TYPE.bodyStrong, color: COLORS.textPrimary, lineHeight: 18 },
-  workspaceBadgeLabel: { ...TYPE.caption, color: COLORS.textTertiary },
-  workspaceExpand: {
-    width: 40, height: 40, borderRadius: RADIUS.md,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
-  },
-  workspaceExpandActive: { backgroundColor: COLORS.primaryDark },
-  toolbarWrap: {
-    marginBottom: SPACING.sm, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
-  },
-  toolbar: { padding: 5, gap: 4 },
-  tool: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    height: ms(40), paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.md, backgroundColor: "transparent",
-    borderWidth: 1, borderColor: "transparent",
-  },
-  toolActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
-  toolLabel: { ...TYPE.caption, color: COLORS.textSecondary },
+  toolActive: { backgroundColor: COLORS.primaryDark },
+  // Snapping is a mode, not a tool, so it is tinted rather than filled — it must
+  // not compete with the one tool that is actually armed.
+  toolSnapActive: { backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft },
+  toolSnapActiveLabel: { color: COLORS.primaryDark },
+  toolLabel: { ...TYPE.caption, fontSize: 10, color: COLORS.textSecondary },
   toolLabelActive: { color: COLORS.white },
 
-  curveCard: {
-    marginBottom: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  hintRow: {
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
+    marginBottom: SPACING.md, paddingHorizontal: SPACING.xs,
   },
-  curveHead: { gap: SPACING.md },
-  curveHeadCopy: { gap: 2 },
-  curveTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  curveCopy: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
-  curveSegmented: { flexDirection: "row", padding: 3, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
-  curveSegment: { flex: 1, alignItems: "center", paddingVertical: SPACING.sm, borderRadius: RADIUS.pill },
-  curveSegmentActive: { backgroundColor: COLORS.primaryDark },
-  curveSegmentText: { ...TYPE.caption, color: COLORS.textSecondary },
-  curveSegmentTextActive: { color: COLORS.white },
-  curveSettings: { marginTop: SPACING.md, gap: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: SPACING.md },
-  curveDirection: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
-  curveDirectionButtons: { flexDirection: "row", gap: 4 },
-  curveDirectionButton: { paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
-  curveDirectionButtonActive: { backgroundColor: COLORS.primaryTint },
-  curveDirectionText: { ...TYPE.caption, color: COLORS.textSecondary },
-  curveDirectionTextActive: { color: COLORS.primaryDark },
-  curveSettingLabel: { ...TYPE.caption, color: COLORS.textSecondary },
-  curveStepper: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 34 },
-  curveStepperActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  curveStepButton: { width: 30, height: 30, alignItems: "center", justifyContent: "center", borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
-  curveStepValue: { minWidth: 46, ...TYPE.caption, color: COLORS.textPrimary, textAlign: "center" },
-  curveReset: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 },
-  curveResetText: { ...TYPE.caption, color: COLORS.primaryDark },
-  curveFlow: { flexDirection: "row", gap: SPACING.sm },
-  curveFlowStep: { flex: 1, alignItems: "center", gap: 4 },
-  curveFlowDot: {
-    width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center",
-    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
-  },
-  curveFlowDotActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
-  curveFlowDotComplete: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  curveFlowDotText: { ...TYPE.caption, color: COLORS.textTertiary },
-  curveFlowDotTextActive: { color: COLORS.white },
-  curveFlowLabel: { ...TYPE.caption, color: COLORS.textTertiary },
-  curveFlowLabelActive: { color: COLORS.textPrimary },
-  curveApplyRow: { flexDirection: "row", gap: SPACING.sm, marginTop: 2 },
-  curveCancel: {
-    paddingHorizontal: SPACING.md, height: 38, alignItems: "center", justifyContent: "center",
-    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
-  },
-  curveCancelText: { ...TYPE.caption, color: COLORS.textSecondary },
-  curveApply: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
-    height: 38, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
-  },
-  curveApplyText: { ...TYPE.caption, color: COLORS.white },
+  hintRowText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 17 },
+  hintRowTool: { color: COLORS.primaryDark },
 
   canvasFrame: { alignSelf: "center" },
-  canvasFrameFocused: { marginHorizontal: -SPACING.md },
+  canvasFrameFocused: { marginHorizontal: -SPACING.base },
+
   drawingBar: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     marginTop: SPACING.sm, padding: SPACING.sm, paddingLeft: SPACING.md,
@@ -2624,17 +2914,57 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.primarySoft,
   },
   drawingBarText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 15 },
+  drawingBarGhost: {
+    width: ms(32), height: ms(32), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surface,
+  },
   drawingBarPrimary: {
-    paddingHorizontal: SPACING.md, height: 32, alignItems: "center", justifyContent: "center",
+    paddingHorizontal: SPACING.base, height: ms(32), alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
   },
   drawingBarPrimaryDisabled: { opacity: 0.4 },
   drawingBarPrimaryText: { ...TYPE.caption, color: COLORS.white },
 
-  roomSizeList: {
-    marginTop: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg,
+  selectionBar: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.sm,
+    padding: SPACING.sm, paddingHorizontal: SPACING.md,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.md,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  selectionName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  selectionAction: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: SPACING.md, paddingVertical: 6,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.dangerSoft,
+  },
+  selectionActionText: { ...TYPE.caption, color: COLORS.danger },
+  openingEditor: {
+    marginTop: SPACING.sm, padding: SPACING.base, borderRadius: RADIUS.lg,
     backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
   },
+
+
+
+  summaryBar: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    marginBottom: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  summaryBarText: { flex: 1, ...TYPE.caption, color: COLORS.primaryDark },
+
+  card: {
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.base,
+    marginTop: SPACING.md, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+  },
+  cardSectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  cardHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.xs },
+  roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
+  roomName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 4 },
+  roomDelete: {
+    width: ms(34), height: ms(34), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.dangerSoft,
+  },
+
   roomSizeRow: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     paddingVertical: 6, borderRadius: RADIUS.sm,
@@ -2644,110 +2974,28 @@ const styles = StyleSheet.create({
   roomSizeFields: { flexDirection: "row", alignItems: "center", gap: 5 },
   roomSizeField: {
     flexDirection: "row", alignItems: "center", gap: 2,
-    paddingHorizontal: 7, height: 34, borderRadius: RADIUS.sm,
+    paddingHorizontal: 7, height: ms(34), borderRadius: RADIUS.sm,
     backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
   },
-  roomSizeInput: { width: 42, ...TYPE.caption, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
+  roomSizeInput: { width: ms(42), ...TYPE.caption, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
   roomSizeUnit: { ...TYPE.caption, color: COLORS.textTertiary },
   roomSizeTimes: { ...TYPE.caption, color: COLORS.textTertiary },
-  roomSizeArea: { minWidth: 54, ...TYPE.caption, color: COLORS.textSecondary, textAlign: "right" },
-
-  canvasActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm, marginTop: SPACING.md },
-  ghost: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
-    borderRadius: RADIUS.pill, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface,
-  },
-  ghostActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryTint },
-  ghostDisabled: { opacity: 0.5 },
-  ghostText: { ...TYPE.caption },
-
-  metrics: { flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.base },
-  metric: {
-    flex: 1, backgroundColor: COLORS.surface, borderRadius: RADIUS.md,
-    paddingVertical: SPACING.md, alignItems: "center", borderWidth: 1, borderColor: COLORS.border,
-  },
-  metricValue: { ...TYPE.h3, color: COLORS.textPrimary },
-  metricLabel: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 1 },
-  scaleEditor: {
-    marginTop: SPACING.md, padding: SPACING.md, gap: SPACING.md,
-    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
-    borderWidth: 1, borderColor: COLORS.primarySoft,
-  },
-  scaleEditorCopy: { gap: 2 },
-  scaleEditorTitle: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
-  scaleEditorText: { ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 17 },
-  scaleEditorActions: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
-
-  stageSummary: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    marginBottom: SPACING.md, padding: SPACING.base, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
-  },
-  stageSummaryIcon: {
-    width: 42, height: 42, alignItems: "center", justifyContent: "center",
-    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
-  },
-  stageSummaryCopy: { flex: 1 },
-  stageSummaryTitle: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
-  stageSummaryText: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2 },
-  exactSourceCard: {
-    flexDirection: "row", alignItems: "flex-start", gap: SPACING.md,
-    marginBottom: SPACING.md, padding: SPACING.base, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
-  },
-  exactSourceIcon: {
-    width: 44, height: 44, alignItems: "center", justifyContent: "center",
-    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
-  },
-  exactSourceCopy: { flex: 1 },
-  exactSourceTitle: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
-  exactSourceText: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 3, lineHeight: 17 },
-
-  card: {
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.base,
-    marginBottom: SPACING.md, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
-  },
-  cardSectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
-  cardSectionCopy: { ...TYPE.small, color: COLORS.textSecondary, marginTop: 3, marginBottom: SPACING.sm },
-  cardHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.xs },
-  roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
-
-  selectionBar: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.md,
-    padding: SPACING.sm, paddingHorizontal: SPACING.md,
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.md,
-    borderWidth: 1, borderColor: COLORS.border,
-  },
-  selectionName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  selectionAction: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.dangerSoft },
-  selectionActionText: { ...TYPE.caption },
-  openingEditor: {
-    marginTop: SPACING.sm, padding: SPACING.base, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
-  },
-  openingEditorHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
-  openingEditorIcon: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken },
-  openingEditorCopy: { flex: 1 },
-  openingEditorTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  openingEditorText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, lineHeight: 16 },
-  roomName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 4 },
-  roomArea: { ...TYPE.caption, color: COLORS.textTertiary },
+  roomSizeArea: { minWidth: ms(54), ...TYPE.caption, color: COLORS.textSecondary, textAlign: "right" },
 
   openingWidth: { marginTop: SPACING.sm },
   openingWidthRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm, marginTop: 5 },
   openingWidthStep: {
-    width: 38, height: 38, alignItems: "center", justifyContent: "center",
+    width: ms(38), height: ms(38), alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
     borderWidth: 1, borderColor: COLORS.border,
   },
   openingWidthStepDisabled: { opacity: 0.4 },
   openingWidthField: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3,
-    paddingHorizontal: SPACING.md, height: 38, borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.md, height: ms(38), borderRadius: RADIUS.md,
     backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.borderStrong,
   },
-  openingWidthInput: { width: 54, ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
+  openingWidthInput: { width: ms(54), ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
   openingWidthUnit: { ...TYPE.caption, color: COLORS.textTertiary },
 
   chipBlock: { marginTop: SPACING.sm },
@@ -2761,76 +3009,89 @@ const styles = StyleSheet.create({
   chipText: { ...TYPE.caption, color: COLORS.textSecondary },
   chipTextActive: { color: COLORS.white },
 
-  settingToggle: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.lg,
-    padding: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  disclosure: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: SPACING.md, paddingHorizontal: SPACING.base, height: ms(48),
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.primarySoft,
   },
-  settingToggleIcon: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: COLORS.border, alignItems: "center", justifyContent: "center" },
+  disclosureText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
+
+  settingToggle: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.md,
+    padding: SPACING.base, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
+  settingToggleIcon: {
+    width: ms(22), height: ms(22), borderRadius: 7, borderWidth: 1.5,
+    borderColor: COLORS.borderStrong, alignItems: "center", justifyContent: "center",
+  },
   settingToggleIconActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
   settingToggleCopy: { flex: 1 },
   settingToggleTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  settingToggleText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
+  settingToggleText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, lineHeight: 16 },
 
   notes: {
-    minHeight: 92, borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+    minHeight: ms(92), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
     padding: SPACING.md, ...TYPE.small, color: COLORS.textPrimary, textAlignVertical: "top",
   },
-
-  projectBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: COLORS.scrim },
-  projectSheet: {
-    maxHeight: "88%", backgroundColor: COLORS.background,
-    borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
-    paddingHorizontal: SPACING.lg, paddingTop: SPACING.sm,
-  },
-  projectHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.base },
-  projectHeadCopy: { flex: 1 },
-  projectEyebrow: { ...TYPE.overline, color: COLORS.primary },
-  projectTitle: { ...TYPE.h2, color: COLORS.textPrimary, marginTop: 2 },
-  projectClose: { width: 38, height: 38, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken },
-  currentProjectCard: { padding: SPACING.base, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs },
-  projectNameInput: { ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingHorizontal: SPACING.md, paddingVertical: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken },
-  currentProjectActions: { flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md },
-  projectSaveButton: { flex: 1.2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
-  projectSaveText: { ...TYPE.caption, color: COLORS.white },
-  projectNewButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint },
-  projectNewText: { ...TYPE.caption, color: COLORS.primaryDark },
-  projectList: { marginTop: SPACING.base },
-  projectListContent: { gap: SPACING.sm, paddingBottom: SPACING.xl },
-  projectCard: { flexDirection: "row", alignItems: "center", gap: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
-  projectCardActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryTint },
-  projectThumbnail: { width: 52, height: 52, borderRadius: RADIUS.md, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken },
-  projectThumbnailImage: { width: "100%", height: "100%" },
-  projectCardCopy: { flex: 1 },
-  projectCardTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  projectCardMeta: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 3 },
-  projectCurrentPill: { paddingHorizontal: SPACING.sm, paddingVertical: 4, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
-  projectCurrentText: { ...TYPE.caption, color: COLORS.white },
-  projectDelete: { width: 30, height: 30, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.dangerSoft },
-  projectEmpty: { alignItems: "center", paddingVertical: SPACING.xxl, paddingHorizontal: SPACING.xl },
-  projectEmptyTitle: { ...TYPE.bodyStrong, color: COLORS.textSecondary, marginTop: SPACING.sm },
-  projectEmptyText: { ...TYPE.caption, color: COLORS.textTertiary, textAlign: "center", marginTop: 4, lineHeight: 17 },
 
   empty: { alignItems: "center", gap: SPACING.sm, paddingVertical: SPACING.xxl },
   emptyText: { ...TYPE.small, color: COLORS.textTertiary },
 
-  // Footer
+  // ── Curved-wall controls ─────────────────────────────────────────────────
+  curveCard: {
+    marginBottom: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
+  curveHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
+  curveTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  curveCopy: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
+  curveSegmented: { flexDirection: "row", padding: 3, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveSegment: { minWidth: ms(78), alignItems: "center", paddingVertical: SPACING.sm, borderRadius: RADIUS.pill },
+  curveSegmentActive: { backgroundColor: COLORS.primaryDark },
+  curveSegmentText: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveSegmentTextActive: { color: COLORS.white },
+  curveSettings: {
+    marginTop: SPACING.md, gap: SPACING.sm,
+    borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: SPACING.md,
+  },
+  curveDirection: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
+  curveDirectionButtons: { flexDirection: "row", gap: 4 },
+  curveDirectionButton: { paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveDirectionButtonActive: { backgroundColor: COLORS.primaryTint },
+  curveDirectionText: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveDirectionTextActive: { color: COLORS.primaryDark },
+  curveSettingLabel: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveStepper: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: ms(34) },
+  curveStepperActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  curveStepButton: { width: ms(30), height: ms(30), alignItems: "center", justifyContent: "center", borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveStepValue: { minWidth: ms(46), ...TYPE.caption, color: COLORS.textPrimary, textAlign: "center" },
+  curveReset: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 },
+  curveResetText: { ...TYPE.caption, color: COLORS.primaryDark },
+  curveApplyRow: { flexDirection: "row", gap: SPACING.sm, marginTop: 2 },
+  curveCancel: {
+    paddingHorizontal: SPACING.md, height: ms(38), alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  },
+  curveCancelText: { ...TYPE.caption, color: COLORS.textSecondary },
+  curveApply: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
+    height: ms(38), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+  },
+  curveApplyText: { ...TYPE.caption, color: COLORS.white },
+
+  // ── Footer ───────────────────────────────────────────────────────────────
   footer: {
-    flexDirection: "row", gap: SPACING.md, paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md, paddingBottom: SPACING.md,
+    flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.base,
+    paddingTop: SPACING.sm + 2, paddingBottom: SPACING.sm + 2,
     backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border,
   },
-  footerGhost: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken,
-  },
-  footerGhostText: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  footerPrimary: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark, ...SHADOW.brand,
-  },
-  footerPrimaryDisabled: { backgroundColor: COLORS.disabled, shadowOpacity: 0, elevation: 0 },
-  footerPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  footerGhost: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
+  footerGhostText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.textPrimary },
+  footerPrimary: { backgroundColor: COLORS.primaryDark },
+  footerPrimaryDisabled: { backgroundColor: COLORS.disabled },
+  footerPrimaryText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.white },
 
   // ── Viewer ───────────────────────────────────────────────────────────────
   // One overlay column, pinned to the safe area, holding a top and a bottom
@@ -2848,33 +3109,20 @@ const styles = StyleSheet.create({
 
   viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   segmented: {
-    flex: 1,
-    flexDirection: "row",
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.pill,
-    padding: 4,
-    ...SHADOW.md,
+    flex: 1, flexDirection: "row", padding: 4,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.pill, ...SHADOW.md,
   },
   segment: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    height: ms(38),
-    borderRadius: RADIUS.pill,
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, height: ms(38), borderRadius: RADIUS.pill,
   },
   segmentActive: { backgroundColor: COLORS.primaryDark },
   segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.white },
   roundButton: {
-    width: ms(46),
-    height: ms(46),
-    borderRadius: RADIUS.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.surface,
-    ...SHADOW.md,
+    width: ms(46), height: ms(46), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.surface, ...SHADOW.md,
   },
   roundButtonActive: { backgroundColor: COLORS.brand800 },
 
@@ -2883,59 +3131,39 @@ const styles = StyleSheet.create({
   roomStrip: { marginHorizontal: -SPACING.base, flexGrow: 0 },
   roomStripContent: { paddingHorizontal: SPACING.base, gap: SPACING.sm },
   roomPill: {
-    justifyContent: "center",
-    height: ms(34),
-    maxWidth: ms(160),
-    paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
-    ...SHADOW.sm,
+    justifyContent: "center", height: ms(34), maxWidth: ms(160),
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface, ...SHADOW.sm,
   },
   roomPillActive: { backgroundColor: COLORS.primaryDark },
   roomPillText: { ...TYPE.caption, color: COLORS.textSecondary },
   roomPillTextActive: { color: COLORS.white },
 
   hintPill: {
-    alignSelf: "flex-start",
-    maxWidth: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.xs,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs + 2,
-    borderRadius: RADIUS.pill,
-    backgroundColor: "rgba(24, 30, 25, 0.74)",
+    alignSelf: "flex-start", maxWidth: "100%",
+    flexDirection: "row", alignItems: "center", gap: SPACING.xs,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs + 2,
+    borderRadius: RADIUS.pill, backgroundColor: "rgba(24, 30, 25, 0.74)",
   },
   hintText: { ...TYPE.caption, color: COLORS.white, flexShrink: 1 },
 
   // ── Contextual sheet (selection and AI) ──────────────────────────────────
   panelCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.xl,
-    padding: SPACING.base,
-    gap: SPACING.md,
-    ...SHADOW.lg,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.xl,
+    padding: SPACING.base, gap: SPACING.md, ...SHADOW.lg,
   },
   panelHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
   panelIcon: {
-    width: ms(42),
-    height: ms(42),
-    borderRadius: RADIUS.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.primaryTint,
+    width: ms(42), height: ms(42), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
   panelIconAccent: { backgroundColor: COLORS.accentTint },
   panelHeadCopy: { flex: 1, minWidth: 0 },
   panelEyebrow: { ...TYPE.overline, color: COLORS.textTertiary },
   panelTitle: { ...TYPE.h3, color: COLORS.textPrimary, textTransform: "capitalize" },
   panelClose: {
-    width: ms(38),
-    height: ms(38),
-    borderRadius: RADIUS.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.surfaceSunken,
+    width: ms(38), height: ms(38), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
   },
   panelMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: -SPACING.sm },
   panelBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: -SPACING.sm },
@@ -2946,66 +3174,38 @@ const styles = StyleSheet.create({
   editorLabel: { ...TYPE.overline, color: COLORS.textTertiary },
   editorButtons: { flexDirection: "row", gap: SPACING.xs },
   editorButton: {
-    width: ms(44),
-    height: ms(44),
-    borderRadius: RADIUS.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.surfaceSunken,
-    borderWidth: 1,
-    borderColor: COLORS.borderSubtle,
+    width: ms(44), height: ms(44), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
 
   panelGhost: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: SPACING.sm,
-    height: ms(44),
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surfaceSunken,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(44), borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken,
   },
   panelGhostText: { ...TYPE.caption, color: COLORS.textSecondary },
 
   toggleGroup: {
-    flexDirection: "row",
-    gap: SPACING.xs,
-    backgroundColor: COLORS.surfaceSunken,
-    borderRadius: RADIUS.pill,
-    padding: 4,
+    flexDirection: "row", gap: SPACING.xs, padding: 4,
+    backgroundColor: COLORS.surfaceSunken, borderRadius: RADIUS.pill,
   },
-  toggleOption: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    height: ms(38),
-    borderRadius: RADIUS.pill,
-  },
+  toggleOption: { flex: 1, alignItems: "center", justifyContent: "center", height: ms(38), borderRadius: RADIUS.pill },
   toggleOptionActive: { backgroundColor: COLORS.primaryDark },
   toggleText: { ...TYPE.caption, color: COLORS.textSecondary },
   toggleTextActive: { color: COLORS.white },
 
   panelActions: { flexDirection: "row", gap: SPACING.sm },
+  // Both panel actions flex, so when the second one appears the pair splits the
+  // row evenly instead of one of them being sized by its own label.
   panelSecondary: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: SPACING.xs,
-    height: ms(48),
-    paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.primaryTint,
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.xs,
+    height: ms(48), paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint,
   },
   panelSecondaryText: { ...TYPE.caption, color: COLORS.primaryDark },
   panelPrimary: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: SPACING.sm,
-    height: ms(48),
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.accent,
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(48), borderRadius: RADIUS.pill, backgroundColor: COLORS.accent,
   },
   panelPrimaryBusy: { opacity: 0.75 },
   panelPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
@@ -3013,57 +3213,36 @@ const styles = StyleSheet.create({
   // ── AI result ────────────────────────────────────────────────────────────
   aiLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.surfaceInverse },
   aiResultBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.overlay,
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.overlay,
   },
   aiResultCopy: { flex: 1, minWidth: 0 },
   aiResultTag: { ...TYPE.overline, color: "rgba(255,255,255,0.66)" },
   aiResultLabel: { ...TYPE.bodyStrong, color: COLORS.white },
   aiResultButton: {
-    width: ms(44),
-    height: ms(44),
-    borderRadius: RADIUS.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    width: ms(44), height: ms(44), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.18)",
   },
 
   renderOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: COLORS.overlay,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: SPACING.xxl,
-    gap: SPACING.md,
+    ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.overlay,
+    alignItems: "center", justifyContent: "center",
+    paddingHorizontal: SPACING.xxl, gap: SPACING.md,
   },
   renderTitle: { ...TYPE.h3, color: COLORS.white, textAlign: "center" },
   renderBody: { ...TYPE.small, color: "rgba(255,255,255,0.80)", textAlign: "center" },
 
   // ── Movement stick ───────────────────────────────────────────────────────
   stickBase: {
-    alignSelf: "flex-end",
-    width: ms(116),
-    height: ms(116),
-    borderRadius: RADIUS.pill,
-    alignItems: "center",
-    justifyContent: "center",
+    alignSelf: "flex-end", width: ms(116), height: ms(116), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.86)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.9)",
-    ...SHADOW.md,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", ...SHADOW.md,
   },
   stickKnob: {
-    width: ms(48),
-    height: ms(48),
-    borderRadius: RADIUS.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.primaryDark,
-    ...SHADOW.sm,
+    width: ms(48), height: ms(48), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.primaryDark, ...SHADOW.sm,
   },
   stickUp: { position: "absolute", top: ms(8) },
   stickDown: { position: "absolute", bottom: ms(8) },
@@ -3073,45 +3252,33 @@ const styles = StyleSheet.create({
   // ── Dock ─────────────────────────────────────────────────────────────────
   dock: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   statusChip: {
-    flex: 1,
-    minWidth: 0,
-    height: ms(48),
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.sm,
-    paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface,
-    ...SHADOW.md,
+    flex: 1, minWidth: 0, height: ms(48),
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface, ...SHADOW.md,
   },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
   statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
   dockPrimary: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: SPACING.sm,
-    height: ms(48),
-    paddingHorizontal: SPACING.lg,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.accent,
-    ...SHADOW.md,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(48), paddingHorizontal: SPACING.lg,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.accent, ...SHADOW.md,
   },
   dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
   dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
   dockIcon: {
-    width: ms(48),
-    height: ms(48),
-    borderRadius: RADIUS.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.surface,
-    ...SHADOW.md,
+    width: ms(48), height: ms(48), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.surface, ...SHADOW.md,
   },
 
-  // Snapshot sheet
+  // ── Snapshot sheet ───────────────────────────────────────────────────────
   sheetBackdrop: { flex: 1, backgroundColor: COLORS.scrim, justifyContent: "flex-end" },
-  sheet: { backgroundColor: COLORS.surface, borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl, padding: SPACING.xl, paddingBottom: SPACING.xxl },
+  sheet: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
+    padding: SPACING.xl, paddingBottom: SPACING.xxl,
+  },
   sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.base },
   sheetTitle: { ...TYPE.h2, color: COLORS.textPrimary, marginBottom: SPACING.base },
   sheetPreview: { borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surfaceSunken },
@@ -3124,8 +3291,63 @@ const styles = StyleSheet.create({
   sheetCloseText: { ...TYPE.bodyStrong, color: COLORS.textSecondary },
 
   noticeBackdrop: { flex: 1, backgroundColor: COLORS.scrim, alignItems: "center", justifyContent: "center", padding: SPACING.xl },
-  noticeCard: { width: "100%", backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.xl, ...SHADOW.lg },
+  noticeCard: { width: "100%", maxWidth: LAYOUT.maxContentWidth, backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.xl, ...SHADOW.lg },
   noticeText: { ...TYPE.body, color: COLORS.textPrimary, textAlign: "center" },
   noticeButton: { marginTop: SPACING.lg, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
   noticeButtonText: { ...TYPE.bodyStrong, color: COLORS.white, textAlign: "center" },
+
+  // Four equal cells under the canvas — same grid logic as the tool palette.
+  actionRow: { flexDirection: "row", marginTop: SPACING.sm, marginHorizontal: -3 },
+  actionCell: { flex: 1, paddingHorizontal: 3 },
+  action: {
+    height: ms(46), alignItems: "center", justifyContent: "center", gap: 2,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  actionActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.primarySoft },
+  actionDisabled: { opacity: 0.45 },
+  actionLabel: { ...TYPE.caption, fontSize: 10 },
+
+  cardTitleRow: {
+    flexDirection: "row", alignItems: "baseline", justifyContent: "space-between",
+    gap: SPACING.sm, marginBottom: SPACING.sm,
+  },
+  cardTitleMeta: { ...TYPE.caption, color: COLORS.textTertiary, flexShrink: 1 },
+
+  footerButton: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: SPACING.xs + 2, height: ms(44), borderRadius: RADIUS.md,
+  },
+
+  // ── Confirm dialog, matching the Collection screen's delete dialog ────────
+  dialogOverlay: {
+    flex: 1, backgroundColor: "rgba(0,0,0,0.4)",
+    alignItems: "center", justifyContent: "center", padding: SPACING.xl,
+  },
+  dialogContent: {
+    width: "86%", maxWidth: LAYOUT.maxContentWidth,
+    backgroundColor: COLORS.background, borderRadius: RADIUS.xl,
+    padding: SPACING.lg, alignItems: "center", ...SHADOW.lg,
+  },
+  dialogTitle: { ...TYPE.h3, color: COLORS.primaryDark, textAlign: "center" },
+  dialogMessage: {
+    ...TYPE.small, color: COLORS.textSecondary, textAlign: "center",
+    marginTop: SPACING.xs, lineHeight: 20,
+  },
+  dialogInput: {
+    width: "100%", marginTop: SPACING.base, paddingHorizontal: SPACING.base, height: ms(46),
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
+    ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "center",
+  },
+  dialogActions: { flexDirection: "row", gap: SPACING.sm, width: "100%", marginTop: SPACING.lg },
+  dialogButton: {
+    flex: 1, height: ms(44), alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md,
+  },
+  dialogCancel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
+  dialogCancelText: { ...TYPE.bodyStrong, color: COLORS.textSecondary },
+  dialogConfirm: { backgroundColor: COLORS.primaryDark },
+  dialogConfirmDisabled: { backgroundColor: COLORS.disabled },
+  dialogConfirmText: { ...TYPE.bodyStrong, color: COLORS.white },
 });

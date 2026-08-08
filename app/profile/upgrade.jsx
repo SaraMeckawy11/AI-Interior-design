@@ -8,6 +8,7 @@ import styles from '../../assets/styles/upgrade.styles';
 import { useAuthStore } from '../../authStore';
 import COLORS from '../../constants/colors';
 import { apiUrl } from '../../configs/api';
+import ScreenHeader from '../../components/ScreenHeader';
 
 // ✅ Create the rewarded ad only once (outside component)
 // const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
@@ -206,8 +207,9 @@ export default function Upgrade() {
     return <ActivityIndicator color={COLORS.primaryDark} size="large" style={styles.container} />;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Upgrade to Pro</Text>
+    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
+      <ScreenHeader title="Upgrade to Pro" />
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <Text style={styles.subtitle}>Unlock the full LIVINAI experience with premium features.</Text>
 
       {/* Coins section - only show if NOT subscribed and loading finished */}
@@ -268,6 +270,7 @@ export default function Upgrade() {
       </TouchableOpacity>
 
       <Text style={styles.trustNote}>Cancel anytime</Text>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }

@@ -2,6 +2,8 @@ import React from 'react';
 import { ScrollView, Text, StyleSheet, Linking, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import COLORS from '../../constants/colors';
+import ScreenHeader from '../../components/ScreenHeader';
+import { SPACING, TYPE } from '../../constants/theme';
 
 const Terms = () => {
   return (
@@ -9,8 +11,8 @@ const Terms = () => {
       colors={[COLORS.background, COLORS.white]} // 🎨 Gradient background
       style={styles.gradient}
     >
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Terms and Conditions</Text>
+      <ScreenHeader title="Terms & Conditions" />
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
 
         <Section title="Acceptance of Terms">
           <Text style={styles.text}>
@@ -81,7 +83,7 @@ const Terms = () => {
 
         <Section title="Disclaimer of Warranty">
           <Text style={styles.text}>
-            LIVINAI is provided "as is" and without warranties of any kind. We do not guarantee that the app will be error-free, uninterrupted, or meet your expectations.
+            LIVINAI is provided “as is” and without warranties of any kind. We do not guarantee that the app will be error-free, uninterrupted, or meet your expectations.
           </Text>
         </Section>
 
@@ -140,46 +142,46 @@ const styles = StyleSheet.create({
   gradient: {
     flex: 1,
   },
+  // Legal copy is read, not skimmed: a single measure, generous line height and
+  // the app's own type ramp instead of raw font sizes that matched nothing else.
   container: {
-    padding: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 20,
-    textAlign: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xxxl,
   },
   heading: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginTop: 20,
-    marginBottom: 10,
+    ...TYPE.h3,
+    color: COLORS.textPrimary,
+    marginTop: SPACING.lg,
+    marginBottom: SPACING.sm,
   },
   text: {
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 10,
+    ...TYPE.small,
+    color: COLORS.textSecondary,
+    lineHeight: 21,
+    marginBottom: SPACING.sm,
   },
   link: {
-    color: '#007aff',
+    color: COLORS.primaryDark,
     textDecorationLine: 'underline',
   },
   bulletContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 6,
+    marginBottom: SPACING.xs + 2,
   },
   bulletPoint: {
-    fontSize: 15,
-    marginRight: 8,
+    ...TYPE.small,
+    color: COLORS.primary,
+    marginRight: SPACING.sm,
   },
   bulletText: {
     flex: 1,
-    fontSize: 15,
-    lineHeight: 22,
+    ...TYPE.small,
+    color: COLORS.textSecondary,
+    lineHeight: 21,
   },
   section: {
-    marginBottom: 20,
+    marginBottom: SPACING.base,
   },
 });
 

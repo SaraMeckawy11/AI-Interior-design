@@ -1,7 +1,7 @@
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
@@ -16,17 +16,34 @@ export default function LogoutButton() {
   const router = useRouter();
   const { logout } = useAuthStore();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const confirmLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      setShowLogoutModal(false);
+      router.replace('/onboarding');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <>
-      {/* Logout Button */}
-      <TouchableOpacity
-        style={styles.logoutButton}
+      <Pressable
         onPress={() => setShowLogoutModal(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Log out"
+        style={({ pressed }) => [
+          styles.logoutButton,
+          pressed && styles.logoutButtonPressed,
+        ]}
       >
-        <Ionicons name="log-out-outline" size={20} color={COLORS.white} />
-        <Text style={styles.logoutText}>Logout</Text>
-      </TouchableOpacity>
+        <Ionicons name="log-out-outline" size={19} color={COLORS.error} />
+        <Text style={styles.logoutText}>Log out</Text>
+      </Pressable>
 
       {/* Logout Confirmation Modal */}
       <Modal
@@ -39,35 +56,36 @@ export default function LogoutButton() {
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.logoutModalContainer}>
-                {/* <Ionicons
-                  name="log-out-outline"
-                  size={40}
-                  color={COLORS.primaryDark}
-                  style={{ marginBottom: 12 }}
-                /> */}
-                <Text style={styles.logoutModalTitle}>Logout</Text>
+                <Text style={styles.logoutModalTitle}>Log out?</Text>
                 <Text style={styles.logoutModalSubtitle}>
-                  Are you sure you want to logout?
+                  You&apos;ll need to sign in again to reach your saved designs.
                 </Text>
 
                 <View style={styles.logoutModalButtons}>
-                  <TouchableOpacity
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel"
                     style={[styles.logoutModalButton, styles.cancelButton]}
                     onPress={() => setShowLogoutModal(false)}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
+                  </Pressable>
 
-                  <TouchableOpacity
-                    style={[styles.logoutModalButton, styles.confirmButton]}
-                    onPress={async () => {
-                      setShowLogoutModal(false);
-                      await logout();
-                      router.replace('/onboarding');
-                    }}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Confirm log out"
+                    disabled={isLoggingOut}
+                    style={[
+                      styles.logoutModalButton,
+                      styles.confirmButton,
+                      isLoggingOut && { opacity: 0.6 },
+                    ]}
+                    onPress={confirmLogout}
                   >
-                    <Text style={styles.confirmButtonText}>Logout</Text>
-                  </TouchableOpacity>
+                    <Text style={styles.confirmButtonText}>
+                      {isLoggingOut ? 'Logging out…' : 'Log out'}
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
             </TouchableWithoutFeedback>

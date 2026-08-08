@@ -15,12 +15,15 @@ import { Image } from "expo-image";
 import { formatPublishDate } from "../../lib/utils";
 import COLORS from "../../constants/colors";
 import Loader from "../../components/Loader";
+import { TAB_BAR_CLEARANCE } from "../../components/navigation/FloatingTabBar";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiUrl } from "../../configs/api";
 
 export default function Collection() {
   const { token } = useAuthStore();
+  const insets = useSafeAreaInsets();
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [statusLoaded, setStatusLoaded] = useState(false);
@@ -249,7 +252,10 @@ export default function Collection() {
         data={designs}
         renderItem={renderItem}
         keyExtractor={(item, index) => `${item._id}-${index}`}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[
+          styles.listContainer,
+          { paddingTop: insets.top + 12, paddingBottom: TAB_BAR_CLEARANCE },
+        ]}
         showsVerticalScrollIndicator={false}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}

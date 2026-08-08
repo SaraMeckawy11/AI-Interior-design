@@ -1,19 +1,23 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from '../../assets/styles/profile.styles';
+import { TAB_BAR_CLEARANCE } from '../../components/navigation/FloatingTabBar';
 import { useAuthStore } from '../../authStore';
 import LogoutButton from '../../components/profile/LogoutButton';
 import ProfileHeader from '../../components/profile/ProfileHeader';
+import SettingsRow from '../../components/profile/SettingsRow';
 import SubscriptionSection from '../../components/profile/SubscriptionSection';
-import { Ionicons } from '@expo/vector-icons';
-import COLORS from '../../constants/colors';
 import { apiUrl } from '../../configs/api';
 
 export default function Profile() {
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
   const router = useRouter();
-  const [isPremium, setIsPremium] = useState(false);
+  const insets = useSafeAreaInsets();
+  // Seed from the cached user so the plan badge does not flash the wrong state
+  // for as long as the network round-trip takes.
+  const [isPremium, setIsPremium] = useState(!!user?.isPremium);
 
   useEffect(() => {
     const fetchUserStatus = async () => {
@@ -48,38 +52,69 @@ export default function Profile() {
   }, [token]);
 
   return (
-    <View style={styles.container}>
-      <ProfileHeader />
-      <LogoutButton />
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{
+        // `styles.container` carries `flex: 1`, which would cap the content
+        // instead of letting it scroll, so the padding is restated here rather
+        // than reusing that style for the content container.
+        flexGrow: 1,
+        paddingHorizontal: 16,
+        paddingTop: insets.top + 12,
+        paddingBottom: TAB_BAR_CLEARANCE,
+      }}
+      showsVerticalScrollIndicator={false}
+    >
+      <Text style={styles.screenTitle}>Profile</Text>
 
-      {/* Show subscription section only if NOT premium */}
-      {!isPremium ? (
-        <SubscriptionSection />
-      ) : (
-        <View style={styles.familyMessage}>
-          <Text style={styles.familyText}>
-            Being part of our family gives you exclusive access! Keep creating and designing freely.          </Text>
+      <ProfileHeader isPremium={isPremium} />
+
+      {isPremium ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Subscription</Text>
+          <View style={styles.card}>
+            <SettingsRow
+              icon="card-outline"
+              label="Manage Subscription"
+              onPress={() => router.push('/profile/manageSubscription')}
+            />
+            <SettingsRow
+              icon="receipt-outline"
+              label="Payment History"
+              showDivider
+              onPress={() => router.push('/profile/payment-history')}
+            />
+          </View>
         </View>
+      ) : (
+        <SubscriptionSection />
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Help & Legal</Text>
+        <Text style={styles.sectionTitle}>Help &amp; Legal</Text>
 
-        <TouchableOpacity style={styles.item} onPress={() => router.push('/profile/privacy')}>
-          <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} style={styles.itemIcon} />
-          <Text style={styles.itemText}>Privacy Policy</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.item} onPress={() => router.push('/profile/terms')}>
-          <Ionicons name="document-text-outline" size={18} color={COLORS.textSecondary} style={styles.itemIcon} />
-          <Text style={styles.itemText}>Terms & Conditions</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.item} onPress={() => router.push('/profile/contact')}>
-          <Ionicons name="help-circle-outline" size={18} color={COLORS.textSecondary} style={styles.itemIcon} />
-          <Text style={styles.itemText}>Contact Support</Text>
-        </TouchableOpacity>
+        <View style={styles.card}>
+          <SettingsRow
+            icon="lock-closed-outline"
+            label="Privacy Policy"
+            onPress={() => router.push('/profile/privacy')}
+          />
+          <SettingsRow
+            icon="document-text-outline"
+            label="Terms & Conditions"
+            showDivider
+            onPress={() => router.push('/profile/terms')}
+          />
+          <SettingsRow
+            icon="help-circle-outline"
+            label="Contact Support"
+            showDivider
+            onPress={() => router.push('/profile/contact')}
+          />
+        </View>
       </View>
-    </View>
+
+      <LogoutButton />
+    </ScrollView>
   );
 }

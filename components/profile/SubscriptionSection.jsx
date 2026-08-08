@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import styles from '../../assets/styles/profile.styles';
+import SettingsRow from './SettingsRow';
 
 export default function SubscriptionSection() {
   const router = useRouter();
@@ -11,23 +11,20 @@ export default function SubscriptionSection() {
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Subscription</Text>
 
-      <TouchableOpacity
-        style={styles.item}
-        activeOpacity={0.8}
-        onPress={() => router.push('/profile/upgrade')}
-      >
-        <Ionicons name="star-outline" size={18} color="#888" style={styles.itemIcon} />
-        <Text style={styles.itemText}>Upgrade to Pro</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.item}
-        activeOpacity={0.8}
-        onPress={() => router.push('/profile/manageSubscription')}
-      >
-        <Ionicons name="settings-outline" size={18} color="#888" style={styles.itemIcon} />
-        <Text style={styles.itemText}>Manage Subscription</Text>
-      </TouchableOpacity>
+      <View style={styles.card}>
+        <SettingsRow
+          icon="sparkles"
+          label="Upgrade to Pro"
+          accent
+          onPress={() => router.push('/profile/upgrade')}
+        />
+        <SettingsRow
+          icon="card-outline"
+          label="Manage Subscription"
+          showDivider
+          onPress={() => router.push('/profile/manageSubscription')}
+        />
+      </View>
     </View>
   );
 }

@@ -1,290 +1,224 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Modal,
-  TouchableWithoutFeedback,
-  Platform,
-  Linking,
-} from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Purchases from 'react-native-purchases';
-import styles from '../../assets/styles/upgrade.styles';
+
+import styles from '../../assets/styles/profile.styles';
 import { useAuthStore } from '../../authStore';
-import Loader from '../../components/Loader';
+import ConfirmDialog from '../../components/profile/ConfirmDialog';
+import ScreenHeader from '../../components/ScreenHeader';
+import SettingsRow from '../../components/profile/SettingsRow';
+import COLORS from '../../constants/colors';
 import { apiUrl } from '../../configs/api';
+
+const capitalize = (text) =>
+  !text || typeof text !== 'string' ? '' : text.charAt(0).toUpperCase() + text.slice(1);
+
+const formatDate = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleDateString();
+};
 
 export default function Subscription() {
   const router = useRouter();
   const { token } = useAuthStore();
-  const [currentPlan, setCurrentPlan] = useState(null);
+
+  const [plan, setPlan] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [offerings, setOfferings] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState('');
 
-  // Modal states
-  const [showCancelConfirmModal, setShowCancelConfirmModal] = useState(false);
-  const [showCancelSuccessModal, setShowCancelSuccessModal] = useState(false);
-  const [showCancelErrorModal, setShowCancelErrorModal] = useState(false);
-
-  // fetch RevenueCat offerings
-  useEffect(() => {
-    let mounted = true;
-    async function fetchOfferings() {
-      try {
-        const rc = await Purchases.getOfferings();
-        if (mounted) setOfferings(rc);
-      } catch (err) {
-        console.error('Failed to fetch offerings:', err);
-      }
+  /**
+   * Load the current subscription.
+   *
+   * Having no subscription is a normal state, not a failure: the API answers 404
+   * and this screen shows the "no plan" card. It used to `console.error` on that
+   * path — and on RevenueCat not being configured — which in a development build
+   * throws a red error box over the screen the moment it opens. That red box was
+   * the "error" on this screen; there was never anything actually broken.
+   */
+  const load = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
     }
-    fetchOfferings();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // fetch user's latest subscription from backend
-  useEffect(() => {
-    if (!token) return;
-    let mounted = true;
-    async function fetchUserSubscription() {
-      try {
-        const response = await fetch(apiUrl('/api/orders/latest'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || 'Subscription fetch failed');
-        }
-
-        const data = await response.json();
-        const latestOrder = data.order;
-
-        const planName = `${capitalize(latestOrder.plan)} – ${capitalize(latestOrder.billingCycle)}`;
-        const price = `${latestOrder.price} ${
-          latestOrder.billingCycle === 'weekly' ? '/ week' : '/ year'
-        }`;
-
-        const endDate = latestOrder.endDate
-          ? new Date(latestOrder.endDate).toLocaleDateString()
-          : '—';
-        const canceledAt = latestOrder.canceledAt
-          ? new Date(latestOrder.canceledAt).toLocaleDateString()
-          : null;
-
-        if (mounted) {
-          setCurrentPlan({
-            name: planName,
-            price,
-            nextBilling: endDate,
-            autoRenew: latestOrder.autoRenew,
-            isActive: latestOrder.isActive,
-            canceledAt,
-          });
-
-          setIsSubscribed(Boolean(latestOrder.isActive));
-        }
-      } catch (error) {
-        console.error('Failed to load subscription:', error);
-        if (mounted) setIsSubscribed(false);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-    fetchUserSubscription();
-    return () => {
-      mounted = false;
-    };
-  }, [token, offerings]);
-
-  const handleCancelConfirm = () => setShowCancelConfirmModal(true);
-
-  const handleCancel = async () => {
-    setShowCancelConfirmModal(false);
+    setLoading(true);
     try {
-      if (Platform.OS === 'ios') {
-        await Linking.openURL('https://apps.apple.com/account/subscriptions');
-      } else if (Platform.OS === 'android') {
-        await Linking.openURL('https://play.google.com/store/account/subscriptions');
-      }
-
-      await fetch(apiUrl('/api/orders/cancel-latest'), {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+      const response = await fetch(apiUrl('/api/orders/latest'), {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
 
-      setCurrentPlan((prev) => ({
-        ...prev,
-        autoRenew: false,
-        canceledAt: new Date().toLocaleDateString(),
-      }));
+      if (response.status === 404) {
+        setPlan(null);
+        return;
+      }
+      if (!response.ok) throw new Error('Subscription lookup failed');
 
-      setShowCancelSuccessModal(true);
-    } catch (err) {
-      console.error('Cancel error:', err);
-      setShowCancelErrorModal(true);
+      const { order } = await response.json();
+      if (!order) {
+        setPlan(null);
+        return;
+      }
+
+      setPlan({
+        name: `${capitalize(order.plan)} · ${capitalize(order.billingCycle)}`,
+        price: `${order.price} ${order.billingCycle === 'weekly' ? '/ week' : '/ year'}`,
+        renewsOn: formatDate(order.endDate),
+        autoRenew: !!order.autoRenew,
+        canceledAt: order.canceledAt ? formatDate(order.canceledAt) : null,
+        isActive: !!order.isActive,
+      });
+    } catch {
+      // A lookup that genuinely failed is reported in the UI, not the console.
+      setPlan(null);
+      setNotice("Your subscription details could not be loaded. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const cancelSubscription = async () => {
+    setConfirming(false);
+    // Cancelling actually happens in the store; the app only records that the
+    // user asked, so the plan card stops promising a renewal.
+    const storeUrl = Platform.OS === 'ios'
+      ? 'https://apps.apple.com/account/subscriptions'
+      : 'https://play.google.com/store/account/subscriptions';
+
+    try {
+      await Linking.openURL(storeUrl);
+    } catch {
+      setNotice('Open your device store to finish cancelling this subscription.');
+    }
+
+    try {
+      await fetch(apiUrl('/api/orders/cancel-latest'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      setPlan((current) => (current ? { ...current, autoRenew: false, canceledAt: formatDate(Date.now()) } : current));
+    } catch {
+      setNotice('We could not record the cancellation. It will update the next time you open this screen.');
     }
   };
 
-  const capitalize = (text) => {
-    if (!text || typeof text !== 'string') return '';
-    return text.charAt(0).toUpperCase() + text.slice(1);
-  };
-
-  if (loading) return <Loader />;
-
-  if (!isSubscribed) {
-    return (
-      <View style={styles.unsubscribedWrapper}>
-        <View style={styles.unsubscribedCard}>
-          <Text style={styles.unsubscribedTitle}>You’re not subscribed</Text>
-          <Text style={styles.unsubscribedText}>
-            Unlock premium features like unlimited renders and ad-free experience.
-          </Text>
-          <TouchableOpacity
-            style={styles.unsubscribedButton}
-            onPress={() => router.push('/profile/upgrade')}
-          >
-            <Text style={styles.unsubscribedButtonText}>View Plans</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  // RevenueCat's offerings are only needed to change plans, which happens on the
+  // upgrade screen. Warming them here is best-effort and must never be visible.
+  useEffect(() => {
+    Purchases.getOfferings?.().catch(() => {});
+  }, []);
 
   return (
-    <>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Manage Subscription</Text>
-        <Text style={styles.subtitle}>
-          Easily manage your current plan, billing settings, or support.
-        </Text>
+    <View style={styles.container}>
+      <ScreenHeader title="Manage Subscription" />
 
-        <View style={[styles.card, styles.cardElevated]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Ionicons name="star" size={24} color="#f7b731" />
-            <View style={{ marginLeft: 12 }}>
-              <Text style={styles.cardTitle}>{currentPlan?.name}</Text>
-              <Text style={styles.cardSubtitle}>{currentPlan?.price}</Text>
-              <Text style={styles.cardSmall}>
-                {currentPlan?.autoRenew
-                  ? `Next billing: ${currentPlan?.nextBilling}`
-                  : `Subscription ends: ${currentPlan?.nextBilling}`}
-              </Text>
-              <Text style={styles.cardSmall}>
-                Auto-renewal: {currentPlan?.autoRenew ? 'ON' : 'OFF'}
-              </Text>
-              {currentPlan?.canceledAt && (
-                <Text style={styles.cardSmall}>Canceled at: {currentPlan.canceledAt}</Text>
-              )}
-            </View>
-          </View>
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={COLORS.primaryDark} />
         </View>
-
-        <View style={{ marginTop: 12 }}>
-          <TouchableOpacity
-            style={[styles.card, styles.cardInteractive]}
-            activeOpacity={0.9}
-            onPress={() => router.push('/profile/upgrade')}
-          >
-            <Ionicons name="repeat-outline" size={22} color="#444" />
-            <View style={{ marginLeft: 12 }}>
-              <Text style={styles.cardTitle}>Change Plan</Text>
-              <Text style={styles.cardSmall}>Choose a different subscription plan</Text>
+      ) : (
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {!!notice && (
+            <View style={[styles.section, styles.notice]}>
+              <Text style={styles.noticeText}>{notice}</Text>
             </View>
-          </TouchableOpacity>
+          )}
 
-          <TouchableOpacity
-            style={[styles.card, styles.cardInteractive]}
-            activeOpacity={0.9}
-            onPress={() => router.push('/profile/payment-history')}
-          >
-            <Ionicons name="time-outline" size={22} color="#444" />
-            <View style={{ marginLeft: 12 }}>
-              <Text style={styles.cardTitle}>Payment History</Text>
-              <Text style={styles.cardSmall}>View all your past payments</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.card, styles.cardDestructive]}
-            activeOpacity={0.9}
-            onPress={handleCancelConfirm}
-          >
-            <Ionicons name="close-circle-outline" size={22} color="#e74c3c" />
-            <View style={{ marginLeft: 12 }}>
-              <Text style={[styles.cardTitle, { color: '#e74c3c' }]}>Cancel Subscription</Text>
-              <Text style={styles.cardSmall}>Auto-renewal will be turned off</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      {/* Cancel Confirmation Modal */}
-      <Modal visible={showCancelConfirmModal} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={() => setShowCancelConfirmModal(false)}>
-          <View style={styles.modalMissingOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalMissingContainer}>
-                <Text style={styles.modalTitle}>Cancel Subscription</Text>
-                <Text style={styles.modalSubtitle}>
-                  Are you sure you want to cancel your subscription?
-                </Text>
-
-                <View style={{ flexDirection: 'row', marginTop: 20 }}>
-                  <TouchableOpacity
-                    style={[styles.modalMissingButton, { flex: 1, marginRight: 10 }]}
-                    onPress={() => setShowCancelConfirmModal(false)}
-                  >
-                    <Text style={styles.modalButtonText}>No</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.modalMissingButton, styles.modalConfirmButton, { flex: 1 }]}
-                    onPress={handleCancel}
-                  >
-                    <Text style={styles.modalButtonText}>Yes, Cancel</Text>
-                  </TouchableOpacity>
+          {plan ? (
+            <>
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Current plan</Text>
+                <View style={styles.card}>
+                  <SettingsRow icon="sparkles" label="Plan" value={plan.name} accent />
+                  <SettingsRow icon="pricetag-outline" label="Price" value={plan.price} showDivider />
+                  <SettingsRow
+                    icon="calendar-outline"
+                    label={plan.autoRenew ? 'Renews on' : 'Ends on'}
+                    value={plan.renewsOn}
+                    showDivider
+                  />
+                  <SettingsRow
+                    icon={plan.autoRenew ? 'refresh-outline' : 'pause-outline'}
+                    label="Auto-renewal"
+                    value={plan.autoRenew ? 'On' : 'Off'}
+                    showDivider
+                  />
+                  {!!plan.canceledAt && (
+                    <SettingsRow
+                      icon="close-circle-outline"
+                      label="Cancelled"
+                      value={plan.canceledAt}
+                      showDivider
+                    />
+                  )}
                 </View>
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
 
-      {/* Error Modal */}
-      <Modal visible={showCancelErrorModal} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={() => setShowCancelErrorModal(false)}>
-          <View style={styles.modalMissingOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalMissingContainer}>
-                <Text style={styles.modalTitle}>Error</Text>
-                <Text style={styles.modalSubtitle}>
-                  Failed to open your subscription settings. Please try again later.
-                </Text>
-
-                <TouchableOpacity
-                  style={[styles.modalMissingButton, styles.modalConfirmButton]}
-                  onPress={() => setShowCancelErrorModal(false)}
-                >
-                  <Text style={styles.modalButtonText}>OK</Text>
-                </TouchableOpacity>
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Manage</Text>
+                <View style={styles.card}>
+                  <SettingsRow
+                    icon="repeat-outline"
+                    label="Change plan"
+                    onPress={() => router.push('/profile/upgrade')}
+                  />
+                  <SettingsRow
+                    icon="receipt-outline"
+                    label="Payment history"
+                    showDivider
+                    onPress={() => router.push('/profile/payment-history')}
+                  />
+                  {plan.autoRenew && (
+                    <SettingsRow
+                      icon="close-circle-outline"
+                      label="Cancel subscription"
+                      showDivider
+                      danger
+                      onPress={() => setConfirming(true)}
+                    />
+                  )}
+                </View>
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-    </>
+            </>
+          ) : (
+            <View style={styles.section}>
+              <View style={styles.notice}>
+                <View style={styles.noticeIcon}>
+                  <Ionicons name="sparkles-outline" size={24} color={COLORS.primaryDark} />
+                </View>
+                <Text style={styles.noticeTitle}>No active subscription</Text>
+                <Text style={styles.noticeText}>
+                  Go premium for unlimited designs, no ads, and every render in full quality.
+                </Text>
+                <Pressable
+                  style={styles.noticeButton}
+                  accessibilityRole="button"
+                  onPress={() => router.push('/profile/upgrade')}
+                >
+                  <Text style={styles.noticeButtonText}>View plans</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      <ConfirmDialog
+        visible={confirming}
+        title="Cancel Subscription"
+        message="Auto-renewal will be turned off. You keep premium until the end of the current period."
+        confirmLabel="Cancel plan"
+        cancelLabel="Keep it"
+        onCancel={() => setConfirming(false)}
+        onConfirm={cancelSubscription}
+      />
+    </View>
   );
 }
