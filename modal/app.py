@@ -876,12 +876,16 @@ def _require_token(authorization: str):
 
 
 def _dispatch(body: dict):
-    """Route a request to the right engine, with a safe fallback.
+    """Route a request to the one engine that can serve it.
 
-    Guided floor plans need ControlNet conditioning, so they stay on SD 1.5.
-    Everything else goes to Gen-Klein; if that path fails for any reason
-    (gated-model access, a cold-start problem, an OOM), we fall back to the
-    ControlNet pipeline rather than returning an error to the user.
+    Guided floor plans need ControlNet conditioning, so they go to SD 1.5;
+    everything else goes to Gen-Klein.
+
+    There is deliberately no fallback between the two. Each is a GPU container,
+    so retrying the other after the first failed made a single request pay two
+    cold starts and two GPU bills — and answer with an engine the prompt was
+    not written for, which is a different picture, not a degraded one. Failure
+    is reported instead; the backend falls back to RunPod.
     """
     image_b64 = body.get("image")
     if not image_b64:
@@ -898,36 +902,35 @@ def _dispatch(body: dict):
 
     is_guided = mode.lower() == "guided" and bool(rooms)
 
-    if not is_guided:
-        try:
-            return GenKlein().run.remote(
+    try:
+        if is_guided:
+            return InteriorAI().run.remote(
                 image=image_b64,
                 room_type=room_type,
                 design_style=design_style,
                 color_tone=color_tone,
                 custom_prompt=custom_prompt,
-                mode=mode or "interior",
-                material=(body.get("material") or "Natural oak").strip(),
-                lighting=(body.get("lighting") or "Natural daylight").strip(),
-                preserve_geometry=body.get("preserve_geometry", True),
-                creativity=int(body.get("creativity") or 42),
+                rooms=rooms,
+                canvas=canvas,
+                mode=mode,
+                doors=doors,
             )
-        except Exception as error:
-            print(f"[router] Gen-Klein unavailable, falling back to ControlNet: {error}")
 
-    try:
-        return InteriorAI().run.remote(
+        return GenKlein().run.remote(
             image=image_b64,
             room_type=room_type,
             design_style=design_style,
             color_tone=color_tone,
             custom_prompt=custom_prompt,
-            rooms=rooms,
-            canvas=canvas,
-            mode=mode,
-            doors=doors,
+            mode=mode or "interior",
+            material=(body.get("material") or "Natural oak").strip(),
+            lighting=(body.get("lighting") or "Natural daylight").strip(),
+            preserve_geometry=body.get("preserve_geometry", True),
+            creativity=int(body.get("creativity") or 42),
         )
     except Exception as error:
+        engine = "InteriorAI" if is_guided else "Gen-Klein"
+        print(f"[router] {engine} failed: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
 

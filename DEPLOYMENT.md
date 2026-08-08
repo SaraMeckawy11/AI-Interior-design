@@ -74,9 +74,12 @@ Smoke-test end to end once it is up:
 modal run app.py --image-path ./test.jpg --room-type "living room"
 ```
 
-If Gen‑Klein is unavailable for any reason — gated-model access, an OOM, a cold
-start failure — the router automatically falls back to the ControlNet pipeline
-rather than returning an error, so the app keeps working while you fix it.
+The router makes **one** engine call per request: guided plans to `InteriorAI`,
+everything else to `GenKlein`. It used to retry the other engine when the first
+failed, which meant a single request starting two GPU containers — two cold
+starts, two GPU bills — to answer with an engine the prompt was not written for.
+A failure here is reported to the backend instead, and the backend falls back to
+RunPod (§4).
 
 ---
 
