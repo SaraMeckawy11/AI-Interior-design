@@ -1,37 +1,43 @@
 # Render Blueprint for the Livinai API.
 #
-# This service MUST use the Docker runtime.
+# This service runs on Render's native Node runtime. It can, because it no
+# longer hosts any Python: the 3D walkthrough exporter runs on Modal.
 #
-# The 3D walkthrough is exported by `backend/renderer/render_worker.py`, which
-# needs numpy, Pillow, Shapely, trimesh and Open3D, plus the system libraries
-# Open3D links against. Render's native Node runtime installs none of that and
-# gives you no way to apt-get it, so a Node service builds and starts perfectly
-# and then fails on the first Explore request with:
+# `backend/renderer/render_worker.py` needs numpy, Pillow, Shapely, trimesh and
+# Open3D, and Open3D links system libraries (libgl1, libegl1, the X11 set) that
+# only a package manager can install. Render's native runtime gives you no root
+# and no apt, so hosting the exporter here used to mean running the service as a
+# Docker image on an instance with at least 2 GB of memory. Now
+# `backend/src/lib/walkthroughRenderer.js` calls the `livinai-walkthrough` Modal
+# app instead, and the heavy work is billed per second rather than per month.
 #
-#   File "/opt/render/project/src/backend/renderer/render_worker.py", line 23
-#   ModuleNotFoundError: No module named 'numpy'
+# Deploy order matters: `cd modal && modal deploy walkthrough_app.py` first,
+# then set MODAL_WALKTHROUGH_ENDPOINT_URL below to the build endpoint it prints.
+# Without that variable the API falls back to spawning Python locally, which on
+# this runtime fails with `ModuleNotFoundError: No module named 'numpy'` the
+# first time someone opens the Explore step. `/healthz` reports which of the two
+# is in use, and says why if neither works.
 #
-# `/opt/render/project/src` in a traceback is the tell: that is the native
-# runtime's checkout path. The Docker image runs from /app.
+# Still want everything in one box? `backend/Dockerfile` remains valid and
+# self-contained — set the runtime to Docker with `dockerfilePath:
+# ./backend/Dockerfile` and `dockerContext: ./backend`, leave
+# MODAL_WALKTHROUGH_ENDPOINT_URL unset, and give it 2 GB. See DEPLOYMENT.md.
 #
-# Apply with: Render Dashboard -> Blueprints -> New Blueprint Instance.
-# `plan` and `region` are intentionally omitted so applying this does not move
-# an existing service or change what it costs. See DEPLOYMENT.md for the memory
-# floor Open3D needs.
+# Apply with: Render Dashboard -> Blueprints -> New Blueprint Instance. This
+# creates a service named `livinai-api`; it does not reconfigure a service you
+# already have under another name. `plan` and `region` are intentionally omitted
+# so applying this does not move an existing service or change what it costs.
 services:
   - type: web
     name: livinai-api
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node src/index.js
     healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
-      # Set in the image too, but stated here so the value is visible with the
-      # rest of the service configuration.
-      - key: WALKTHROUGH_PYTHON
-        value: python3
       # Secrets stay in the dashboard; `sync: false` means "this service needs
       # it, do not overwrite it from the repository".
       - key: MONGO_URI
@@ -48,6 +54,12 @@ services:
         sync: false
       - key: MODAL_FLOORPLAN_ENDPOINT_URL
         sync: false
+      # https://<workspace>--livinai-walkthrough-build.modal.run
+      # The model and health endpoints are derived from this one by name, so
+      # this is the only walkthrough URL to configure.
+      - key: MODAL_WALKTHROUGH_ENDPOINT_URL
+        sync: false
+      # Shared by every Modal app, including the walkthrough exporter.
       - key: MODAL_API_KEY
         sync: false
       - key: REVENUECAT_API_KEY

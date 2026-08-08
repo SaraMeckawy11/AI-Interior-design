@@ -27,7 +27,10 @@ from webgl_walkthrough import (  # noqa: E402
 )
 
 
-OUTPUT_DIR = ROOT / "generated"
+# Content-addressed exports live next to the renderer by default. Modal mounts a
+# Volume instead, because a container's own filesystem is discarded when it
+# scales down and every scene would then be built from scratch.
+OUTPUT_DIR = Path(os.environ.get("WALKTHROUGH_OUTPUT_DIR") or (ROOT / "generated"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

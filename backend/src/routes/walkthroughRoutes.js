@@ -1,9 +1,9 @@
 import express from "express";
-import { promises as fs } from "node:fs";
 
 import cloudinary from "../lib/cloudinary.js";
 import {
   buildWalkthroughModel,
+  ensureWalkthroughModel,
   rendererReadiness,
   walkthroughModelPath,
 } from "../lib/walkthroughRenderer.js";
@@ -235,21 +235,27 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
 
 // GLTFLoader cannot attach the app's bearer token, so model URLs are unlisted,
 // content-addressed cache keys. Only strict renderer-generated names can pass.
+//
+// When the exporter runs on Modal the geometry is not on this disk yet, so the
+// first request for a scene fetches it once and every later request — including
+// the repeat views that make up most of the traffic — is served locally.
 router.get("/realtime/model/:filename", async (req, res) => {
   const { filename } = req.params;
-  const modelPath = walkthroughModelPath(filename);
-  if (!modelPath) return res.status(400).json({ message: "Invalid walkthrough model." });
+  if (!walkthroughModelPath(filename)) {
+    return res.status(400).json({ message: "Invalid walkthrough model." });
+  }
 
   try {
-    await fs.access(modelPath);
+    const modelPath = await ensureWalkthroughModel(filename);
     res.set({
       "Content-Type": "model/gltf-binary",
       "Cache-Control": "public, max-age=604800, immutable",
     });
     return res.sendFile(modelPath);
   } catch (error) {
-    if (error.code !== "ENOENT") console.error("GET /walkthrough/realtime/model error:", error.message);
-    return res.status(404).json({ message: "This walkthrough model has expired." });
+    if (error.notFound) return res.status(404).json({ message: "This walkthrough model has expired." });
+    console.error("GET /walkthrough/realtime/model error:", error.message);
+    return res.status(502).json({ message: "This walkthrough model could not be loaded." });
   }
 });
 

@@ -1,3 +1,9 @@
+# The all-in-one API image: Express plus the walkthrough exporter in one
+# container. It is one of the two supported arrangements — the other runs the
+# exporter on Modal (`modal/walkthrough_app.py`) and lets the API deploy to a
+# plain Node host, which is cheaper because only this image needs the 2 GB of
+# memory Open3D wants. See DEPLOYMENT.md. Leave MODAL_WALKTHROUGH_ENDPOINT_URL
+# unset to use the Python installed below.
 FROM node:20-bookworm-slim
 
 # The walkthrough exporter is Python. Open3D's wheel links Filament, OpenMP and
