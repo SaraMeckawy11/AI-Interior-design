@@ -14,6 +14,102 @@ async function getImageBase64FromUrl(url) {
   return buffer.toString("base64");
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ───────────────────────────────────────────────────────────────────────────
+// Inference engines
+//
+// RunPod runs first and Modal catches whatever it drops. The two take the same
+// brief and return the same thing — a base64 PNG — so the route below does not
+// care which one answered.
+//
+// They are not the same engine, though: RunPod is the SD 1.5 + ControlNet
+// handler in `interiorAI/`, Modal is FLUX.2 [klein]. A design served by the
+// fallback will not look like one served by the primary. The logs name the
+// engine for exactly that reason.
+// ───────────────────────────────────────────────────────────────────────────
+
+const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || "9x2kmfa8z6483c";
+const RUNPOD_POLL_INTERVAL_MS = 2_000;
+// 30 polls at 2s covers a warm worker comfortably. A cold RunPod worker pulling
+// its image can take longer than this; that is a timeout, and a timeout is one
+// of the failures Modal is here to absorb.
+const RUNPOD_MAX_POLLS = 30;
+
+/**
+ * Submit to the RunPod serverless endpoint and poll until it finishes.
+ *
+ * Throws on anything that is not a finished image, so the caller has one thing
+ * to catch rather than a status code to interpret.
+ */
+async function generateWithRunPod(payload) {
+  if (!process.env.RUNPOD_API_KEY) throw new Error("RUNPOD_API_KEY is not set");
+
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.RUNPOD_API_KEY}`,
+  };
+
+  // The handler reads `event["input"]`; the Gen-Klein-only controls in the
+  // payload are ignored by it rather than rejected.
+  const jobResponse = await axios.post(
+    `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/run`,
+    { input: payload },
+    { headers, timeout: 30_000 },
+  );
+
+  const jobId = jobResponse.data?.id;
+  if (!jobId) throw new Error("RunPod did not return a job id");
+  console.log("RunPod job submitted:", jobId, "initial status:", jobResponse.data.status);
+
+  for (let attempt = 1; attempt <= RUNPOD_MAX_POLLS; attempt += 1) {
+    await sleep(RUNPOD_POLL_INTERVAL_MS);
+
+    const statusResp = await axios.get(
+      `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/status/${jobId}`,
+      { headers, timeout: 30_000 },
+    );
+    const status = statusResp.data?.status;
+    console.log(`Polling RunPod [attempt ${attempt}]:`, status);
+
+    if (status === "COMPLETED") {
+      const generated = statusResp.data?.output?.generatedImage;
+      if (!generated) throw new Error("RunPod completed without returning an image");
+      return generated;
+    }
+    if (status === "FAILED" || status === "CANCELLED" || status === "TIMED_OUT") {
+      throw new Error(`RunPod job ${status.toLowerCase()}: ${statusResp.data?.error || "no detail"}`);
+    }
+  }
+
+  throw new Error(`RunPod job did not finish within ${(RUNPOD_MAX_POLLS * RUNPOD_POLL_INTERVAL_MS) / 1000}s`);
+}
+
+/** Ask the Modal router, which picks between Gen-Klein and the ControlNet path. */
+async function generateWithModal(payload) {
+  if (!process.env.MODAL_ENDPOINT_URL) throw new Error("MODAL_ENDPOINT_URL is not set");
+
+  const modalResp = await axios.post(process.env.MODAL_ENDPOINT_URL, payload, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.MODAL_API_KEY}`,
+    },
+    timeout: 180_000, // 3 min — covers worst-case cold start + inference
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
+
+  console.log(
+    "Modal job completed:",
+    "prompt=", modalResp.data?.prompt?.slice(0, 80),
+    "has_window=", modalResp.data?.has_window,
+  );
+
+  const generated = modalResp.data?.generatedImage || null;
+  if (!generated) throw new Error("Modal did not return a generated image");
+  return generated;
+}
+
 router.post("/", isAuthenticated, async (req, res) => {
   try {
     const {
@@ -85,7 +181,7 @@ router.post("/", isAuthenticated, async (req, res) => {
     const imageBase64 = image.startsWith("data:image") ? image.split(",")[1] : image;
     console.log("Prepared base64 for AI API, length:", imageBase64.length);
 
-    // Submit job to Modal (synchronous - no polling needed)
+    // One brief, two engines. RunPod reads it from `input`, Modal from the body.
     const payload = {
       image: imageBase64,
       room_type: roomType,
@@ -105,44 +201,30 @@ router.post("/", isAuthenticated, async (req, res) => {
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
     };
 
-    console.log("Submitting job to Modal endpoint");
-
+    // RunPod first, Modal second. The design credit was already spent above and
+    // is not refunded if both fail — same as before this fallback existed.
     let generatedImageBase64 = null;
+    let engine = "runpod";
+
+    console.log("Submitting job to RunPod endpoint", RUNPOD_ENDPOINT_ID);
     try {
-      const modalResp = await axios.post(
-        process.env.MODAL_ENDPOINT_URL,
-        payload,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.MODAL_API_KEY}`,
-          },
-          timeout: 180_000, // 3 min — covers worst-case cold start + inference
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-        }
-      );
-
-      generatedImageBase64 = modalResp.data?.generatedImage || null;
-      console.log(
-        "Modal job completed:",
-        "prompt=", modalResp.data?.prompt?.slice(0, 80),
-        "has_window=", modalResp.data?.has_window,
-        "imageLen=", generatedImageBase64?.length
-      );
-    } catch (err) {
-      console.error(
-        "Modal request failed:",
-        err.response?.status,
-        err.response?.data || err.message
-      );
-      return res.status(502).json({ message: "AI service failed. Please try again." });
+      generatedImageBase64 = await generateWithRunPod(payload);
+    } catch (runpodError) {
+      console.error("RunPod request failed, falling back to Modal:", runpodError.message);
+      engine = "modal";
+      try {
+        generatedImageBase64 = await generateWithModal(payload);
+      } catch (modalError) {
+        console.error(
+          "Modal request failed too:",
+          modalError.response?.status,
+          modalError.response?.data || modalError.message,
+        );
+        return res.status(502).json({ message: "AI service failed. Please try again." });
+      }
     }
 
-    if (!generatedImageBase64) {
-      console.warn("Modal did not return a generated image");
-      return res.status(502).json({ message: "AI service returned no image" });
-    }
+    console.log(`Design generated by ${engine}, imageLen=${generatedImageBase64.length}`);
 
     // Upload AI-generated image to Cloudinary
     let generatedImageUrl = null;

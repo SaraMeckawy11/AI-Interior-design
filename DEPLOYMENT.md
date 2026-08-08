@@ -6,8 +6,10 @@ are bundled inside this repository's backend.
 
 | Piece | Where it runs | Must be redeployed? |
 |---|---|---|
-| Gen‑Klein (FLUX.2 [klein]) inference | Modal | **Yes** |
-| Node API + bundled Livinai_web GLB exporter | backend Docker image | **Yes** |
+| SD 1.5 + ControlNet inference (primary) | RunPod (`interiorAI`) | **Yes** |
+| Gen‑Klein (FLUX.2 [klein]) inference (fallback) | Modal | **Yes** |
+| Livinai_web GLB exporter | Modal | **Yes** |
+| Node API | Render (native Node runtime) | **Yes** |
 | Expo app (3D walkthrough, new UI) | EAS build / OTA update | **Yes** |
 | RunPod handlers (`interiorAI/`, `interio/`) | RunPod | Only if you still use them |
 
@@ -101,53 +103,119 @@ Redeploy `backend/`. Changes:
   removed from Cloudinary. Existing documents keep the old behaviour; new ones
   delete cleanly.
 
-Deploy `backend/Dockerfile` with the service's **root/build directory set to
-`backend`**. It installs Node, Python, Open3D, Shapely and
-Trimesh, then runs the normal Express API. The API launches
-`backend/renderer/render_worker.py` directly and serves its content-addressed
-GLB from the same `/api/walkthrough` origin. There is no renderer URL,
-`INTERIOR_PLAN_ROOT`, second checkout, or sidecar service to configure.
+### Where the walkthrough exporter runs
 
-### The Render service must use the Docker runtime — this is not optional
+The exporter is Python, and Open3D links system libraries (`libgl1`, `libegl1`,
+the X11 set) that a package manager has to install. Render's native Node runtime
+gives you no root and no `apt`, so there are exactly two working arrangements.
+`backend/src/lib/walkthroughRenderer.js` supports both and picks between them on
+one environment variable:
 
-A Render **Node** service builds this repository perfectly, starts, and serves
-every route except the one that matters here. It never runs `backend/Dockerfile`,
-so nothing ever installs `backend/renderer/requirements.txt`, and the first
-person to open the Explore step gets:
+| `MODAL_WALKTHROUGH_ENDPOINT_URL` | Render runtime | Where Python runs | Memory Render needs |
+|---|---|---|---|
+| **set** | Node (native) | Modal, per request | whatever the API alone needs |
+| unset | Docker (`backend/Dockerfile`) | in the API container | **2 GB minimum** |
+
+Everything else is identical. Either way the app calls
+`POST /api/walkthrough/realtime/session`, gets metadata plus a relative
+`modelUrl`, and loads the GLB from the same `/api/walkthrough` origin. There is
+no renderer URL in the app, no `INTERIOR_PLAN_ROOT`, and no second checkout.
+
+#### Option 1 — exporter on Modal (recommended)
+
+The Node service stays on Render's native runtime and never touches Python.
+Deploy the exporter first, because the API needs the URL it prints:
+
+```bash
+cd modal && modal deploy walkthrough_app.py
+```
+
+That publishes three endpoints built from `backend/renderer` — the same exporter
+source and the same bundled assets, in an image that `apt-get`s what Open3D
+needs:
+
+```
+POST https://<workspace>--livinai-walkthrough-build.modal.run
+GET  https://<workspace>--livinai-walkthrough-model.modal.run?name=<id>.glb
+GET  https://<workspace>--livinai-walkthrough-health.modal.run
+```
+
+Set **only the first** on the Render service; the other two are derived from it
+by name, so there is no way to configure two of the three and wonder why:
+
+```
+MODAL_WALKTHROUGH_ENDPOINT_URL=https://sara123meckawy--livinai-walkthrough-build.modal.run
+```
+
+It reuses the existing `livinai-api-key` secret, so `MODAL_API_KEY` on Render is
+already the right token.
+
+Building and downloading are separate calls on purpose. A furnished multi-room
+GLB runs to roughly 4–20 MB, and returning it inline would make the Render
+instance hold the whole file in memory just to write it to disk. Instead the
+session response carries metadata only, and the route that serves the model
+streams it from Modal once and caches it on disk — so repeat views of the same
+home never leave Render. Scenes are content-addressed, so a name that already
+exists is by definition the right file and is never re-fetched.
+
+Cost and latency: the exporter is a CPU function with 2 GB of memory and a
+five-minute idle window. You pay for the seconds it runs rather than for a
+permanently reserved instance — but the first request after an idle period waits
+for a cold container. Someone adjusting finishes on the same home reuses the
+warm one.
+
+Smoke-test the image before pointing Render at it:
+
+```bash
+LIVINAI_API_KEY=<your api key> modal run walkthrough_app.py
+```
+
+#### Option 2 — everything in one Docker image
+
+Leave `MODAL_WALKTHROUGH_ENDPOINT_URL` unset and deploy `backend/Dockerfile`
+with the Render service's runtime set to **Docker**, Dockerfile path
+`./backend/Dockerfile`, Docker context `./backend`. It installs Node, Python,
+Open3D, Shapely and Trimesh, then runs the normal Express API, which spawns
+`render_worker.py` as a child process.
+
+Render fixes native-vs-Docker when a service is created and offers no switch
+afterwards, so an existing Node service has to be recreated — or a new Docker
+service made, the environment variables copied across, and
+`EXPO_PUBLIC_SERVER_URI` repointed — to take this path.
+
+**Memory.** Open3D plus a furnished multi-room scene does not fit comfortably in
+512 MB. If builds succeed but requests die with no error and the instance
+restarts, that is the OOM killer — this option needs at least 2 GB.
+
+#### How a broken renderer announces itself
+
+Whichever option you pick, a misconfiguration surfaces before a user finds it:
+
+* Both images **fail to build** if the Python imports do not work — the
+  Dockerfile and `modal/walkthrough_app.py` each run
+  `import numpy, PIL, shapely, trimesh, open3d` as a build step.
+* `GET /healthz` reports renderer readiness, and the same check is logged once
+  at boot: `Walkthrough renderer ready on Modal (…).`,
+  `Walkthrough renderer ready (python3).`, or `… UNAVAILABLE: …`.
+* `POST /api/walkthrough/realtime/session` returns `503 RENDERER_UNAVAILABLE`
+  immediately instead of starting doomed work, and the app shows a plain
+  sentence with the technical detail behind a disclosure rather than printing a
+  traceback at the user.
+
+A failed readiness answer is re-checked after 30 seconds rather than cached for
+the life of the process, so deploying the missing piece fixes the API without
+also restarting it.
+
+The tell for the misconfiguration that started all this — the Node runtime with
+no `MODAL_WALKTHROUGH_ENDPOINT_URL` set — is still:
 
 ```
 File "/opt/render/project/src/backend/renderer/render_worker.py", line 23, in <module>
 ModuleNotFoundError: No module named 'numpy'
 ```
 
-`/opt/render/project/src` in a traceback is the giveaway: that is the native
-runtime's checkout path. The Docker image runs from `/app`. There is no build
-command that fixes a Node service — Open3D needs system libraries (`libgl1`,
-`libegl1`, the X11 set) that only the Dockerfile can `apt-get install`.
-
-To fix it:
-
-1. Render Dashboard → the API service → **Settings** → set the runtime/language
-   to **Docker**, Dockerfile path `./backend/Dockerfile`, Docker context
-   `./backend`. If your service has no such setting, create a **new** Docker web
-   service (or apply the `render.yaml` Blueprint at the repository root), copy
-   the environment variables across, and repoint `EXPO_PUBLIC_SERVER_URI`.
-2. Redeploy.
-
-Two things now make a broken environment obvious long before a user finds it:
-
-* The image **fails to build** if the Python imports do not work — the Dockerfile
-  runs `import numpy, PIL, shapely, trimesh, open3d` as its last build step.
-* `GET /healthz` reports renderer readiness, and the same check is logged once at
-  boot (`Walkthrough renderer ready (python3).` or `… UNAVAILABLE: …`).
-  `POST /api/walkthrough/realtime/session` returns `503 RENDERER_UNAVAILABLE`
-  immediately instead of spawning a doomed process, and the app shows a plain
-  sentence with the technical detail behind a disclosure rather than printing a
-  traceback at the user.
-
-**Memory.** Open3D plus a furnished multi-room scene does not fit comfortably in
-512 MB. If builds succeed but requests die with no error and the instance
-restarts, that is the OOM killer — move to an instance with at least 2 GB.
+`/opt/render/project/src` is the native runtime's checkout path. Set the
+variable, or move to Docker.
 
 ---
 
@@ -186,13 +254,31 @@ version.
 
 ---
 
-## 4. RunPod handlers (optional)
+## 4. RunPod handlers — the primary engine
 
-`interiorAI/` and `interio/` are no longer in the request path — the backend
-talks to Modal. They were updated to the shared prompt engine anyway so they do
-not drift. If you still run them, rebuild the images; each folder now contains
-its own copy of `prompt_engine.py`, which the Dockerfile picks up with the rest
-of the directory.
+`POST /api/designs` calls **RunPod first and falls back to Modal**. The
+`interiorAI/` handler on endpoint `9x2kmfa8z6483c` serves every design it can;
+Modal only answers when RunPod errors, returns no image, or does not finish
+within 60 seconds.
+
+Both handlers share `prompt_engine.py`, so a design does not change meaning when
+it crosses over — but it does change engine. RunPod is SD 1.5 + ControlNet,
+Modal is FLUX.2 [klein], and they do not produce the same picture. Every
+generation logs which one answered:
+
+```
+Design generated by runpod, imageLen=…
+RunPod request failed, falling back to Modal: …
+```
+
+Rebuild the RunPod images after changing anything under `interiorAI/` or
+`interio/`; each folder carries its own copy of `prompt_engine.py`, which the
+Dockerfile picks up with the rest of the directory. The endpoint builds from the
+`interiorAI` branch, so pushing to that branch is what triggers a rebuild.
+
+Override the endpoint with `RUNPOD_ENDPOINT_ID` if you move it. With
+`RUNPOD_API_KEY` unset the route skips RunPod and goes straight to Modal, which
+is the quickest way to take the primary out of the path without a code change.
 
 ---
 
