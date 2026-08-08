@@ -8,9 +8,12 @@ import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -43,7 +46,7 @@ import PlanCanvas, {
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
 import COLORS from "../../constants/colors";
-import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
+import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
   COLOR_MOODS,
   CURTAIN_DESIGNS,
@@ -141,6 +144,24 @@ const VIEW_MODES = [
   { key: "plan", icon: "map-outline", label: "Bird" },
 ];
 
+/** How long the "drag to look around" coach mark stays up before fading. */
+const HINT_VISIBLE_MS = 5200;
+
+/**
+ * What the exporter is doing, in the order it does it.
+ *
+ * These rotate under the progress bar during a build. They are honest about the
+ * work rather than a percentage: the exporter reports no progress, and a
+ * fabricated number that stalls at 80% is worse than no number at all.
+ */
+const BUILD_STEPS = [
+  "Squaring up your walls and openings",
+  "Choosing furniture that fits each room",
+  "Leaving room to walk between the pieces",
+  "Laying floors, paint and fabrics",
+  "Lighting the rooms",
+];
+
 const clonePoints = (points = []) => points.map((point) => [...point]);
 const clonePlanSnapshot = ({ rooms, openings, roomConfigs, selectedRoom }) => ({
   rooms: rooms.map(clonePoints),
@@ -216,6 +237,10 @@ export default function WalkthroughScreen() {
   const [exactSceneBaseUrl, setExactSceneBaseUrl] = useState("");
   const [exactSceneLoading, setExactSceneLoading] = useState(false);
   const [exactSceneError, setExactSceneError] = useState("");
+  // The sentence a person reads and the diagnostics an engineer needs are two
+  // different things. Keeping them apart is what stopped a Python traceback
+  // from being presented to someone as an explanation of their own home.
+  const [exactSceneDetail, setExactSceneDetail] = useState("");
   const [exactSceneRetry, setExactSceneRetry] = useState(0);
 
   // The style step asks seven questions. Four of them decide how a home reads;
@@ -270,7 +295,8 @@ export default function WalkthroughScreen() {
       setExactScene(null);
       setExactSceneBaseUrl("");
       setExactSceneLoading(false);
-      setExactSceneError("The Livinai API URL is not configured.");
+      setExactSceneError("This build of Livinai is not pointed at a server yet.");
+      setExactSceneDetail("EXPO_PUBLIC_SERVER_URI is empty.");
       return undefined;
     }
 
@@ -280,6 +306,7 @@ export default function WalkthroughScreen() {
     setSceneInfo(null);
     setExactSceneLoading(true);
     setExactSceneError("");
+    setExactSceneDetail("");
 
     (async () => {
       try {
@@ -305,10 +332,22 @@ export default function WalkthroughScreen() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(data.detail || data.message || "The exact Livinai_web scene is unavailable.");
+          // `message` is written for the person holding the phone; `detail`
+          // carries whatever the server can say about the cause. Never promote
+          // `detail` into the headline — that is how a stack trace becomes copy.
+          const failure = new Error(
+            data.message
+              || (response.status >= 500
+                ? "The 3D service could not build your home."
+                : "Livinai could not start this walkthrough."),
+          );
+          failure.detail = data.detail || `HTTP ${response.status}`;
+          throw failure;
         }
         if (!data.modelUrl || !Array.isArray(data.furniture) || !Array.isArray(data.roomCenters)) {
-          throw new Error("The Livinai_web renderer returned an incomplete scene.");
+          const failure = new Error("Your home came back from the 3D service incomplete.");
+          failure.detail = "The response was missing modelUrl, furniture or roomCenters.";
+          throw failure;
         }
         if (controller.signal.aborted) return;
         const origin = rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
@@ -317,7 +356,17 @@ export default function WalkthroughScreen() {
       } catch (error) {
         if (error.name === "AbortError") return;
         setExactScene(null);
-        setExactSceneError(error.message || "The exact Livinai_web scene is unavailable.");
+        // A fetch that never reached the server throws a bare "Network request
+        // failed", which tells someone on a hotel Wi-Fi nothing about what to do.
+        const offline = !error.detail && /network|failed to fetch/i.test(error.message || "");
+        setExactSceneError(
+          offline
+            ? "Livinai could not reach the 3D service."
+            : error.message || "Your home could not be built in 3D.",
+        );
+        setExactSceneDetail(
+          offline ? "The request never reached the server. Check your connection." : error.detail || "",
+        );
       } finally {
         if (!controller.signal.aborted) setExactSceneLoading(false);
       }
@@ -1294,6 +1343,7 @@ export default function WalkthroughScreen() {
               exactSceneBaseUrl={exactSceneBaseUrl}
               exactSceneLoading={exactSceneLoading}
               exactSceneError={exactSceneError}
+              exactSceneDetail={exactSceneDetail}
               viewMode={viewMode}
               night={night}
               selectedRoom={selectedRoom}
@@ -1313,9 +1363,11 @@ export default function WalkthroughScreen() {
               onDiagnostic={setNotice}
               onExactError={(message) => {
                 setExactScene(null);
-                setExactSceneError(message);
+                setExactSceneError("Your home was built, but it could not be opened here.");
+                setExactSceneDetail(message);
               }}
               onRetryExact={() => setExactSceneRetry((value) => value + 1)}
+              onBackToDesign={goBack}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
               onFocusRoom={focusRoom}
@@ -1767,6 +1819,7 @@ function WalkthroughStage({
   exactSceneBaseUrl,
   exactSceneLoading,
   exactSceneError,
+  exactSceneDetail,
   viewMode,
   night,
   selectedRoom,
@@ -1786,6 +1839,7 @@ function WalkthroughStage({
   onDiagnostic,
   onExactError,
   onRetryExact,
+  onBackToDesign,
   onChangeMode,
   onToggleNight,
   onFocusRoom,
@@ -1801,11 +1855,20 @@ function WalkthroughStage({
   const sheetOpen = !!inspected || panel === "ai";
   const showStick = viewMode === "walk" && !showingAi && !sheetOpen;
   const showRooms = roomConfigs.length > 1 && !showingAi;
+  // Controls only make sense once there is a home to point them at. Showing a
+  // view switcher and a Render button over an error is an invitation to press
+  // things that cannot work.
+  const showControls = !!exactScene;
 
   const drive = useCallback(
     (x, y) => viewerRef.current?.setJoystick(x, y),
     [viewerRef],
   );
+
+  // A coach mark is only useful the first time the controls mean something new.
+  // Without this the tip replayed every time a furniture sheet was dismissed.
+  const coached = useRef(new Set());
+  const showHint = !showingAi && !sheetOpen && !coached.current.has(viewMode);
 
   const status = describeScene(sceneInfo);
 
@@ -1834,23 +1897,14 @@ function WalkthroughStage({
       ) : (
         <View style={styles.exactSceneState}>
           {exactSceneLoading ? (
-            <>
-              <ActivityIndicator size="large" color={COLORS.brand800} />
-              <Text style={styles.exactSceneTitle}>Building the exact Livinai_web scene</Text>
-              <Text style={styles.exactSceneBody}>
-                Loading the original dimensions, furniture, placement and PBR materials.
-              </Text>
-            </>
+            <SceneBuildingState rooms={roomConfigs.length} />
           ) : (
-            <>
-              <Ionicons name="warning-outline" size={30} color={COLORS.danger} />
-              <Text style={styles.exactSceneTitle}>Exact walkthrough unavailable</Text>
-              <Text style={styles.exactSceneBody}>{exactSceneError || "The canonical renderer did not respond."}</Text>
-              <Pressable style={styles.exactSceneRetry} onPress={onRetryExact}>
-                <Ionicons name="refresh" size={16} color={COLORS.white} />
-                <Text style={styles.exactSceneRetryText}>Try again</Text>
-              </Pressable>
-            </>
+            <SceneErrorState
+              message={exactSceneError}
+              detail={exactSceneDetail}
+              onRetry={onRetryExact}
+              onBack={onBackToDesign}
+            />
           )}
         </View>
       )}
@@ -1871,6 +1925,26 @@ function WalkthroughStage({
         </View>
       )}
 
+      {/* Floating white controls sit on top of whatever the camera happens to
+          be looking at — a pale wall, a window, a bright render. These scrims
+          are what keep them readable in every one of those cases without
+          darkening the room itself. */}
+      {showControls && (
+        <>
+          <LinearGradient
+            colors={["rgba(20,26,21,0.34)", "rgba(20,26,21,0)"]}
+            style={styles.scrimTop}
+            pointerEvents="none"
+          />
+          <LinearGradient
+            colors={["rgba(20,26,21,0)", "rgba(20,26,21,0.40)"]}
+            style={styles.scrimBottom}
+            pointerEvents="none"
+          />
+        </>
+      )}
+
+      {showControls && (
       <View
         style={[
           styles.viewerOverlay,
@@ -1881,18 +1955,24 @@ function WalkthroughStage({
         {/* ── Top cluster ────────────────────────────────────────────────── */}
         <View style={styles.overlayTop} pointerEvents="box-none">
           <View style={styles.viewControls} pointerEvents="box-none">
-            <View style={styles.segmented}>
+            <View style={styles.segmented} accessibilityRole="tablist">
               {VIEW_MODES.map((item) => {
                 const active = viewMode === item.key;
                 return (
                   <Pressable
                     key={item.key}
-                    accessibilityRole="button"
+                    accessibilityRole="tab"
+                    accessibilityLabel={`${item.label} view`}
                     accessibilityState={{ selected: active }}
-                    style={[styles.segment, active && styles.segmentActive]}
+                    android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
+                    style={({ pressed }) => [
+                      styles.segment,
+                      active && styles.segmentActive,
+                      pressed && !active && styles.segmentPressed,
+                    ]}
                     onPress={() => onChangeMode(item.key)}
                   >
-                    <Ionicons name={item.icon} size={15} color={active ? COLORS.white : COLORS.textSecondary} />
+                    <Ionicons name={item.icon} size={16} color={active ? COLORS.white : COLORS.textSecondary} />
                     <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
                       {item.label}
                     </Text>
@@ -1904,7 +1984,12 @@ function WalkthroughStage({
               accessibilityRole="switch"
               accessibilityLabel={night ? "Switch to daylight" : "Switch to evening light"}
               accessibilityState={{ checked: night }}
-              style={[styles.roundButton, night && styles.roundButtonActive]}
+              android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
+              style={({ pressed }) => [
+                styles.roundButton,
+                night && styles.roundButtonActive,
+                pressed && styles.pressedSurface,
+              ]}
               onPress={onToggleNight}
             >
               <Ionicons name={night ? "moon" : "sunny-outline"} size={19} color={night ? COLORS.white : COLORS.textPrimary} />
@@ -1912,42 +1997,21 @@ function WalkthroughStage({
           </View>
 
           {showRooms && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.roomStrip}
-              contentContainerStyle={styles.roomStripContent}
-            >
-              {roomConfigs.map((room, index) => {
-                const active = selectedRoom === index;
-                return (
-                  <Pressable
-                    key={`jump-${index}`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    style={[styles.roomPill, active && styles.roomPillActive]}
-                    onPress={() => onFocusRoom(index)}
-                  >
-                    <Text style={[styles.roomPillText, active && styles.roomPillTextActive]} numberOfLines={1}>
-                      {room.name || room.roomType}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            <RoomStrip rooms={roomConfigs} selected={selectedRoom} onSelect={onFocusRoom} />
           )}
 
-          {!showingAi && !sheetOpen && (
-            <View style={styles.hintPill} pointerEvents="none">
-              <Ionicons name={viewMode === "walk" ? "hand-left-outline" : "sync-outline"} size={14} color={COLORS.white} />
-              <Text style={styles.hintText} numberOfLines={1}>
-                {viewMode === "walk"
+          {showHint && (
+            <CoachHint
+              mode={viewMode}
+              onDone={() => coached.current.add(viewMode)}
+              text={
+                viewMode === "walk"
                   ? "Drag to look around · Tap any piece to edit it"
                   : viewMode === "orbit"
                     ? "Drag to orbit the home · Tap any piece to edit it"
-                    : "Drag to rotate the furnished plan"}
-              </Text>
-            </View>
+                    : "Drag to rotate the furnished plan"
+              }
+            />
           )}
         </View>
 
@@ -2138,7 +2202,14 @@ function WalkthroughStage({
 
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              <View style={styles.statusChip}>
+              {/* The chip reports work the person did not start and cannot see
+                  finish, so it is announced rather than only drawn. */}
+              <View
+                style={styles.statusChip}
+                accessibilityRole="text"
+                accessibilityLiveRegion="polite"
+                accessibilityLabel={status.label}
+              >
                 {status.busy
                   ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
                   : <View style={styles.statusDot} />}
@@ -2146,8 +2217,14 @@ function WalkthroughStage({
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Open AI render options"
-                style={[styles.dockPrimary, panel === "ai" && styles.dockPrimaryActive]}
+                accessibilityLabel="AI render options"
+                accessibilityState={{ expanded: panel === "ai" }}
+                android_ripple={{ color: "rgba(255,255,255,0.18)", borderless: false }}
+                style={({ pressed }) => [
+                  styles.dockPrimary,
+                  panel === "ai" && styles.dockPrimaryActive,
+                  pressed && styles.pressedSurface,
+                ]}
                 onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
               >
                 <Ionicons name="sparkles" size={18} color={COLORS.white} />
@@ -2156,7 +2233,13 @@ function WalkthroughStage({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Take a photo of this view"
-                style={styles.dockIcon}
+                accessibilityState={{ busy: busy === "capture", disabled: busy === "capture" }}
+                android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
+                style={({ pressed }) => [
+                  styles.dockIcon,
+                  pressed && styles.pressedSurface,
+                  busy === "capture" && styles.dockIconBusy,
+                ]}
                 onPress={onCapture}
                 disabled={busy === "capture"}
               >
@@ -2168,6 +2251,277 @@ function WalkthroughStage({
           )}
         </View>
       </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * The room jump strip.
+ *
+ * Two things it now does that a plain map over pills did not. It keeps the
+ * selected room on screen — walking into room seven used to leave its pill
+ * scrolled off the left with nothing to say so — and its targets clear the 44pt
+ * minimum, which the previous 34pt pills did not.
+ */
+function RoomStrip({ rooms, selected, onSelect }) {
+  const scroller = useRef(null);
+  const offsets = useRef([]);
+
+  useEffect(() => {
+    const x = offsets.current[selected];
+    if (typeof x !== "number") return;
+    // Leave a pill's worth of room to the left so the selected one never sits
+    // flush against the edge, where it reads as "the first room".
+    scroller.current?.scrollTo({ x: Math.max(0, x - ms(64)), animated: true });
+  }, [selected]);
+
+  return (
+    <ScrollView
+      ref={scroller}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.roomStrip}
+      contentContainerStyle={styles.roomStripContent}
+      accessibilityRole="tablist"
+    >
+      {rooms.map((room, index) => {
+        const active = selected === index;
+        return (
+          <Pressable
+            key={`jump-${index}`}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: false }}
+            hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+            onLayout={(event) => { offsets.current[index] = event.nativeEvent.layout.x; }}
+            style={({ pressed }) => [
+              styles.roomPill,
+              active && styles.roomPillActive,
+              pressed && !active && styles.pressedSurface,
+            ]}
+            onPress={() => onSelect(index)}
+          >
+            <Text style={[styles.roomPillText, active && styles.roomPillTextActive]} numberOfLines={1}>
+              {room.name || room.roomType}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+/**
+ * The "drag to look around" coach mark.
+ *
+ * It used to be permanent. A tip that never leaves stops being a tip and
+ * becomes a label covering the room the person came here to look at, so it now
+ * fades out on its own and comes back only when the controls change meaning —
+ * which is exactly when it is worth reading again.
+ */
+function CoachHint({ mode, text, onDone }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const [mounted, setMounted] = useState(true);
+  const done = useRef(onDone);
+  done.current = onDone;
+
+  useEffect(() => {
+    setMounted(true);
+    opacity.setValue(0);
+    const animation = Animated.sequence([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: MOTION.base,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.delay(HINT_VISIBLE_MS),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: MOTION.slow,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(({ finished }) => {
+      if (!finished) return;
+      done.current?.();
+      setMounted(false);
+    });
+    return () => animation.stop();
+  }, [mode, opacity]);
+
+  if (!mounted) return null;
+
+  return (
+    <Animated.View style={[styles.hintPill, { opacity }]} pointerEvents="none">
+      <Ionicons name={mode === "walk" ? "hand-left-outline" : "sync-outline"} size={14} color={COLORS.white} />
+      <Text style={styles.hintText} numberOfLines={2}>{text}</Text>
+    </Animated.View>
+  );
+}
+
+/**
+ * Waiting for the home to be built.
+ *
+ * A bare spinner over a blank panel gave no sense of scale or progress on a job
+ * that can take the better part of a minute. This says what is being built, how
+ * big it is, and — through a moving track and rotating captions — that the wait
+ * is proceeding rather than stuck.
+ */
+function SceneBuildingState({ rooms = 0 }) {
+  const sweep = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const [step, setStep] = useState(0);
+  // Measured rather than assumed: the card is a percentage of the viewport, so
+  // a hard-coded travel distance would under- or overshoot on other phones.
+  const [trackWidth, setTrackWidth] = useState(0);
+  const barWidth = Math.max(ms(48), trackWidth * 0.36);
+
+  useEffect(() => {
+    const track = Animated.loop(
+      Animated.timing(sweep, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    const breathe = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    track.start();
+    breathe.start();
+    const ticker = setInterval(() => setStep((value) => (value + 1) % BUILD_STEPS.length), 2600);
+    return () => { track.stop(); breathe.stop(); clearInterval(ticker); };
+  }, [pulse, sweep]);
+
+  return (
+    <View style={styles.stateCard} accessibilityRole="progressbar" accessibilityLabel={BUILD_STEPS[step]}>
+      <Animated.View
+        style={[
+          styles.stateIconBrand,
+          {
+            transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }],
+            opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }),
+          },
+        ]}
+      >
+        <Ionicons name="home-outline" size={26} color={COLORS.primaryDark} />
+      </Animated.View>
+
+      <Text style={styles.stateTitle}>Building your home in 3D</Text>
+      <Text style={styles.stateBody}>
+        {rooms > 0
+          ? `Measuring ${rooms === 1 ? "your room" : `all ${rooms} rooms`}, then furnishing them with the same pieces and finishes Livinai uses on the web.`
+          : "Measuring your rooms, then furnishing them with the same pieces and finishes Livinai uses on the web."}
+      </Text>
+
+      {/* Indeterminate, because the exporter cannot report a percentage. A bar
+          that invents one is worse than a bar that only proves it is alive. */}
+      <View
+        style={styles.progressTrack}
+        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+      >
+        {trackWidth > 0 && (
+          <Animated.View
+            style={[
+              styles.progressBar,
+              {
+                width: barWidth,
+                transform: [{
+                  translateX: sweep.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-barWidth, trackWidth],
+                  }),
+                }],
+              },
+            ]}
+          />
+        )}
+      </View>
+
+      <Text style={styles.stateStep} numberOfLines={1}>{BUILD_STEPS[step]}</Text>
+    </View>
+  );
+}
+
+/**
+ * When the home could not be built.
+ *
+ * The previous version printed whatever the server said straight into the body
+ * copy, which is how a Python traceback — file paths, line numbers,
+ * `ModuleNotFoundError` — ended up being shown to someone decorating a flat as
+ * the explanation for their own home. The sentence a person reads is now plain
+ * language and the diagnostics live behind a disclosure, where they are still
+ * one tap away for whoever is actually debugging the server.
+ */
+function SceneErrorState({ message, detail, onRetry, onBack }) {
+  const [showDetail, setShowDetail] = useState(false);
+
+  return (
+    <View style={styles.stateCard} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+      <View style={styles.stateIconDanger}>
+        <Ionicons name="cube-outline" size={26} color={COLORS.danger} />
+      </View>
+
+      <Text style={styles.stateTitle}>Your home could not be built</Text>
+      <Text style={styles.stateBody}>
+        {message || "The 3D service did not respond. Your plan and your rooms are safe."}
+      </Text>
+      <Text style={styles.stateReassure}>Nothing you drew has been lost.</Text>
+
+      <Pressable
+        accessibilityRole="button"
+        android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+        style={({ pressed }) => [styles.statePrimary, pressed && styles.pressedSurface]}
+        onPress={onRetry}
+      >
+        <Ionicons name="refresh" size={17} color={COLORS.white} />
+        <Text style={styles.statePrimaryText}>Try again</Text>
+      </Pressable>
+
+      {!!onBack && (
+        <Pressable
+          accessibilityRole="button"
+          android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+          style={({ pressed }) => [styles.stateSecondary, pressed && styles.pressedSurface]}
+          onPress={onBack}
+        >
+          {/* Matches the header's own wording for the same destination. */}
+          <Text style={styles.stateSecondaryText}>Back to Style</Text>
+        </Pressable>
+      )}
+
+      {!!detail && (
+        <>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showDetail }}
+            hitSlop={LAYOUT.hitSlop}
+            style={styles.stateDisclosure}
+            onPress={() => setShowDetail((value) => !value)}
+          >
+            <Text style={styles.stateDisclosureText}>
+              {showDetail ? "Hide technical details" : "Technical details"}
+            </Text>
+            <Ionicons
+              name={showDetail ? "chevron-up" : "chevron-down"}
+              size={14}
+              color={COLORS.textTertiary}
+            />
+          </Pressable>
+          {showDetail && (
+            <ScrollView style={styles.stateDetail} contentContainerStyle={styles.stateDetailContent}>
+              <Text style={styles.stateDetailText} selectable>{detail}</Text>
+            </ScrollView>
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -3211,36 +3565,105 @@ const styles = StyleSheet.create({
   // stacks in flow, so adding or hiding a control cannot push another one off
   // screen or under the home indicator.
   viewerWrap: { flex: 1, backgroundColor: COLORS.surfaceAlt },
+  // ── Building / failed states ─────────────────────────────────────────────
+  // Both states are one card on the sunken background rather than loose text
+  // floating in the middle of the screen. The card gives the copy a measured
+  // line length and puts the actions where a person is already looking.
+  //
+  // The previous versions of these two blocks referenced `RADIUS.full` and
+  // `TYPE.button`, neither of which exists in the design tokens, so the retry
+  // button was rendering with no radius and no type at all.
   exactSceneState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: SPACING.xxl,
+    padding: SPACING.lg,
     backgroundColor: COLORS.surfaceAlt,
   },
-  exactSceneTitle: {
-    ...TYPE.h3,
-    color: COLORS.textPrimary,
-    marginTop: SPACING.base,
-    textAlign: "center",
-  },
-  exactSceneBody: {
-    ...TYPE.small,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.sm,
-    textAlign: "center",
-  },
-  exactSceneRetry: {
-    marginTop: SPACING.lg,
-    flexDirection: "row",
+  stateCard: {
+    width: "100%",
+    maxWidth: ms(380),
     alignItems: "center",
-    gap: SPACING.sm,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderRadius: RADIUS.full,
-    backgroundColor: COLORS.brand800,
+    padding: SPACING.xl,
+    borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.surface,
+    ...SHADOW.lg,
   },
-  exactSceneRetryText: { ...TYPE.button, color: COLORS.white },
+  stateIconBrand: {
+    width: ms(60), height: ms(60), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.primaryTint,
+  },
+  stateIconDanger: {
+    width: ms(60), height: ms(60), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.dangerSoft,
+  },
+  stateTitle: {
+    ...TYPE.h3, color: COLORS.textPrimary,
+    marginTop: SPACING.base, textAlign: "center",
+  },
+  stateBody: {
+    ...TYPE.small, color: COLORS.textSecondary,
+    marginTop: SPACING.sm, textAlign: "center",
+  },
+  stateReassure: {
+    ...TYPE.caption, color: COLORS.textTertiary,
+    marginTop: SPACING.sm, textAlign: "center",
+  },
+  progressTrack: {
+    width: "100%", height: 4, marginTop: SPACING.lg,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken,
+    overflow: "hidden",
+  },
+  progressBar: {
+    height: 4, borderRadius: RADIUS.pill, backgroundColor: COLORS.primary,
+  },
+  stateStep: {
+    ...TYPE.caption, color: COLORS.textTertiary,
+    marginTop: SPACING.md, textAlign: "center",
+  },
+  statePrimary: {
+    marginTop: SPACING.lg, alignSelf: "stretch",
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: SPACING.sm, height: ms(50),
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
+  },
+  statePrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  stateSecondary: {
+    marginTop: SPACING.sm, alignSelf: "stretch",
+    alignItems: "center", justifyContent: "center", height: ms(46),
+    borderRadius: RADIUS.pill,
+  },
+  stateSecondaryText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
+  stateDisclosure: {
+    marginTop: SPACING.md,
+    flexDirection: "row", alignItems: "center", gap: SPACING.xs,
+    minHeight: ms(32), paddingHorizontal: SPACING.sm,
+  },
+  stateDisclosureText: { ...TYPE.caption, color: COLORS.textTertiary },
+  stateDetail: {
+    alignSelf: "stretch", maxHeight: ms(140), marginTop: SPACING.sm,
+    borderRadius: RADIUS.sm, backgroundColor: COLORS.surfaceSunken,
+  },
+  stateDetailContent: { padding: SPACING.md },
+  stateDetailText: {
+    fontSize: 11.5, lineHeight: 17, color: COLORS.textSecondary,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+  },
+
+  // Pressed feedback for the floating controls. Opacity rather than a scale
+  // transform: these sit in a row, and scaling one nudges the others.
+  pressedSurface: { opacity: 0.78 },
+  // Legibility scrims. Without them the white control pills sit on whatever the
+  // camera is pointed at, and a pale wall or a bright window leaves them as
+  // white-on-white. They are drawn under the overlay and take no touches.
+  scrimTop: {
+    position: "absolute", top: 0, left: 0, right: 0, height: ms(180),
+  },
+  scrimBottom: {
+    position: "absolute", bottom: 0, left: 0, right: 0, height: ms(220),
+  },
   viewerOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "space-between",
@@ -3254,26 +3677,33 @@ const styles = StyleSheet.create({
     flex: 1, flexDirection: "row", padding: 4,
     backgroundColor: COLORS.surface, borderRadius: RADIUS.pill, ...SHADOW.md,
   },
+  // 40 + the 4pt of track padding above and below clears the 44pt minimum.
   segment: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, height: ms(38), borderRadius: RADIUS.pill,
+    gap: 6, height: ms(40), borderRadius: RADIUS.pill,
   },
   segmentActive: { backgroundColor: COLORS.primaryDark },
+  segmentPressed: { backgroundColor: COLORS.surfaceSunken },
   segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.white },
   roundButton: {
-    width: ms(46), height: ms(46), borderRadius: RADIUS.pill,
+    width: ms(48), height: ms(48), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
     backgroundColor: COLORS.surface, ...SHADOW.md,
   },
   roundButtonActive: { backgroundColor: COLORS.brand800 },
 
   // Negative margins let the strip bleed to the screen edges so a long room
-  // list scrolls off the side instead of stopping inside the gutter.
+  // list scrolls off the side instead of stopping inside the gutter. The
+  // vertical padding is what stops SHADOW.sm being clipped by the ScrollView.
   roomStrip: { marginHorizontal: -SPACING.base, flexGrow: 0 },
-  roomStripContent: { paddingHorizontal: SPACING.base, gap: SPACING.sm },
+  roomStripContent: {
+    paddingHorizontal: SPACING.base, paddingVertical: SPACING.xs, gap: SPACING.sm,
+  },
+  // Was 34pt tall — below the 44pt touch minimum, and these sit in a row where
+  // a mis-tap jumps the camera into the wrong room. 40 plus hitSlop clears it.
   roomPill: {
-    justifyContent: "center", height: ms(34), maxWidth: ms(160),
+    justifyContent: "center", height: ms(40), maxWidth: ms(170),
     paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
     backgroundColor: COLORS.surface, ...SHADOW.sm,
   },
@@ -3283,9 +3713,9 @@ const styles = StyleSheet.create({
 
   hintPill: {
     alignSelf: "flex-start", maxWidth: "100%",
-    flexDirection: "row", alignItems: "center", gap: SPACING.xs,
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs + 2,
-    borderRadius: RADIUS.pill, backgroundColor: "rgba(24, 30, 25, 0.74)",
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.lg, backgroundColor: "rgba(24, 30, 25, 0.82)",
   },
   hintText: { ...TYPE.caption, color: COLORS.white, flexShrink: 1 },
 
@@ -3413,6 +3843,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     backgroundColor: COLORS.surface, ...SHADOW.md,
   },
+  dockIconBusy: { backgroundColor: COLORS.surfaceSunken },
 
   // ── Snapshot sheet ───────────────────────────────────────────────────────
   sheetBackdrop: { flex: 1, backgroundColor: COLORS.scrim, justifyContent: "flex-end" },

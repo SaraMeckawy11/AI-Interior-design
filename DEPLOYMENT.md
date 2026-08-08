@@ -108,6 +108,47 @@ Trimesh, then runs the normal Express API. The API launches
 GLB from the same `/api/walkthrough` origin. There is no renderer URL,
 `INTERIOR_PLAN_ROOT`, second checkout, or sidecar service to configure.
 
+### The Render service must use the Docker runtime — this is not optional
+
+A Render **Node** service builds this repository perfectly, starts, and serves
+every route except the one that matters here. It never runs `backend/Dockerfile`,
+so nothing ever installs `backend/renderer/requirements.txt`, and the first
+person to open the Explore step gets:
+
+```
+File "/opt/render/project/src/backend/renderer/render_worker.py", line 23, in <module>
+ModuleNotFoundError: No module named 'numpy'
+```
+
+`/opt/render/project/src` in a traceback is the giveaway: that is the native
+runtime's checkout path. The Docker image runs from `/app`. There is no build
+command that fixes a Node service — Open3D needs system libraries (`libgl1`,
+`libegl1`, the X11 set) that only the Dockerfile can `apt-get install`.
+
+To fix it:
+
+1. Render Dashboard → the API service → **Settings** → set the runtime/language
+   to **Docker**, Dockerfile path `./backend/Dockerfile`, Docker context
+   `./backend`. If your service has no such setting, create a **new** Docker web
+   service (or apply the `render.yaml` Blueprint at the repository root), copy
+   the environment variables across, and repoint `EXPO_PUBLIC_SERVER_URI`.
+2. Redeploy.
+
+Two things now make a broken environment obvious long before a user finds it:
+
+* The image **fails to build** if the Python imports do not work — the Dockerfile
+  runs `import numpy, PIL, shapely, trimesh, open3d` as its last build step.
+* `GET /healthz` reports renderer readiness, and the same check is logged once at
+  boot (`Walkthrough renderer ready (python3).` or `… UNAVAILABLE: …`).
+  `POST /api/walkthrough/realtime/session` returns `503 RENDERER_UNAVAILABLE`
+  immediately instead of spawning a doomed process, and the app shows a plain
+  sentence with the technical detail behind a disclosure rather than printing a
+  traceback at the user.
+
+**Memory.** Open3D plus a furnished multi-room scene does not fit comfortably in
+512 MB. If builds succeed but requests die with no error and the instance
+restarts, that is the OOM killer — move to an instance with at least 2 GB.
+
 ---
 
 ## 3. Expo app

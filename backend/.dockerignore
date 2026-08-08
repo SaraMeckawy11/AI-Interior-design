@@ -1,7 +1,20 @@
+.git
 node_modules
 .env
+.env.*
 .expo
+
+# Local developer Python environments. These are platform-specific (a Windows
+# .venv in a Linux image is dead weight at best) and the image installs its own
+# from renderer/requirements.txt.
+renderer/.venv
+**/.venv
+**/.triposr_venv
+
+# The GLB cache is content-addressed and rebuilt on demand; shipping one
+# machine's cache would only make the image bigger.
 renderer/generated/*.glb
 renderer/generated/*.json
+
 **/__pycache__
 **/*.pyc

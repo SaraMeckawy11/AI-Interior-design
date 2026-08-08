@@ -1,0 +1,56 @@
+# Render Blueprint for the Livinai API.
+#
+# This service MUST use the Docker runtime.
+#
+# The 3D walkthrough is exported by `backend/renderer/render_worker.py`, which
+# needs numpy, Pillow, Shapely, trimesh and Open3D, plus the system libraries
+# Open3D links against. Render's native Node runtime installs none of that and
+# gives you no way to apt-get it, so a Node service builds and starts perfectly
+# and then fails on the first Explore request with:
+#
+#   File "/opt/render/project/src/backend/renderer/render_worker.py", line 23
+#   ModuleNotFoundError: No module named 'numpy'
+#
+# `/opt/render/project/src` in a traceback is the tell: that is the native
+# runtime's checkout path. The Docker image runs from /app.
+#
+# Apply with: Render Dashboard -> Blueprints -> New Blueprint Instance.
+# `plan` and `region` are intentionally omitted so applying this does not move
+# an existing service or change what it costs. See DEPLOYMENT.md for the memory
+# floor Open3D needs.
+services:
+  - type: web
+    name: livinai-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Set in the image too, but stated here so the value is visible with the
+      # rest of the service configuration.
+      - key: WALKTHROUGH_PYTHON
+        value: python3
+      # Secrets stay in the dashboard; `sync: false` means "this service needs
+      # it, do not overwrite it from the repository".
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: MODAL_ENDPOINT_URL
+        sync: false
+      - key: MODAL_FLOORPLAN_ENDPOINT_URL
+        sync: false
+      - key: MODAL_API_KEY
+        sync: false
+      - key: REVENUECAT_API_KEY
+        sync: false
+      - key: REVENUECAT_WEBHOOK_SECRET
+        sync: false

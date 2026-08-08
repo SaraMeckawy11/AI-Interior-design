@@ -2,7 +2,11 @@ import express from "express";
 import { promises as fs } from "node:fs";
 
 import cloudinary from "../lib/cloudinary.js";
-import { buildWalkthroughModel, walkthroughModelPath } from "../lib/walkthroughRenderer.js";
+import {
+  buildWalkthroughModel,
+  rendererReadiness,
+  walkthroughModelPath,
+} from "../lib/walkthroughRenderer.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import WalkthroughPlan from "../models/WalkthroughPlan.js";
 
@@ -204,6 +208,17 @@ router.delete("/plans/:id", isAuthenticated, async (req, res) => {
  * or machine-specific source root in this path.
  */
 router.post("/realtime/session", isAuthenticated, async (req, res) => {
+  // A server that cannot import the exporter will spend four minutes failing
+  // the same way for every request. Answer immediately, and say why.
+  const renderer = await rendererReadiness();
+  if (!renderer.ready) {
+    return res.status(503).json({
+      message: "The 3D walkthrough service is not available right now.",
+      detail: renderer.reason,
+      code: "RENDERER_UNAVAILABLE",
+    });
+  }
+
   try {
     const { modelName, ...data } = await buildWalkthroughModel(req.body || {});
     return res.json({
