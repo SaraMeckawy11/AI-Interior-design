@@ -131,7 +131,11 @@ flux_image = (
         # Saturates the network while pulling the ~16 GB checkpoint.
         "HF_HUB_ENABLE_HF_TRANSFER": "1",
     })
-    .add_local_python_source("prompt_engine")
+    # `copy=True` rather than the usual runtime mount: the prefetch below is a
+    # build step, Modal runs a build step by importing this module, and this
+    # module imports prompt_engine at line 59 — so the source has to be in the
+    # image before the step, not attached to containers afterwards.
+    .add_local_python_source("prompt_engine", copy=True)
 )
 
 router_image = (
@@ -154,6 +158,11 @@ api_key_secret = modal.Secret.from_name("livinai-api-key", required_keys=["API_K
 # not have to wait for a 16 GB download. FLUX.2 [klein] 4B is Apache-2.0 and not
 # gated, so no Hugging Face token is needed — an earlier revision required one
 # and that alone made `modal deploy` fail.
+#
+# Modal refuses a build step placed after a non-copy `add_local_*`, and this one
+# has to run after prompt_engine is present (see above). Editing prompt_engine.py
+# therefore invalidates this layer — but the weights live on the volume, so the
+# re-run finds them cached and finishes in seconds.
 flux_image = flux_image.run_function(
     _prefetch_flux,
     volumes={"/cache": hf_cache_vol},
