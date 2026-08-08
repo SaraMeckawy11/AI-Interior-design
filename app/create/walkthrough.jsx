@@ -214,6 +214,12 @@ export default function WalkthroughScreen() {
   const [syncState, setSyncState] = useState("idle"); // 'idle' | 'saving' | 'saved'
   const [renaming, setRenaming] = useState(null); // null | 'current' | project
   const [pendingDelete, setPendingDelete] = useState(null);
+  // Two destructive actions that used to fire on one tap. Clearing the plan is
+  // undoable, but Undo lives in the Draw step's action row and says nothing
+  // about what it would bring back; deleting a room happens on the Rooms step,
+  // where there is no Undo control on screen at all.
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [pendingRoomDelete, setPendingRoomDelete] = useState(null);
   const draftStepsRef = useRef([]);
 
   // ── Viewer state ─────────────────────────────────────────────────────────
@@ -1250,15 +1256,23 @@ export default function WalkthroughScreen() {
                     first step leave the editor. The Explore step has no footer,
                     so without this it would have been a room with no door. */}
                 <Pressable
+                  accessibilityRole="button"
                   accessibilityLabel={stage === 0 ? "Back to your 3D plans" : `Back to ${STAGES[stage - 1].label}`}
                   onPress={goBack}
                   hitSlop={LAYOUT.hitSlop}
-                  style={styles.headerButton}
+                  android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+                  style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
                 >
                   <Ionicons name="chevron-back" size={20} color={COLORS.white} />
                 </Pressable>
 
-                <Pressable style={styles.headerCopy} onPress={() => setRenaming("current")}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Plan name, ${projectTitle}`}
+                  accessibilityHint="Rename this plan"
+                  style={({ pressed }) => [styles.headerCopy, pressed && styles.pressedSurface]}
+                  onPress={() => setRenaming("current")}
+                >
                   <Text style={styles.headerEyebrow} numberOfLines={1}>{current.title}</Text>
                   <View style={styles.headerTitleRow}>
                     <Text style={styles.headerTitle} numberOfLines={1}>{projectTitle}</Text>
@@ -1266,11 +1280,27 @@ export default function WalkthroughScreen() {
                   </View>
                 </Pressable>
 
+                {/* The icon alone said "save"; it never said whether the last
+                    save had happened. Screen reader users got "Save this 3D
+                    plan" whether it was mid-save, saved, or never saved. */}
                 <Pressable
-                  accessibilityLabel="Save this 3D plan"
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    syncState === "saving"
+                      ? "Saving this 3D plan"
+                      : syncState === "saved"
+                        ? "Saved. Save again"
+                        : "Save this 3D plan"
+                  }
+                  accessibilityState={{ busy: syncState === "saving", disabled: syncState === "saving" }}
                   onPress={() => pushToCloud({ announce: true })}
                   hitSlop={LAYOUT.hitSlop}
-                  style={styles.headerButton}
+                  android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+                  style={({ pressed }) => [
+                    styles.headerButton,
+                    syncState === "saved" && styles.headerButtonSaved,
+                    pressed && styles.headerButtonPressed,
+                  ]}
                   disabled={syncState === "saving"}
                 >
                   {syncState === "saving" ? (
@@ -1305,11 +1335,12 @@ export default function WalkthroughScreen() {
                         accessibilityRole="tab"
                         accessibilityLabel={`Step ${index + 1}, ${item.label}`}
                         accessibilityState={{ selected: active, disabled: !reachable }}
-                        hitSlop={8}
-                        style={[
+                        hitSlop={{ top: 12, bottom: 12, left: 9, right: 9 }}
+                        style={({ pressed }) => [
                           styles.step,
                           (done || active) && styles.stepReached,
                           active && styles.stepActive,
+                          pressed && reachable && styles.stepPressed,
                         ]}
                         onPress={() => setStage(index)}
                       >
@@ -1491,18 +1522,25 @@ export default function WalkthroughScreen() {
                             : "Tap the first corner again, or finish the room."}
                       </Text>
                       <Pressable
-                        style={styles.drawingBarGhost}
+                        accessibilityRole="button"
+                        accessibilityLabel={curveControl ? "Discard this wall" : "Discard these corners"}
+                        android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+                        style={({ pressed }) => [styles.drawingBarGhost, pressed && styles.pressedSurface]}
                         onPress={() => {
                           setDraft([]);
                           setCurveControl(null);
                         }}
                       >
-                        <Ionicons name="close" size={15} color={COLORS.textSecondary} />
+                        <Ionicons name="close" size={16} color={COLORS.textSecondary} />
                       </Pressable>
                       <Pressable
-                        style={[
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: !curveControl && draft.length < 3 }}
+                        android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+                        style={({ pressed }) => [
                           styles.drawingBarPrimary,
                           !curveControl && draft.length < 3 && styles.drawingBarPrimaryDisabled,
+                          pressed && styles.pressedSurface,
                         ]}
                         disabled={!curveControl && draft.length < 3}
                         onPress={curveControl ? applyCurve : () => closeRoom()}
@@ -1532,7 +1570,13 @@ export default function WalkthroughScreen() {
                               ) / pixelsPerMeter
                             ).toFixed(1)} m`}
                       </Text>
-                      <Pressable style={styles.selectionAction} onPress={deleteSelection}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete the selected shape"
+                        android_ripple={{ color: "rgba(190,58,47,0.16)" }}
+                        style={({ pressed }) => [styles.selectionAction, pressed && styles.pressedSurface]}
+                        onPress={deleteSelection}
+                      >
                         <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
                         <Text style={styles.selectionActionText}>Delete</Text>
                       </Pressable>
@@ -1580,7 +1624,7 @@ export default function WalkthroughScreen() {
                       label="Clear"
                       tone="danger"
                       disabled={!rooms.length && !openings.length && !draft.length}
-                      onPress={clearPlanLines}
+                      onPress={() => setConfirmClear(true)}
                     />
                   </View>
 
@@ -1618,7 +1662,11 @@ export default function WalkthroughScreen() {
               {stage === 1 && (
                 <>
                   {roomConfigs.length === 0 ? (
-                    <EmptyState text="Go back and draw at least one room." />
+                    <EmptyState
+                      text="There is nothing to name yet. Draw at least one room on the plan first."
+                      actionLabel="Back to Draw"
+                      onAction={() => setStage(0)}
+                    />
                   ) : (
                     <View style={styles.summaryBar}>
                       <Ionicons name="home-outline" size={17} color={COLORS.primaryDark} />
@@ -1632,20 +1680,32 @@ export default function WalkthroughScreen() {
                     <View key={`config-${index}`} style={styles.card}>
                       <View style={styles.cardHead}>
                         <View style={[styles.roomSwatch, { backgroundColor: ROOM_TINTS[index % ROOM_TINTS.length].stroke }]} />
-                        <TextInput
-                          style={styles.roomName}
-                          value={room.name}
-                          onChangeText={(value) => updateRoom(index, "name", value)}
-                          placeholder={`Room ${index + 1}`}
-                          placeholderTextColor={COLORS.placeholderText}
-                        />
+                        {/* Naming the room is the whole job of this step, and the
+                            field was styled as plain text — nothing said it could
+                            be typed into. It now reads as a field, with the
+                            pencil that the header title already uses to mean
+                            "editable". */}
+                        <View style={styles.roomNameField}>
+                          <TextInput
+                            style={styles.roomName}
+                            value={room.name}
+                            accessibilityLabel={`Name of room ${index + 1}`}
+                            onChangeText={(value) => updateRoom(index, "name", value)}
+                            placeholder={`Room ${index + 1}`}
+                            placeholderTextColor={COLORS.placeholderText}
+                            maxLength={40}
+                          />
+                          <Ionicons name="create-outline" size={14} color={COLORS.textTertiary} />
+                        </View>
                         {/* The area used to be printed here as well as on the
                             size row two lines below it. */}
                         <Pressable
+                          accessibilityRole="button"
                           accessibilityLabel={`Delete ${room.name || `room ${index + 1}`}`}
-                          onPress={() => removeRoom(index)}
+                          onPress={() => setPendingRoomDelete(index)}
                           hitSlop={LAYOUT.hitSlop}
-                          style={styles.roomDelete}
+                          android_ripple={{ color: "rgba(190,58,47,0.16)", borderless: true }}
+                          style={({ pressed }) => [styles.roomDelete, pressed && styles.pressedSurface]}
                         >
                           <Ionicons name="trash-outline" size={17} color={COLORS.danger} />
                         </Pressable>
@@ -1670,7 +1730,11 @@ export default function WalkthroughScreen() {
               {/* ── Step 3 · Style ───────────────────────────────────── */}
               {stage === 2 && (
                 roomConfigs.length === 0 ? (
-                  <EmptyState text="Draw and name a room first." />
+                  <EmptyState
+                    text="These settings furnish your rooms, so there has to be a room first."
+                    actionLabel="Back to Draw"
+                    onAction={() => setStage(0)}
+                  />
                 ) : (
                   <>
                     <View style={styles.card}>
@@ -1681,9 +1745,10 @@ export default function WalkthroughScreen() {
                     </View>
 
                     <Pressable
-                      style={styles.disclosure}
+                      style={({ pressed }) => [styles.disclosure, pressed && styles.pressedSurface]}
                       accessibilityRole="button"
                       accessibilityState={{ expanded: styleExpanded }}
+                      android_ripple={{ color: "rgba(51,96,74,0.10)" }}
                       onPress={() => setStyleExpanded((value) => !value)}
                     >
                       <Text style={styles.disclosureText}>Soft furnishings and decor</Text>
@@ -1699,10 +1764,16 @@ export default function WalkthroughScreen() {
                         <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
                         <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
                         <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
-                        <Text style={[styles.fieldLabel, { marginTop: SPACING.lg }]}>Notes (optional)</Text>
+                        <View style={[styles.notesHead, { marginTop: SPACING.lg }]}>
+                          <Text style={styles.fieldLabel}>Notes (optional)</Text>
+                          {/* The field silently stopped accepting characters at
+                              240 with nothing to say it had. */}
+                          <Text style={styles.notesCount}>{(settings.notes || "").length}/240</Text>
+                        </View>
                         <TextInput
                           style={styles.notes}
                           value={settings.notes}
+                          accessibilityLabel="Notes for the designer"
                           onChangeText={(value) => updateSetting("notes", value)}
                           placeholder="Natural materials, calm lighting, no glossy surfaces…"
                           placeholderTextColor={COLORS.placeholderText}
@@ -1712,18 +1783,23 @@ export default function WalkthroughScreen() {
                       </View>
                     )}
 
+                    {/* A checkbox drawn for a setting that is a mode, not a
+                        selection. A track and a knob say "on or off" without
+                        having to read the label first. */}
                     <Pressable
-                      style={styles.settingToggle}
+                      style={({ pressed }) => [styles.settingToggle, pressed && styles.pressedSurface]}
                       accessibilityRole="switch"
+                      accessibilityLabel="Walk through walls"
                       accessibilityState={{ checked: settings.freeExplore }}
+                      android_ripple={{ color: "rgba(30,36,31,0.08)" }}
                       onPress={() => updateSetting("freeExplore", !settings.freeExplore)}
                     >
-                      <View style={[styles.settingToggleIcon, settings.freeExplore && styles.settingToggleIconActive]}>
-                        {settings.freeExplore && <Ionicons name="checkmark" size={13} color={COLORS.white} />}
-                      </View>
                       <View style={styles.settingToggleCopy}>
                         <Text style={styles.settingToggleTitle}>Walk through walls</Text>
                         <Text style={styles.settingToggleText}>Useful for reviewing furniture without using the doors.</Text>
+                      </View>
+                      <View style={[styles.switchTrack, settings.freeExplore && styles.switchTrackOn]}>
+                        <View style={[styles.switchKnob, settings.freeExplore && styles.switchKnobOn]} />
                       </View>
                     </Pressable>
                   </>
@@ -1738,20 +1814,46 @@ export default function WalkthroughScreen() {
               look like a mistake rather than a choice. */}
           {stage < STAGES.length - 1 && (
             <SafeAreaView edges={["bottom"]} style={styles.footer}>
-              <Pressable style={[styles.footerButton, styles.footerGhost]} onPress={goBack}>
-                <Ionicons name="arrow-back" size={16} color={COLORS.textPrimary} />
-                <Text style={styles.footerGhostText}>Back</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.footerButton, styles.footerPrimary, !canContinue && styles.footerPrimaryDisabled]}
-                disabled={!canContinue}
-                onPress={goNext}
-              >
-                <Text style={styles.footerPrimaryText} numberOfLines={1}>
-                  {stage === STAGES.length - 2 ? "Walk through" : "Continue"}
-                </Text>
-                <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
-              </Pressable>
+              {/* A greyed-out Continue with no explanation left the only unmet
+                  requirement of the whole flow unstated. It is one line, and it
+                  sits directly above the button it is about. */}
+              {!canContinue && (
+                <View style={styles.footerHint} accessibilityLiveRegion="polite">
+                  <Ionicons name="information-circle-outline" size={15} color={COLORS.textSecondary} />
+                  <Text style={styles.footerHintText} numberOfLines={2}>
+                    Draw at least one room to continue.
+                  </Text>
+                </View>
+              )}
+              <View style={styles.footerRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                  style={({ pressed }) => [styles.footerButton, styles.footerGhost, pressed && styles.pressedSurface]}
+                  onPress={goBack}
+                >
+                  <Ionicons name="arrow-back" size={16} color={COLORS.textPrimary} />
+                  <Text style={styles.footerGhostText}>Back</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !canContinue }}
+                  android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+                  style={({ pressed }) => [
+                    styles.footerButton,
+                    styles.footerPrimary,
+                    !canContinue && styles.footerPrimaryDisabled,
+                    pressed && canContinue && styles.pressedSurface,
+                  ]}
+                  disabled={!canContinue}
+                  onPress={goNext}
+                >
+                  <Text style={styles.footerPrimaryText} numberOfLines={1}>
+                    {stage === STAGES.length - 2 ? "Walk through" : "Continue"}
+                  </Text>
+                  <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
+                </Pressable>
+              </View>
             </SafeAreaView>
           )}
         </>
@@ -1772,6 +1874,40 @@ export default function WalkthroughScreen() {
         project={pendingDelete}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => removeSavedProject(pendingDelete)}
+      />
+
+      {/* Both of these say what will be lost, in the numbers on screen, rather
+          than asking "are you sure?" about an unnamed amount of work. */}
+      <ConfirmDialog
+        visible={confirmClear}
+        title="Clear this plan?"
+        message={
+          `This removes ${rooms.length === 1 ? "1 room" : `${rooms.length} rooms`}`
+          + `${openings.length ? ` and ${openings.length === 1 ? "1 opening" : `${openings.length} openings`}` : ""}`
+          + `.${planImage ? " The traced photo stays." : ""}`
+        }
+        confirmLabel="Clear"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => {
+          setConfirmClear(false);
+          clearPlanLines();
+        }}
+      />
+
+      <ConfirmDialog
+        visible={pendingRoomDelete !== null}
+        title="Delete this room?"
+        message={
+          pendingRoomDelete === null
+            ? ""
+            : `“${roomConfigs[pendingRoomDelete]?.name || `Room ${pendingRoomDelete + 1}`}” and its measurements will be removed from the plan.`
+        }
+        confirmLabel="Delete"
+        onCancel={() => setPendingRoomDelete(null)}
+        onConfirm={() => {
+          removeRoom(pendingRoomDelete);
+          setPendingRoomDelete(null);
+        }}
       />
 
       <SnapshotModal
@@ -2638,10 +2774,13 @@ function RoomSizeRow({ index, label, room, pixelsPerMeter, active, compact, onFo
       {!compact && <Text style={styles.roomSizeLabel} numberOfLines={1}>{label}</Text>}
       {compact && <Text style={styles.fieldLabel}>{label}</Text>}
       <View style={styles.roomSizeFields}>
+        {/* Two bare number fields with an "m" beside them: a screen reader read
+            them out as "edit box, 4.20" twice with nothing to tell them apart. */}
         <View style={styles.roomSizeField}>
           <TextInput
             style={styles.roomSizeInput}
             keyboardType="decimal-pad"
+            accessibilityLabel={`${label} width in metres`}
             value={shown.width}
             selectTextOnFocus
             onFocus={onFocus}
@@ -2656,6 +2795,7 @@ function RoomSizeRow({ index, label, room, pixelsPerMeter, active, compact, onFo
           <TextInput
             style={styles.roomSizeInput}
             keyboardType="decimal-pad"
+            accessibilityLabel={`${label} depth in metres`}
             value={shown.depth}
             selectTextOnFocus
             onFocus={onFocus}
@@ -2698,8 +2838,15 @@ function OpeningWidthControl({ widthMeters, onChange }) {
       <Text style={styles.fieldLabel}>Width</Text>
       <View style={styles.openingWidthRow}>
         <Pressable
-          accessibilityLabel="Narrow this opening"
-          style={[styles.openingWidthStep, widthMeters <= OPENING_MIN_METERS && styles.openingWidthStepDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel="Narrow this opening by 10 centimetres"
+          accessibilityState={{ disabled: widthMeters <= OPENING_MIN_METERS }}
+          android_ripple={{ color: "rgba(30,36,31,0.12)" }}
+          style={({ pressed }) => [
+            styles.openingWidthStep,
+            widthMeters <= OPENING_MIN_METERS && styles.openingWidthStepDisabled,
+            pressed && styles.pressedSurface,
+          ]}
           disabled={widthMeters <= OPENING_MIN_METERS}
           onPress={() => step(-0.1)}
         >
@@ -2709,6 +2856,7 @@ function OpeningWidthControl({ widthMeters, onChange }) {
           <TextInput
             style={styles.openingWidthInput}
             keyboardType="decimal-pad"
+            accessibilityLabel="Opening width in metres"
             value={String(shown)}
             selectTextOnFocus
             onChangeText={setDraft}
@@ -2718,8 +2866,10 @@ function OpeningWidthControl({ widthMeters, onChange }) {
           <Text style={styles.openingWidthUnit}>m</Text>
         </View>
         <Pressable
-          accessibilityLabel="Widen this opening"
-          style={styles.openingWidthStep}
+          accessibilityRole="button"
+          accessibilityLabel="Widen this opening by 10 centimetres"
+          android_ripple={{ color: "rgba(30,36,31,0.12)" }}
+          style={({ pressed }) => [styles.openingWidthStep, pressed && styles.pressedSurface]}
           onPress={() => step(0.1)}
         >
           <Ionicons name="add" size={16} color={COLORS.textPrimary} />
@@ -2754,9 +2904,15 @@ function CurveControls({
           ].map(([value, label]) => (
             <Pressable
               key={value}
-              accessibilityRole="button"
+              accessibilityRole="tab"
+              accessibilityLabel={`${label} walls`}
               accessibilityState={{ selected: edgeType === value }}
-              style={[styles.curveSegment, edgeType === value && styles.curveSegmentActive]}
+              android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+              style={({ pressed }) => [
+                styles.curveSegment,
+                edgeType === value && styles.curveSegmentActive,
+                pressed && edgeType !== value && styles.pressedSurface,
+              ]}
               onPress={() => onChangeEdgeType(value)}
             >
               <Text style={[styles.curveSegmentText, edgeType === value && styles.curveSegmentTextActive]}>{label}</Text>
@@ -2777,12 +2933,25 @@ function CurveControls({
           <View style={styles.curveDirection}>
             <Text style={styles.curveSettingLabel}>Curve direction</Text>
             <View style={styles.curveDirectionButtons}>
-              <Pressable style={[styles.curveDirectionButton, settings.direction === -1 && styles.curveDirectionButtonActive]} onPress={() => update("direction", -1)}>
-                <Text style={[styles.curveDirectionText, settings.direction === -1 && styles.curveDirectionTextActive]}>Left</Text>
-              </Pressable>
-              <Pressable style={[styles.curveDirectionButton, settings.direction === 1 && styles.curveDirectionButtonActive]} onPress={() => update("direction", 1)}>
-                <Text style={[styles.curveDirectionText, settings.direction === 1 && styles.curveDirectionTextActive]}>Right</Text>
-              </Pressable>
+              {[[-1, "Left"], [1, "Right"]].map(([value, label]) => (
+                <Pressable
+                  key={label}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`Curve ${label.toLowerCase()}`}
+                  accessibilityState={{ checked: settings.direction === value, selected: settings.direction === value }}
+                  android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                  style={({ pressed }) => [
+                    styles.curveDirectionButton,
+                    settings.direction === value && styles.curveDirectionButtonActive,
+                    pressed && settings.direction !== value && styles.pressedSurface,
+                  ]}
+                  onPress={() => update("direction", value)}
+                >
+                  <Text style={[styles.curveDirectionText, settings.direction === value && styles.curveDirectionTextActive]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
           <CurveStepper label="Curve strength" value={settings.intensity} min={0} max={100} step={5} suffix="%" onChange={(value) => update("intensity", value)} />
@@ -2790,16 +2959,30 @@ function CurveControls({
           <CurveStepper label="Curve tilt" value={settings.angle} min={-55} max={55} step={5} suffix="°" onChange={(value) => update("angle", value)} />
           {curveStaged ? (
             <View style={styles.curveApplyRow}>
-              <Pressable style={styles.curveCancel} onPress={onCancelCurve}>
+              <Pressable
+                accessibilityRole="button"
+                android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                style={({ pressed }) => [styles.curveCancel, pressed && styles.pressedSurface]}
+                onPress={onCancelCurve}
+              >
                 <Text style={styles.curveCancelText}>Cancel curve</Text>
               </Pressable>
-              <Pressable style={styles.curveApply} onPress={onApplyCurve}>
+              <Pressable
+                accessibilityRole="button"
+                android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+                style={({ pressed }) => [styles.curveApply, pressed && styles.pressedSurface]}
+                onPress={onApplyCurve}
+              >
                 <Ionicons name="add" size={15} color={COLORS.white} />
                 <Text style={styles.curveApplyText}>Add curved wall</Text>
               </Pressable>
             </View>
           ) : (
-            <Pressable style={styles.curveReset} onPress={() => onChangeSettings({ ...DEFAULT_CURVE_SETTINGS })}>
+            <Pressable
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.curveReset, pressed && styles.pressedSurface]}
+              onPress={() => onChangeSettings({ ...DEFAULT_CURVE_SETTINGS })}
+            >
               <Ionicons name="refresh-outline" size={13} color={COLORS.primaryDark} />
               <Text style={styles.curveResetText}>Reset curve shape</Text>
             </Pressable>
@@ -2815,12 +2998,28 @@ function CurveStepper({ label, value, min, max, step, suffix, onChange }) {
     <View style={styles.curveStepper}>
       <Text style={styles.curveSettingLabel}>{label}</Text>
       <View style={styles.curveStepperActions}>
-        <Pressable style={styles.curveStepButton} disabled={value <= min} onPress={() => onChange(Math.max(min, value - step))}>
-          <Ionicons name="remove" size={14} color={value <= min ? COLORS.textTertiary : COLORS.textPrimary} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Decrease ${label.toLowerCase()}`}
+          accessibilityState={{ disabled: value <= min }}
+          android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
+          style={({ pressed }) => [styles.curveStepButton, pressed && value > min && styles.pressedSurface]}
+          disabled={value <= min}
+          onPress={() => onChange(Math.max(min, value - step))}
+        >
+          <Ionicons name="remove" size={15} color={value <= min ? COLORS.textTertiary : COLORS.textPrimary} />
         </Pressable>
-        <Text style={styles.curveStepValue}>{value}{suffix}</Text>
-        <Pressable style={styles.curveStepButton} disabled={value >= max} onPress={() => onChange(Math.min(max, value + step))}>
-          <Ionicons name="add" size={14} color={value >= max ? COLORS.textTertiary : COLORS.textPrimary} />
+        <Text style={styles.curveStepValue} accessibilityLabel={`${label}, ${value}${suffix}`}>{value}{suffix}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Increase ${label.toLowerCase()}`}
+          accessibilityState={{ disabled: value >= max }}
+          android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
+          style={({ pressed }) => [styles.curveStepButton, pressed && value < max && styles.pressedSurface]}
+          disabled={value >= max}
+          onPress={() => onChange(Math.min(max, value + step))}
+        >
+          <Ionicons name="add" size={15} color={value >= max ? COLORS.textTertiary : COLORS.textPrimary} />
         </Pressable>
       </View>
     </View>
@@ -2849,6 +3048,12 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
             <View style={styles.headerCopy}>
               <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
               <Text style={styles.headerTitle}>Your plans</Text>
+              {/* How many, so the list has a size before it has been scrolled. */}
+              {!!projects.length && (
+                <Text style={styles.headerMeta}>
+                  {projects.length === 1 ? "1 plan" : `${projects.length} plans`}
+                </Text>
+              )}
             </View>
             <Pressable
               accessibilityLabel="Refresh your saved plans"
@@ -2869,8 +3074,19 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
         showsVerticalScrollIndicator={false}
       >
         {loading && !projects.length ? (
-          <View style={styles.libraryLoading}>
-            <ActivityIndicator color={COLORS.primaryDark} />
+          // Three placeholder rows in the shape of the real thing, rather than a
+          // spinner on an empty screen. The list stops changing height when the
+          // plans arrive, and the wait reads as "loading a list", not "broken".
+          <View style={styles.librarySkeleton} accessibilityLabel="Loading your plans">
+            {[0, 1, 2].map((row) => (
+              <View key={row} style={styles.skeletonCard}>
+                <View style={styles.skeletonThumb} />
+                <View style={styles.skeletonCopy}>
+                  <View style={[styles.skeletonLine, { width: "58%" }]} />
+                  <View style={[styles.skeletonLine, styles.skeletonLineSmall, { width: "38%" }]} />
+                </View>
+              </View>
+            ))}
           </View>
         ) : projects.length ? (
           projects.map((project) => (
@@ -2883,12 +3099,26 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
             />
           ))
         ) : (
+          // An invitation, not an apology, and with the action in it. The dock at
+          // the foot of the screen carries the same action, but a person reading
+          // "draw your home to scale" should not have to look elsewhere to start.
           <View style={styles.libraryEmpty}>
-            <Ionicons name="cube-outline" size={30} color={COLORS.textTertiary} />
-            <Text style={styles.libraryEmptyTitle}>No plans yet</Text>
+            <View style={styles.libraryEmptyIcon}>
+              <Ionicons name="home-outline" size={28} color={COLORS.primaryDark} />
+            </View>
+            <Text style={styles.libraryEmptyTitle}>Draw your first home</Text>
             <Text style={styles.libraryEmptyText}>
-              Draw your home to scale, walk through it, then render it with AI.
+              Trace a floor plan or draw it to scale, walk through it in 3D, then render it with AI.
             </Text>
+            <Pressable
+              accessibilityRole="button"
+              android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+              style={({ pressed }) => [styles.libraryEmptyAction, pressed && styles.pressedSurface]}
+              onPress={onStart}
+            >
+              <Ionicons name="add" size={18} color={COLORS.white} />
+              <Text style={styles.libraryEmptyActionText}>Start a plan</Text>
+            </Pressable>
           </View>
         )}
 
@@ -2912,64 +3142,105 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
         )}
       </ScrollView>
 
-      {/* One primary action, docked, always reachable however long the list is. */}
-      <SafeAreaView edges={["bottom"]} style={styles.libraryFooter}>
-        <Pressable
-          style={styles.libraryPrimary}
-          accessibilityRole="button"
-          accessibilityLabel="Start a new 3D plan"
-          onPress={onStart}
-        >
-          <Ionicons name="add" size={20} color={COLORS.white} />
-          <Text style={styles.libraryPrimaryText}>New plan</Text>
-        </Pressable>
-      </SafeAreaView>
+      {/* One primary action, docked, always reachable however long the list is.
+          Hidden only when the empty state is showing, because that already
+          carries the same button and two of them on one screen is one too many.
+          It stays up while the list loads — waiting for plans is no reason to
+          lose the way to start a new one. */}
+      {(!!projects.length || loading) && (
+        <SafeAreaView edges={["bottom"]} style={styles.libraryFooter}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Start a new 3D plan"
+            android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+            style={({ pressed }) => [styles.libraryPrimary, pressed && styles.pressedSurface]}
+            onPress={onStart}
+          >
+            <Ionicons name="add" size={20} color={COLORS.white} />
+            <Text style={styles.libraryPrimaryText}>New plan</Text>
+          </Pressable>
+        </SafeAreaView>
+      )}
     </View>
   );
 }
 
+/**
+ * How long ago a plan was touched, in the words a person would use.
+ *
+ * A recents list answers "which one was I working on?", and a locale date
+ * string makes that a subtraction problem. "Yesterday" does not.
+ */
+function relativeDay(value) {
+  const then = value ? new Date(value) : null;
+  if (!then || Number.isNaN(then.valueOf())) return null;
+  const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).valueOf();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(then)) / 86_400_000);
+  if (days <= 0) return "Edited today";
+  if (days === 1) return "Edited yesterday";
+  if (days < 7) return `Edited ${days} days ago`;
+  if (days < 14) return "Edited last week";
+  // Past a fortnight the exact day stops being the useful fact, so fall back to
+  // the calendar rather than counting out "27 days ago".
+  return `Edited ${then.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+}
+
 function ProjectCard({ project, onOpen, onRename, onDelete }) {
-  const updated = project.updatedAt ? new Date(project.updatedAt) : null;
+  const edited = relativeDay(project.updatedAt);
   const meta = [
     `${project.roomCount || 0} ${project.roomCount === 1 ? "room" : "rooms"}`,
     project.areaMeters ? `${Number(project.areaMeters).toFixed(1)} m²` : null,
-    updated && !Number.isNaN(updated.valueOf()) ? updated.toLocaleDateString() : null,
   ].filter(Boolean).join(" · ");
 
   return (
-    <Pressable style={styles.projectCard} onPress={onOpen} accessibilityRole="button">
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={project.title}
+      accessibilityHint="Opens this plan in the editor"
+      android_ripple={{ color: "rgba(30,36,31,0.08)" }}
+      style={({ pressed }) => [styles.projectCard, pressed && styles.projectCardPressed]}
+      onPress={onOpen}
+    >
       <View style={styles.projectThumbnail}>
         {project.thumbnail ? (
           <Image source={{ uri: project.thumbnail }} style={styles.projectThumbnailImage} resizeMode="cover" />
         ) : (
-          <Ionicons name="cube-outline" size={22} color={COLORS.primaryDark} />
+          <Ionicons name="grid-outline" size={22} color={COLORS.primaryDark} />
         )}
       </View>
 
-      {/* Name and one line of facts. A row of "Traced"/"Drawn"/"This device"
-          tags used to sit under this, repeating what the thumbnail shows and what
-          the note at the foot of the list already says once for every plan. */}
+      {/* Name, what is in it, and when it was last touched — on separate lines,
+          because "3 rooms · 62.4 m²" and "Edited yesterday" answer different
+          questions and ran together as one grey string. A row of
+          "Traced"/"Drawn"/"This device" tags used to sit under this as well,
+          repeating what the thumbnail shows and what the note at the foot of the
+          list already says once for every plan. */}
       <View style={styles.projectCardCopy}>
         <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
         <Text style={styles.projectCardMeta} numberOfLines={1}>{meta}</Text>
+        {!!edited && <Text style={styles.projectCardTime} numberOfLines={1}>{edited}</Text>}
       </View>
 
       <View style={styles.projectActions}>
         <Pressable
+          accessibilityRole="button"
           accessibilityLabel={`Rename ${project.title}`}
           hitSlop={LAYOUT.hitSlop}
-          style={styles.projectAction}
+          android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+          style={({ pressed }) => [styles.projectAction, pressed && styles.pressedSurface]}
           onPress={onRename}
         >
-          <Ionicons name="create-outline" size={16} color={COLORS.textSecondary} />
+          <Ionicons name="create-outline" size={17} color={COLORS.textSecondary} />
         </Pressable>
         <Pressable
+          accessibilityRole="button"
           accessibilityLabel={`Delete ${project.title}`}
           hitSlop={LAYOUT.hitSlop}
-          style={[styles.projectAction, styles.projectActionDanger]}
+          android_ripple={{ color: "rgba(190,58,47,0.16)", borderless: true }}
+          style={({ pressed }) => [styles.projectAction, styles.projectActionDanger, pressed && styles.pressedSurface]}
           onPress={onDelete}
         >
-          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+          <Ionicons name="trash-outline" size={17} color={COLORS.danger} />
         </Pressable>
       </View>
     </Pressable>
@@ -2994,20 +3265,36 @@ function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
         <Text style={styles.sourceBarTitle} numberOfLines={1}>
           {detecting ? "Reading your plan…" : planImage ? "Tracing your plan" : "Blank grid"}
         </Text>
-        <Pressable style={styles.sourceBarButton} onPress={onUpload} disabled={detecting} hitSlop={LAYOUT.hitSlop}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: detecting }}
+          android_ripple={{ color: "rgba(51,96,74,0.14)" }}
+          style={({ pressed }) => [styles.sourceBarButton, pressed && styles.pressedSurface]}
+          onPress={onUpload}
+          disabled={detecting}
+          hitSlop={LAYOUT.hitSlop}
+        >
           <Text style={styles.sourceBarButtonText}>{planImage ? "Replace" : "Trace a photo"}</Text>
         </Pressable>
         {!!planImage && (
           <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Remove the uploaded plan"
             onPress={onClear}
             hitSlop={LAYOUT.hitSlop}
+            style={({ pressed }) => pressed && styles.pressedSurface}
           >
             <Ionicons name="close-circle" size={18} color={COLORS.textTertiary} />
           </Pressable>
         )}
       </View>
-      {!!error && <Text style={styles.sourceBarError}>{error}</Text>}
+      {/* Announced, not just coloured: this is the only place the plan reader
+          can report that it could not measure the photo. */}
+      {!!error && (
+        <Text style={styles.sourceBarError} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          {error}
+        </Text>
+      )}
     </View>
   );
 }
@@ -3030,10 +3317,10 @@ function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap }) {
         return (
           <Pressable
             key={item.key}
-            accessibilityRole="button"
+            accessibilityRole="radio"
             accessibilityLabel={item.label}
-            accessibilityState={{ selected: active }}
-            style={styles.toolCell}
+            accessibilityState={{ selected: active, checked: active }}
+            style={({ pressed }) => [styles.toolCell, pressed && !active && styles.pressedSurface]}
             onPress={() => onChange(item.key)}
           >
             <View style={[styles.tool, active && styles.toolActive]}>
@@ -3050,7 +3337,7 @@ function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap }) {
         accessibilityRole="switch"
         accessibilityLabel="Snap to the grid"
         accessibilityState={{ checked: snapToGrid }}
-        style={styles.toolCell}
+        style={({ pressed }) => [styles.toolCell, pressed && styles.pressedSurface]}
         onPress={onToggleSnap}
       >
         <View style={[styles.tool, snapToGrid && styles.toolSnapActive]}>
@@ -3085,7 +3372,7 @@ function ActionButton({ icon, label, onPress, disabled, active, tone }) {
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled, selected: !!active }}
-      style={styles.actionCell}
+      style={({ pressed }) => [styles.actionCell, pressed && !disabled && styles.pressedSurface]}
       onPress={onPress}
       disabled={disabled}
     >
@@ -3113,11 +3400,24 @@ function ConfirmDialog({ visible, title, message, confirmLabel, confirmDisabled,
           {!!message && <Text style={styles.dialogMessage}>{message}</Text>}
           {children}
           <View style={styles.dialogActions}>
-            <Pressable style={[styles.dialogButton, styles.dialogCancel]} onPress={onCancel}>
+            <Pressable
+              accessibilityRole="button"
+              android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+              style={({ pressed }) => [styles.dialogButton, styles.dialogCancel, pressed && styles.pressedSurface]}
+              onPress={onCancel}
+            >
               <Text style={styles.dialogCancelText}>Cancel</Text>
             </Pressable>
             <Pressable
-              style={[styles.dialogButton, styles.dialogConfirm, confirmDisabled && styles.dialogConfirmDisabled]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !!confirmDisabled }}
+              android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+              style={({ pressed }) => [
+                styles.dialogButton,
+                styles.dialogConfirm,
+                confirmDisabled && styles.dialogConfirmDisabled,
+                pressed && !confirmDisabled && styles.pressedSurface,
+              ]}
               disabled={confirmDisabled}
               onPress={onConfirm}
             >
@@ -3175,15 +3475,48 @@ function ConfirmSheet({ project, onCancel, onConfirm }) {
   );
 }
 
+/**
+ * One labelled row of mutually exclusive options.
+ *
+ * Some of these rows are long — there are more room types than fit on a phone —
+ * and the chosen one was frequently scrolled off the right, so a card could show
+ * a "Room type" row with nothing selected in it. The row now brings the current
+ * answer into view, and each chip is a tab rather than an unlabelled button.
+ */
 function ChipRow({ label, options, value, onChange, formatOption = (option) => option }) {
+  const scroller = useRef(null);
+  const offsets = useRef([]);
+  const index = options.indexOf(value);
+
+  useEffect(() => {
+    const x = offsets.current[index];
+    if (typeof x !== "number") return;
+    scroller.current?.scrollTo({ x: Math.max(0, x - ms(56)), animated: true });
+  }, [index]);
+
   return (
     <View style={styles.chipBlock}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-        {options.map((option) => {
+      <ScrollView
+        ref={scroller}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipRow}
+        accessibilityRole="tablist"
+        accessibilityLabel={label}
+      >
+        {options.map((option, optionIndex) => {
           const active = value === option;
           return (
-            <Pressable key={option} style={[styles.chip, active && styles.chipActive]} onPress={() => onChange(option)}>
+            <Pressable
+              key={option}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+              onLayout={(event) => { offsets.current[optionIndex] = event.nativeEvent.layout.x; }}
+              style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && !active && styles.pressedSurface]}
+              onPress={() => onChange(option)}
+            >
               <Text style={[styles.chipText, active && styles.chipTextActive]}>{formatOption(option)}</Text>
             </Pressable>
           );
@@ -3193,11 +3526,31 @@ function ChipRow({ label, options, value, onChange, formatOption = (option) => o
   );
 }
 
-function EmptyState({ text }) {
+/**
+ * A step that cannot be done yet.
+ *
+ * It used to be an icon and a sentence telling the person to go back — an
+ * instruction with no way to follow it, on the one screen where they are most
+ * obviously stuck. The way back is now a button.
+ */
+function EmptyState({ text, actionLabel, onAction }) {
   return (
     <View style={styles.empty}>
-      <Ionicons name="cube-outline" size={26} color={COLORS.textTertiary} />
+      <View style={styles.emptyIcon}>
+        <Ionicons name="grid-outline" size={24} color={COLORS.primaryDark} />
+      </View>
       <Text style={styles.emptyText}>{text}</Text>
+      {!!onAction && (
+        <Pressable
+          accessibilityRole="button"
+          android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+          style={({ pressed }) => [styles.emptyAction, pressed && styles.pressedSurface]}
+          onPress={onAction}
+        >
+          <Ionicons name="arrow-back" size={15} color={COLORS.white} />
+          <Text style={styles.emptyActionText}>{actionLabel}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -3232,7 +3585,15 @@ function SnapshotModal({ snapshot, kind, busy, onClose, onShare, onSaveGallery, 
 
 function SheetAction({ icon, label, onPress, loading }) {
   return (
-    <Pressable style={styles.sheetAction} onPress={onPress} disabled={loading}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ busy: !!loading, disabled: !!loading }}
+      android_ripple={{ color: "rgba(51,96,74,0.14)" }}
+      style={({ pressed }) => [styles.sheetAction, pressed && styles.pressedSurface]}
+      onPress={onPress}
+      disabled={loading}
+    >
       {loading ? <ActivityIndicator size="small" color={COLORS.primaryDark} /> : <Ionicons name={icon} size={19} color={COLORS.primaryDark} />}
       <Text style={styles.sheetActionText}>{label}</Text>
     </Pressable>
@@ -3246,25 +3607,32 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.base },
   headerRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md, paddingTop: SPACING.sm },
   headerButton: {
-    width: ms(40), height: ms(40), borderRadius: RADIUS.md,
+    width: ms(42), height: ms(42), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)",
   },
+  headerButtonPressed: { backgroundColor: "rgba(255,255,255,0.30)" },
+  headerButtonSaved: { backgroundColor: "rgba(255,255,255,0.30)" },
   headerCopy: { flex: 1, minWidth: 0 },
   headerEyebrow: { ...TYPE.overline, color: "rgba(255,255,255,0.68)" },
   headerTitleRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   headerTitle: { ...TYPE.h2, color: COLORS.white, marginTop: 1, flexShrink: 1 },
+  headerMeta: { ...TYPE.caption, color: "rgba(255,255,255,0.66)", marginTop: 2 },
 
   stepper: { flexDirection: "row", alignItems: "center", marginTop: SPACING.base },
+  // These are the flow's jump-between-steps control, so they carry hitSlop that
+  // takes each one past the 44pt minimum without turning the header into a row
+  // of buttons.
   step: {
-    width: ms(22), height: ms(22), borderRadius: RADIUS.pill,
+    width: ms(26), height: ms(26), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.34)",
   },
   stepReached: { backgroundColor: COLORS.white, borderColor: COLORS.white },
   // The current step is a size larger than the rest, so "where am I" is legible
   // from the shape alone — a filled dot on its own only says "done".
-  stepActive: { width: ms(27), height: ms(27) },
-  stepConnector: { width: ms(20), height: 2, backgroundColor: "rgba(255,255,255,0.24)" },
+  stepActive: { width: ms(31), height: ms(31) },
+  stepPressed: { opacity: 0.7 },
+  stepConnector: { width: ms(18), height: 2, backgroundColor: "rgba(255,255,255,0.24)" },
   stepConnectorDone: { backgroundColor: COLORS.white },
   stepNumber: { ...TYPE.caption, fontSize: 11, color: "rgba(255,255,255,0.72)" },
   stepNumberActive: { color: COLORS.brand800 },
@@ -3289,31 +3657,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.xs, marginBottom: SPACING.xs,
   },
   syncNoteText: { flex: 1, ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 16 },
-  libraryLoading: { paddingVertical: SPACING.xxl, alignItems: "center" },
+  // Placeholder rows in the shape of a ProjectCard, so the list does not jump
+  // when the real plans replace them.
+  librarySkeleton: { gap: SPACING.sm },
+  skeletonCard: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  skeletonThumb: {
+    width: ms(58), height: ms(58), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  },
+  skeletonCopy: { flex: 1, gap: SPACING.sm },
+  skeletonLine: { height: ms(12), borderRadius: RADIUS.xs, backgroundColor: COLORS.surfaceSunken },
+  skeletonLineSmall: { height: ms(9) },
+
   libraryEmpty: {
-    alignItems: "center", padding: SPACING.xl, gap: SPACING.xs,
+    alignItems: "center", padding: SPACING.xl, gap: SPACING.md,
     borderRadius: RADIUS.xl, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border, borderStyle: "dashed",
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  libraryEmptyIcon: {
+    width: ms(60), height: ms(60), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
   libraryEmptyTitle: { ...TYPE.h3, color: COLORS.textPrimary },
   libraryEmptyText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center", lineHeight: 19 },
+  libraryEmptyAction: {
+    marginTop: SPACING.xs, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    height: ms(48), paddingHorizontal: SPACING.xl,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
+  },
+  libraryEmptyActionText: { ...TYPE.bodyStrong, color: COLORS.white },
 
   projectCard: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
     padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
   },
+  projectCardPressed: { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.borderStrong },
   projectThumbnail: {
     width: ms(58), height: ms(58), borderRadius: RADIUS.md, overflow: "hidden",
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
   },
   projectThumbnailImage: { width: "100%", height: "100%" },
-  projectCardCopy: { flex: 1, minWidth: 0, gap: 3 },
+  projectCardCopy: { flex: 1, minWidth: 0, gap: 2 },
   projectCardTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  projectCardMeta: { ...TYPE.caption, color: COLORS.textTertiary },
-  projectActions: { flexDirection: "row", gap: SPACING.xs },
+  projectCardMeta: { ...TYPE.caption, color: COLORS.textSecondary },
+  projectCardTime: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
+  // 8pt apart, not 4 — the right-hand one deletes the plan.
+  projectActions: { flexDirection: "row", gap: SPACING.sm },
   projectAction: {
-    width: ms(32), height: ms(32), borderRadius: RADIUS.pill,
+    width: ms(36), height: ms(36), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
   },
   projectActionDanger: { backgroundColor: COLORS.dangerSoft },
@@ -3380,12 +3775,14 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.primarySoft,
   },
   drawingBarText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 15 },
+  // "Finish" and "discard" 8pt apart at 32pt each: the two most consequential
+  // buttons on the Draw step were also the smallest.
   drawingBarGhost: {
-    width: ms(32), height: ms(32), borderRadius: RADIUS.pill,
+    width: ms(40), height: ms(40), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surface,
   },
   drawingBarPrimary: {
-    paddingHorizontal: SPACING.base, height: ms(32), alignItems: "center", justifyContent: "center",
+    paddingHorizontal: SPACING.lg, height: ms(40), alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
   },
   drawingBarPrimaryDisabled: { opacity: 0.4 },
@@ -3400,7 +3797,7 @@ const styles = StyleSheet.create({
   selectionName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary },
   selectionAction: {
     flexDirection: "row", alignItems: "center", gap: 5,
-    paddingHorizontal: SPACING.md, paddingVertical: 6,
+    paddingHorizontal: SPACING.base, minHeight: ms(40),
     borderRadius: RADIUS.pill, backgroundColor: COLORS.dangerSoft,
   },
   selectionActionText: { ...TYPE.caption, color: COLORS.danger },
@@ -3425,9 +3822,14 @@ const styles = StyleSheet.create({
   cardSectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
   cardHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.xs },
   roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
-  roomName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 4 },
+  roomNameField: {
+    flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    minHeight: ms(44), paddingHorizontal: SPACING.md, borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
+  },
+  roomName: { flex: 1, minWidth: 0, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 0 },
   roomDelete: {
-    width: ms(34), height: ms(34), borderRadius: RADIUS.pill,
+    width: ms(40), height: ms(40), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.dangerSoft,
   },
 
@@ -3440,7 +3842,7 @@ const styles = StyleSheet.create({
   roomSizeFields: { flexDirection: "row", alignItems: "center", gap: 5 },
   roomSizeField: {
     flexDirection: "row", alignItems: "center", gap: 2,
-    paddingHorizontal: 7, height: ms(34), borderRadius: RADIUS.sm,
+    paddingHorizontal: SPACING.sm, height: ms(40), borderRadius: RADIUS.sm,
     backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
   },
   roomSizeInput: { width: ms(42), ...TYPE.caption, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
@@ -3451,14 +3853,14 @@ const styles = StyleSheet.create({
   openingWidth: { marginTop: SPACING.sm },
   openingWidthRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm, marginTop: 5 },
   openingWidthStep: {
-    width: ms(38), height: ms(38), alignItems: "center", justifyContent: "center",
+    width: ms(44), height: ms(44), alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
     borderWidth: 1, borderColor: COLORS.border,
   },
   openingWidthStepDisabled: { opacity: 0.4 },
   openingWidthField: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3,
-    paddingHorizontal: SPACING.md, height: ms(38), borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.md, height: ms(44), borderRadius: RADIUS.md,
     backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.borderStrong,
   },
   openingWidthInput: { width: ms(54), ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "right", padding: 0 },
@@ -3467,7 +3869,10 @@ const styles = StyleSheet.create({
   chipBlock: { marginTop: SPACING.sm },
   fieldLabel: { ...TYPE.overline, color: COLORS.textTertiary, marginBottom: SPACING.sm },
   chipRow: { gap: SPACING.sm, paddingRight: SPACING.base },
+  // 32pt tall was under the touch minimum for controls sitting 8pt apart in a
+  // scrolling row — the easiest place in the flow to pick the wrong answer.
   chip: {
+    minHeight: ms(42), justifyContent: "center",
     paddingHorizontal: SPACING.base, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill,
     backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: "transparent",
   },
@@ -3488,22 +3893,45 @@ const styles = StyleSheet.create({
     padding: SPACING.base, borderRadius: RADIUS.lg,
     backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
   },
-  settingToggleIcon: {
-    width: ms(22), height: ms(22), borderRadius: 7, borderWidth: 1.5,
-    borderColor: COLORS.borderStrong, alignItems: "center", justifyContent: "center",
-  },
-  settingToggleIconActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
-  settingToggleCopy: { flex: 1 },
+  settingToggleCopy: { flex: 1, minWidth: 0 },
   settingToggleTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
   settingToggleText: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2, lineHeight: 16 },
+  switchTrack: {
+    width: ms(46), height: ms(28), borderRadius: RADIUS.pill, padding: 3,
+    justifyContent: "center", alignItems: "flex-start",
+    backgroundColor: COLORS.surfaceSunken,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  switchTrackOn: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
+  switchKnob: {
+    width: ms(20), height: ms(20), borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.white, ...SHADOW.xs,
+  },
+  switchKnobOn: { alignSelf: "flex-end" },
 
+  notesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  notesCount: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary, marginBottom: SPACING.sm },
   notes: {
     minHeight: ms(92), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
     padding: SPACING.md, ...TYPE.small, color: COLORS.textPrimary, textAlignVertical: "top",
   },
 
-  empty: { alignItems: "center", gap: SPACING.sm, paddingVertical: SPACING.xxl },
-  emptyText: { ...TYPE.small, color: COLORS.textTertiary },
+  empty: {
+    alignItems: "center", gap: SPACING.md, paddingVertical: SPACING.xxl,
+    paddingHorizontal: SPACING.lg, borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
+  emptyIcon: {
+    width: ms(52), height: ms(52), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+  },
+  emptyText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center" },
+  emptyAction: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    height: ms(44), paddingHorizontal: SPACING.lg,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
+  },
+  emptyActionText: { ...TYPE.bodyStrong, color: COLORS.white },
 
   // ── Curved-wall controls ─────────────────────────────────────────────────
   curveCard: {
@@ -3514,7 +3942,10 @@ const styles = StyleSheet.create({
   curveTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
   curveCopy: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
   curveSegmented: { flexDirection: "row", padding: 3, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
-  curveSegment: { minWidth: ms(78), alignItems: "center", paddingVertical: SPACING.sm, borderRadius: RADIUS.pill },
+  curveSegment: {
+    minWidth: ms(78), minHeight: ms(40), alignItems: "center", justifyContent: "center",
+    paddingHorizontal: SPACING.md, borderRadius: RADIUS.pill,
+  },
   curveSegmentActive: { backgroundColor: COLORS.primaryDark },
   curveSegmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   curveSegmentTextActive: { color: COLORS.white },
@@ -3524,35 +3955,47 @@ const styles = StyleSheet.create({
   },
   curveDirection: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.md },
   curveDirectionButtons: { flexDirection: "row", gap: 4 },
-  curveDirectionButton: { paddingHorizontal: SPACING.md, paddingVertical: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveDirectionButton: {
+    minHeight: ms(38), justifyContent: "center",
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken,
+  },
   curveDirectionButtonActive: { backgroundColor: COLORS.primaryTint },
   curveDirectionText: { ...TYPE.caption, color: COLORS.textSecondary },
   curveDirectionTextActive: { color: COLORS.primaryDark },
   curveSettingLabel: { ...TYPE.caption, color: COLORS.textSecondary },
   curveStepper: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: ms(34) },
   curveStepperActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  curveStepButton: { width: ms(30), height: ms(30), alignItems: "center", justifyContent: "center", borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
+  curveStepButton: { width: ms(38), height: ms(38), alignItems: "center", justifyContent: "center", borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken },
   curveStepValue: { minWidth: ms(46), ...TYPE.caption, color: COLORS.textPrimary, textAlign: "center" },
-  curveReset: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 },
+  curveReset: {
+    flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5,
+    minHeight: ms(38), paddingHorizontal: SPACING.xs,
+  },
   curveResetText: { ...TYPE.caption, color: COLORS.primaryDark },
   curveApplyRow: { flexDirection: "row", gap: SPACING.sm, marginTop: 2 },
   curveCancel: {
-    paddingHorizontal: SPACING.md, height: ms(38), alignItems: "center", justifyContent: "center",
+    paddingHorizontal: SPACING.base, height: ms(44), alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
   curveCancelText: { ...TYPE.caption, color: COLORS.textSecondary },
   curveApply: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
-    height: ms(38), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+    height: ms(44), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
   },
   curveApplyText: { ...TYPE.caption, color: COLORS.white },
 
   // ── Footer ───────────────────────────────────────────────────────────────
   footer: {
-    flexDirection: "row", gap: SPACING.sm, paddingHorizontal: SPACING.base,
+    paddingHorizontal: SPACING.base,
     paddingTop: SPACING.sm + 2, paddingBottom: SPACING.sm + 2,
     backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border,
   },
+  footerRow: { flexDirection: "row", gap: SPACING.sm },
+  footerHint: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.xs, paddingBottom: SPACING.sm,
+  },
+  footerHintText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 16 },
   footerGhost: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
   footerGhostText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.textPrimary },
   footerPrimary: { backgroundColor: COLORS.primaryDark },

@@ -1146,7 +1146,14 @@ export default function PlanCanvas({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Zoom out"
-          style={[styles.viewportButton, zoom <= minZoom + 0.001 && styles.viewportButtonDisabled]}
+          accessibilityState={{ disabled: zoom <= minZoom + 0.001 }}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+          style={({ pressed }) => [
+            styles.viewportButton,
+            zoom <= minZoom + 0.001 && styles.viewportButtonDisabled,
+            pressed && styles.viewportButtonPressed,
+          ]}
           disabled={zoom <= minZoom + 0.001}
           onPress={() => zoomAt(viewportRef.current.zoom / 1.35)}
         >
@@ -1154,8 +1161,10 @@ export default function PlanCanvas({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Fit the whole plan on screen"
-          style={styles.viewportValue}
+          accessibilityLabel={`Zoom is ${Math.round(zoom * 100)} per cent. Fit the whole plan on screen`}
+          hitSlop={{ top: 6, bottom: 6 }}
+          android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+          style={({ pressed }) => [styles.viewportValue, pressed && styles.viewportButtonPressed]}
           onPress={fitToSheet}
         >
           <Text style={styles.viewportValueText}>{Math.round(zoom * 100)}%</Text>
@@ -1164,7 +1173,14 @@ export default function PlanCanvas({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Zoom in"
-          style={[styles.viewportButton, zoom >= MAX_ZOOM - 0.001 && styles.viewportButtonDisabled]}
+          accessibilityState={{ disabled: zoom >= MAX_ZOOM - 0.001 }}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+          style={({ pressed }) => [
+            styles.viewportButton,
+            zoom >= MAX_ZOOM - 0.001 && styles.viewportButtonDisabled,
+            pressed && styles.viewportButtonPressed,
+          ]}
           disabled={zoom >= MAX_ZOOM - 0.001}
           onPress={() => zoomAt(viewportRef.current.zoom * 1.35)}
         >
@@ -1226,19 +1242,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  // These float over the drawing surface, so a near-miss does not do nothing —
+  // it places a corner. 34×32 was not enough of a target for that; with the
+  // hitSlop above, each one now clears 44pt without growing the pill.
   viewportButton: {
-    width: 34,
-    height: 32,
+    width: 38,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: RADIUS.pill,
     backgroundColor: COLORS.surfaceSunken,
   },
   viewportButtonDisabled: { opacity: 0.36 },
+  viewportButtonPressed: { opacity: 0.6 },
   viewportButtonText: { ...TYPE.h3, color: COLORS.textPrimary, lineHeight: 21 },
-  viewportValue: { minWidth: 54, height: 32, alignItems: "center", justifyContent: "center" },
-  viewportValueText: { ...TYPE.caption, color: COLORS.textSecondary, fontSize: 10 },
-  viewportValueHint: { ...TYPE.caption, color: COLORS.textTertiary, fontSize: 8 },
+  viewportValue: { minWidth: 56, height: 38, alignItems: "center", justifyContent: "center" },
+  // 10pt and 8pt: the smaller of the two was below the floor for legible type,
+  // on the one label that tells you what the button does.
+  viewportValueText: { ...TYPE.caption, color: COLORS.textSecondary, fontSize: 11 },
+  viewportValueHint: { ...TYPE.caption, color: COLORS.textTertiary, fontSize: 9.5 },
   scaleBadge: {
     position: "absolute",
     left: 10,
