@@ -18,6 +18,10 @@ const PROBE_TIMEOUT_MS = 60_000;
 // itself, so it gets more room than the local spawn.
 const REMOTE_RENDER_TIMEOUT_MS = 300_000;
 const REMOTE_MODEL_TIMEOUT_MS = 120_000;
+// Each individual submit/poll request is short; REMOTE_RENDER_TIMEOUT_MS bounds
+// the wait overall.
+const REMOTE_REQUEST_TIMEOUT_MS = 60_000;
+const REMOTE_POLL_INTERVAL_MS = 3_000;
 // How long a failed readiness answer is trusted before it is worth asking
 // again. Long enough that a broken deploy is not re-probed once per request,
 // short enough that a Modal deploy fixing it takes effect without a restart.
@@ -42,6 +46,7 @@ const remoteEndpoint = () => (process.env.MODAL_WALKTHROUGH_ENDPOINT_URL || "").
 
 /** Set these only if the derivation below cannot work — see `siblingEndpoint`. */
 const SIBLING_OVERRIDE = {
+  result: "MODAL_WALKTHROUGH_RESULT_URL",
   model: "MODAL_WALKTHROUGH_MODEL_URL",
   health: "MODAL_WALKTHROUGH_HEALTH_URL",
 };
@@ -252,25 +257,19 @@ export async function buildWalkthroughModel(payload) {
   return response;
 }
 
-/**
- * Ask Modal to export the scene.
- *
- * Only the metadata comes back here. The GLB itself runs to tens of megabytes,
- * and pulling it through this response would mean holding the whole file in
- * memory on an instance that has better uses for it — so it is fetched lazily,
- * once, by the route that serves it.
- */
-async function buildOnModal(payload) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** One authenticated JSON call to the exporter, with a readable failure. */
+async function modalJson(url, init = {}) {
   let response;
   try {
-    response = await fetch(remoteEndpoint(), {
-      method: "POST",
+    response = await fetch(url, {
+      ...init,
       headers: {
-        "Content-Type": "application/json",
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
         Authorization: `Bearer ${process.env.MODAL_API_KEY}`,
       },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(REMOTE_RENDER_TIMEOUT_MS),
+      signal: AbortSignal.timeout(REMOTE_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     if (error.name === "TimeoutError" || error.name === "AbortError") {
@@ -286,13 +285,50 @@ async function buildOnModal(payload) {
     if (response.status === 401) throw new Error("The 3D rendering service rejected this server's credentials.");
     throw new Error("The exact walkthrough could not be generated.");
   }
-  if (!body.success) {
-    // `build()` already reduced the failure to a sentence; the traceback stayed
-    // in Modal's logs.
-    throw new Error(body.error || "The exact walkthrough could not be generated.");
-  }
-  // Same shape the local worker writes to its response file, minus the geometry.
   return body;
+}
+
+/**
+ * Ask Modal to export the scene, then wait for it.
+ *
+ * Submitting and polling rather than one blocking call, because Modal answers
+ * any web request still running after 150 seconds with a redirect to a result
+ * URL — and a furnished multi-room home takes longer than that to export, so
+ * that would be the normal case, not the exception.
+ *
+ * Only the metadata comes back here. The GLB itself runs to tens of megabytes,
+ * and pulling it through this response would mean holding the whole file in
+ * memory on an instance that has better uses for it — so it is fetched lazily,
+ * once, by the route that serves it.
+ */
+async function buildOnModal(payload) {
+  const resultUrl = siblingEndpoint("result");
+  if (!resultUrl) throw new Error(REMOTE_HINT);
+
+  const submitted = await modalJson(remoteEndpoint(), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!submitted.callId) throw new Error("The 3D rendering service did not accept this home.");
+
+  const deadline = Date.now() + REMOTE_RENDER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(REMOTE_POLL_INTERVAL_MS);
+
+    const body = await modalJson(`${resultUrl}?callId=${encodeURIComponent(submitted.callId)}`);
+    if (body.status !== "completed") continue;
+
+    if (!body.success) {
+      // The worker already reduced the failure to a sentence; the traceback
+      // stayed in Modal's logs.
+      throw new Error(body.error || "The exact walkthrough could not be generated.");
+    }
+    // Same shape the local worker writes to its response file, minus geometry.
+    const { status, ...rest } = body;
+    return rest;
+  }
+
+  throw new Error("The exact walkthrough renderer timed out.");
 }
 
 /** Run the exporter in an isolated process on this machine. */

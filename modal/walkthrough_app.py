@@ -27,11 +27,12 @@ Deploy (the secret already exists — it is the one the inference app uses):
 
 Endpoints produced:
     POST https://<workspace>--livinai-walkthrough-build.modal.run
+    GET  https://<workspace>--livinai-walkthrough-result.modal.run?callId=<id>
     GET  https://<workspace>--livinai-walkthrough-model.modal.run?name=<id>.glb
     GET  https://<workspace>--livinai-walkthrough-health.modal.run
 
 Set the first one as MODAL_WALKTHROUGH_ENDPOINT_URL on the Render service; the
-other two are derived from it by name.
+other three are derived from it by name.
 """
 
 from __future__ import annotations
@@ -123,9 +124,14 @@ renderer_image = (
             "OPEN3D_CPU_RENDERING": "true",
             "PYTHONUNBUFFERED": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
-            "WALKTHROUGH_OUTPUT_DIR": OUTPUT_DIR,
         }
     )
+    # WALKTHROUGH_OUTPUT_DIR is deliberately NOT set here. render_worker creates
+    # that directory at import, the verification step below imports it, and a
+    # directory created during the build would leave /cache non-empty — which
+    # makes Modal refuse to mount the volume over it at runtime
+    # ("cannot mount volume on non-empty path"). `_worker()` sets it instead,
+    # inside the container, where /cache is the volume.
     # `copy=True` bakes the exporter into a layer so the verification below can
     # import it. The engine's material and furniture assets are ~120 MB; Modal
     # hashes the directory, so only a real change re-uploads it.
@@ -145,7 +151,13 @@ renderer_image = (
 
 
 def _worker():
-    """Import the bundled exporter, adding its root to the path once."""
+    """Import the bundled exporter, adding its root to the path once.
+
+    The output directory is set here rather than in the image, and it has to be
+    set before the import: render_worker reads it at module scope. See the note
+    on the image's `.env` call.
+    """
+    os.environ["WALKTHROUGH_OUTPUT_DIR"] = OUTPUT_DIR
     if RENDERER_ROOT not in sys.path:
         sys.path.insert(0, RENDERER_ROOT)
     import render_worker
@@ -168,35 +180,24 @@ def _model_path(name: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# ENDPOINTS
+# THE WORK
 # ---------------------------------------------------------------------------
-#
-# Building and downloading are deliberately separate calls. A furnished
-# multi-room GLB runs to tens of megabytes, and returning it inline — base64'd
-# into the session response — would make the Render instance hold the whole
-# thing in memory as a string just to write it to disk. Splitting them lets the
-# API stream the file, and lets it skip the transfer entirely for a scene it has
-# already cached.
 
 
 @app.function(
     image=renderer_image,
-    secrets=[api_key_secret],
     volumes={CACHE_ROOT: cache_vol},
     cpu=2.0,
     # Open3D plus a furnished multi-room scene does not fit in 512 MB. This is
     # the memory the Render service no longer has to reserve around the clock.
     memory=4096,
-    timeout=600,
+    timeout=900,
     # Keep a warm container for a few minutes: someone adjusting finishes
     # rebuilds the same home several times in a row.
     scaledown_window=300,
 )
-@modal.fastapi_endpoint(method="POST", docs=True)
-def build(payload: dict, authorization: str = Header(default="") if Header else ""):
-    """Build the canonical scene and return its metadata (not the geometry)."""
-    _require_token(authorization)
-
+def build_scene(payload: dict) -> dict:
+    """Export the scene. Returns metadata only — the GLB stays on the volume."""
     try:
         result = _worker().build(payload or {})
     except Exception as error:
@@ -211,6 +212,53 @@ def build(payload: dict, authorization: str = Header(default="") if Header else 
     if not result.get("cached"):
         cache_vol.commit()
     return result
+
+
+# ---------------------------------------------------------------------------
+# ENDPOINTS
+# ---------------------------------------------------------------------------
+#
+# Submitting and collecting are separate calls because Modal answers any web
+# request still running after 150 seconds with a 303 to a result URL. Following
+# that redirect is not something to build on — a furnished multi-room home
+# routinely takes longer than 150 seconds to export, so the redirect would be
+# the normal case rather than the exception. `build` therefore spawns the work
+# and returns immediately; the API polls `result`, exactly as it polls RunPod.
+#
+# Downloading is separate again. A furnished GLB runs to tens of megabytes, and
+# returning it inline — base64'd into the session response — would make the
+# Render instance hold the whole thing in memory as a string just to write it to
+# disk. Splitting it lets the API stream the file, and lets it skip the transfer
+# entirely for a scene it has already cached.
+
+
+@app.function(image=renderer_image, secrets=[api_key_secret], timeout=60)
+@modal.fastapi_endpoint(method="POST", docs=True)
+def build(payload: dict, authorization: str = Header(default="") if Header else ""):
+    """Start an export. Returns the call id to poll `result` with."""
+    _require_token(authorization)
+    call = build_scene.spawn(payload or {})
+    return {"callId": call.object_id}
+
+
+@app.function(image=renderer_image, secrets=[api_key_secret], timeout=60)
+@modal.fastapi_endpoint(method="GET")
+def result(callId: str = "", authorization: str = Header(default="") if Header else ""):
+    """Report on a spawned export: pending, or the finished metadata."""
+    _require_token(authorization)
+    if not callId:
+        raise HTTPException(status_code=400, detail="Missing callId.")
+
+    call = modal.FunctionCall.from_id(callId)
+    try:
+        # timeout=0 asks "is it done yet" without waiting.
+        return {"status": "completed", **call.get(timeout=0)}
+    except TimeoutError:
+        return {"status": "pending"}
+    except Exception as error:
+        # The export raising rather than returning is a bug in the worker, but
+        # it still has to reach the caller as a sentence.
+        return {"status": "completed", "success": False, "error": str(error)}
 
 
 @app.function(
@@ -282,10 +330,9 @@ def main():
         "roomConfigs": [{"name": "Living Room", "roomType": "Living Room", "style": "Modern"}],
         "settings": {},
     }
-    # `.remote()` bypasses the HTTP layer but not the check inside it, so the
-    # smoke test has to present the same token the Render service does.
-    token = os.environ.get("LIVINAI_API_KEY", "")
-    result = build.remote(payload, authorization=f"Bearer {token}")
-    if not result.get("success"):
-        raise SystemExit(f"export failed: {result.get('error')}")
-    print(f"built {result['modelName']} (cached={result['cached']})")
+    # Straight to the work, skipping the HTTP layer and its token check —
+    # a webhook function cannot be invoked with `.remote()` anyway.
+    built = build_scene.remote(payload)
+    if not built.get("success"):
+        raise SystemExit(f"export failed: {built.get('error')}")
+    print(f"built {built['modelName']} (cached={built['cached']})")
