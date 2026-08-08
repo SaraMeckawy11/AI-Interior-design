@@ -10,7 +10,7 @@ export default function ProfileHeader({ isPremium }) {
 
   useEffect(() => {
     checkAuth(); // Load from AsyncStorage
-  }, []);
+  }, [checkAuth]);
 
   const { user } = useAuthStore();
 
@@ -20,42 +20,64 @@ export default function ProfileHeader({ isPremium }) {
   // API uses `username`/`profileImage`. The header has to survive both, or it
   // renders an empty line once the DB copy replaces the Google one.
   const displayName = user.username || user.name || 'Your account';
+  const email = user.email || 'No email added';
   const premium = isPremium ?? user.isPremium ?? false;
 
   return (
-    // No avatar disc. Most accounts here sign in with Google and have no photo
-    // set, and Google then serves a generated image of the first letter on a
-    // coloured circle — a monogram is a placeholder pretending to be content, so
-    // the name, the email and the plan take the full width instead.
-    <View style={styles.profileHeader}>
-      <View style={styles.profileInfo}>
-        <Text style={styles.username} numberOfLines={1}>
-          {displayName}
-        </Text>
-        <Text style={styles.email} numberOfLines={1}>
-          {user.email}
-        </Text>
+    <View
+      style={styles.profileHeader}
+      accessibilityRole="summary"
+      accessibilityLabel={`${displayName}, ${email}, ${premium ? 'Premium' : 'Free plan'}`}
+    >
+      <View style={styles.profileHeaderAccent} />
 
-        <View
-          style={[
-            styles.planBadge,
-            premium ? styles.planBadgePremium : styles.planBadgeFree,
-          ]}
-        >
-          <Ionicons
-            name={premium ? 'sparkles' : 'person-outline'}
-            size={11}
-            color={premium ? COLORS.accentStrong : COLORS.textSecondary}
-          />
-          <Text
+      {/* This is deliberately an account glyph rather than a fake avatar. It
+          anchors the identity block without implying the user uploaded a photo. */}
+      <View style={styles.profileIdentityIcon} importantForAccessibility="no">
+        <Ionicons name="person-outline" size={22} color={COLORS.primaryDark} />
+      </View>
+
+      <View style={styles.profileInfo}>
+        <View style={styles.profileMetaRow}>
+          <Text style={styles.profileEyebrow}>Your account</Text>
+
+          <View
             style={[
-              styles.planBadgeText,
-              premium
-                ? styles.planBadgeTextPremium
-                : styles.planBadgeTextFree,
+              styles.planBadge,
+              premium ? styles.planBadgePremium : styles.planBadgeFree,
             ]}
           >
-            {premium ? 'Premium' : 'Free plan'}
+            <Ionicons
+              name={premium ? 'sparkles' : 'leaf-outline'}
+              size={11}
+              color={premium ? COLORS.accentStrong : COLORS.primaryDark}
+            />
+            <Text
+              style={[
+                styles.planBadgeText,
+                premium
+                  ? styles.planBadgeTextPremium
+                  : styles.planBadgeTextFree,
+              ]}
+            >
+              {premium ? 'Premium' : 'Free plan'}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={styles.username} numberOfLines={1} ellipsizeMode="tail">
+          {displayName}
+        </Text>
+
+        <View style={styles.emailRow}>
+          <Ionicons
+            name="mail-outline"
+            size={14}
+            color={COLORS.textSecondary}
+            importantForAccessibility="no"
+          />
+          <Text style={styles.email} numberOfLines={1} ellipsizeMode="tail">
+            {email}
           </Text>
         </View>
       </View>
