@@ -6,7 +6,7 @@ import {
 import { scale, verticalScale } from "react-native-size-matters";
 import { fontSizes, windowWidth } from "@/themes/app.constant";
 import { BlurView } from "expo-blur";
-import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
 import JWT from "expo-jwt";
 import axios from "axios";
 import { useRouter } from "expo-router";
@@ -21,6 +21,8 @@ export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
   const loginGoogle = useAuthStore((state) => state.loginGoogle);
   const [isLogin, setIsLogin] = useState(true); // ✅ toggle
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState(null);
 
   const configureGoogleSignIn = () => {
     if (Platform.OS === "ios") {
@@ -56,11 +58,35 @@ export default function AuthModal({ setModalVisible }) {
       setModalVisible(false);
       router.push("/create");
     } catch (err) {
-      console.error("authHandler error:", err.response?.data || err.message);
+      const detail = err.response?.data?.message || err.response?.data || err.message;
+      console.error("authHandler error:", detail);
+      throw new Error(
+        typeof detail === "string" ? detail : "Could not reach the Livinai server."
+      );
+    }
+  };
+
+  // Google returns codes, not sentences. Map the ones a user can actually act on.
+  const describeSignInError = (error) => {
+    switch (error?.code) {
+      case statusCodes.SIGN_IN_CANCELLED:
+        return null; // The user backed out on purpose; nothing to report.
+      case statusCodes.IN_PROGRESS:
+        return null; // A sign-in is already running; the guard below covers this.
+      case statusCodes.PLAY_SERVICES_NOT_AVAILABLE:
+        return "Google Play services isn't available on this device.";
+      case statusCodes.DEVELOPER_ERROR:
+        return "This build isn't registered for Google Sign-In. Check the app's signing certificate.";
+      default:
+        return error?.message || "Sign-in failed. Please try again.";
     }
   };
 
   const handleGoogleSignIn = async () => {
+    if (isSigningIn) return; // Overlapping signIn() calls reject each other.
+    setIsSigningIn(true);
+    setSignInError(null);
+
     try {
       await GoogleSignin.hasPlayServices();
       await GoogleSignin.signOut();
@@ -69,13 +95,16 @@ export default function AuthModal({ setModalVisible }) {
       const { name, email, photo } = userInfo?.data?.user || {};
 
       if (!name || !email) {
-        console.warn("Incomplete user info from Google.");
+        setSignInError("Google didn't return your name and email.");
         return;
       }
 
       await authHandler({ name, email, avatar: photo });
     } catch (error) {
       console.log("Google sign-in error:", error.message || error);
+      setSignInError(describeSignInError(error));
+    } finally {
+      setIsSigningIn(false);
     }
   };
 
@@ -108,18 +137,39 @@ export default function AuthModal({ setModalVisible }) {
           paddingTop: verticalScale(4),
           fontFamily: "Poppins_300Light",
         }}>
-          It's easier than your imagination!
+          It&apos;s easier than your imagination!
         </Text>
         
         <View style={styles.googleContainer}>
-          <Pressable onPress={handleGoogleSignIn} style={styles.googleButton}>
+          <Pressable
+            onPress={handleGoogleSignIn}
+            disabled={isSigningIn}
+            style={[styles.googleButton, isSigningIn && { opacity: 0.6 }]}
+          >
             <Image
               source={require("@/assets/images/onboarding/google.png")}
               style={styles.googleIcon}
             />
-            <Text style={styles.googleText}>Sign in with Google</Text>
+            <Text style={styles.googleText}>
+              {isSigningIn ? "Signing in…" : "Sign in with Google"}
+            </Text>
           </Pressable>
         </View>
+
+        {signInError && (
+          <Text
+            style={{
+              color: "#c0392b",
+              fontSize: fontSizes.FONT15,
+              fontFamily: "Poppins_300Light",
+              paddingHorizontal: scale(20),
+              paddingTop: verticalScale(4),
+              textAlign: "center",
+            }}
+          >
+            {signInError}
+          </Text>
+        )}
 
       </Pressable>
     </BlurView>

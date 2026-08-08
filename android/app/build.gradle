@@ -108,11 +108,23 @@ android {
             keyAlias "3ba779c9cd2f5a78c894029bd70ab06d"
             keyPassword "4d9a6373cebcdeb44e0fb984db267544"
         }
+        // Google Sign-In resolves its OAuth client by package name + signing SHA-1.
+        // The debug keystore's fingerprint is not registered, so debug builds fail with
+        // DEVELOPER_ERROR. Sign them with the real upload keystore instead.
+        debugWithReleaseKey {
+            storeFile rootProject.file("../credentials/android/keystore.jks")
+            storePassword "970f6503d9acf3c781fd580397097c87"
+            keyAlias "3ba779c9cd2f5a78c894029bd70ab06d"
+            keyPassword "4d9a6373cebcdeb44e0fb984db267544"
+        }
     }
 
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            // Fall back to the plain debug keystore when credentials/ is not checked out.
+            signingConfig signingConfigs.debugWithReleaseKey.storeFile?.exists()
+                ? signingConfigs.debugWithReleaseKey
+                : signingConfigs.debug
         }
         release {
             signingConfig signingConfigs.release  // ✅ use release keystore
