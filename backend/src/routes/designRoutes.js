@@ -19,14 +19,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // ───────────────────────────────────────────────────────────────────────────
 // Inference engines
 //
-// RunPod runs first and Modal catches whatever it drops. The two take the same
+// Modal runs first and RunPod catches whatever it drops. Both take the same
 // brief and return the same thing — a base64 PNG — so the route below does not
 // care which one answered.
 //
-// They are not the same engine, though: RunPod is the SD 1.5 + ControlNet
-// handler in `interiorAI/`, Modal is FLUX.2 [klein]. A design served by the
-// fallback will not look like one served by the primary. The logs name the
-// engine for exactly that reason.
+// They are not the same engine, though. Modal is FLUX.2 [klein], which these
+// prompts were written for; RunPod is the older SD 1.5 + ControlNet handler in
+// `interiorAI/`. They share prompt_engine.py, so the brief means the same thing
+// to both, but the picture does not come out the same. RunPod is here to keep a
+// Modal outage from reaching the user as an error, not to share the load — so
+// it stays second even though it is the cheaper of the two. The logs name the
+// engine that answered for exactly that reason.
 // ───────────────────────────────────────────────────────────────────────────
 
 const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || "9x2kmfa8z6483c";
@@ -201,25 +204,25 @@ router.post("/", isAuthenticated, async (req, res) => {
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
     };
 
-    // RunPod first, Modal second. The design credit was already spent above and
+    // Modal first, RunPod second. The design credit was already spent above and
     // is not refunded if both fail — same as before this fallback existed.
     let generatedImageBase64 = null;
-    let engine = "runpod";
+    let engine = "modal";
 
-    console.log("Submitting job to RunPod endpoint", RUNPOD_ENDPOINT_ID);
+    console.log("Submitting job to Modal endpoint");
     try {
-      generatedImageBase64 = await generateWithRunPod(payload);
-    } catch (runpodError) {
-      console.error("RunPod request failed, falling back to Modal:", runpodError.message);
-      engine = "modal";
+      generatedImageBase64 = await generateWithModal(payload);
+    } catch (modalError) {
+      console.error(
+        "Modal request failed, falling back to RunPod:",
+        modalError.response?.status,
+        modalError.response?.data || modalError.message,
+      );
+      engine = "runpod";
       try {
-        generatedImageBase64 = await generateWithModal(payload);
-      } catch (modalError) {
-        console.error(
-          "Modal request failed too:",
-          modalError.response?.status,
-          modalError.response?.data || modalError.message,
-        );
+        generatedImageBase64 = await generateWithRunPod(payload);
+      } catch (runpodError) {
+        console.error("RunPod request failed too:", runpodError.message);
         return res.status(502).json({ message: "AI service failed. Please try again." });
       }
     }
