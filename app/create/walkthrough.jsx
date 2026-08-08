@@ -57,6 +57,7 @@ import {
   WALL_FINISHES,
   buildLayout,
 } from "../../lib/walkthroughScene";
+import { LIVINAI_WEB_RENDERER_REVISION } from "../../lib/exactWalkthroughScene";
 import {
   createProjectId,
   deleteProject as deleteStoredProject,
@@ -211,6 +212,11 @@ export default function WalkthroughScreen() {
   const [snapshotKind, setSnapshotKind] = useState("capture");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const [exactScene, setExactScene] = useState(null);
+  const [exactSceneBaseUrl, setExactSceneBaseUrl] = useState("");
+  const [exactSceneLoading, setExactSceneLoading] = useState(false);
+  const [exactSceneError, setExactSceneError] = useState("");
+  const [exactSceneRetry, setExactSceneRetry] = useState(0);
 
   // The style step asks seven questions. Four of them decide how a home reads;
   // the rest are refinements, so they stay folded away until asked for.
@@ -251,10 +257,74 @@ export default function WalkthroughScreen() {
   const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
   const currentRender = aiRenders[aiKey];
 
-  // The walkthrough is built entirely on the device: the plan you drew, the
-  // Livinai furniture package that ships with the app, and the same room
-  // programme the web studio uses. There is no renderer service to reach, so
-  // there is nothing here to fail, wait on, or fall back from.
+  // Build the scene with the canonical Livinai_web exporter. Rendering a
+  // second, approximate room programme on-device was the source of mismatched
+  // dimensions, furniture families, placement and finishes. The exporter owns
+  // all of those decisions and returns one textured GLB for the phone to view.
+  useEffect(() => {
+    if (view !== "editor" || stage !== STAGES.length - 1 || !layout.rooms.length) return undefined;
+
+    const rendererRoot = (process.env.EXPO_PUBLIC_SERVER_URI || "").replace(/\/$/, "");
+
+    if (!rendererRoot) {
+      setExactScene(null);
+      setExactSceneBaseUrl("");
+      setExactSceneLoading(false);
+      setExactSceneError("The Livinai API URL is not configured.");
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setExactScene(null);
+    setExactSceneBaseUrl("");
+    setSceneInfo(null);
+    setExactSceneLoading(true);
+    setExactSceneError("");
+
+    (async () => {
+      try {
+        const response = await fetch(`${rendererRoot}/api/walkthrough/realtime/session`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            rendererRevision: LIVINAI_WEB_RENDERER_REVISION,
+            rooms: layout.rooms,
+            doors: layout.doors.map((opening) => opening.slice(0, 2)),
+            windows: layout.windows.map((opening) => opening.slice(0, 2)),
+            balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
+            pixelsPerMeter: layout.pixelsPerMeter,
+            roomConfigs,
+            settings: { ...settings, useCatalog: true },
+            width: 960,
+            height: 600,
+          }),
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.detail || data.message || "The exact Livinai_web scene is unavailable.");
+        }
+        if (!data.modelUrl || !Array.isArray(data.furniture) || !Array.isArray(data.roomCenters)) {
+          throw new Error("The Livinai_web renderer returned an incomplete scene.");
+        }
+        if (controller.signal.aborted) return;
+        const origin = rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
+        setExactScene(data);
+        setExactSceneBaseUrl(origin);
+      } catch (error) {
+        if (error.name === "AbortError") return;
+        setExactScene(null);
+        setExactSceneError(error.message || "The exact Livinai_web scene is unavailable.");
+      } finally {
+        if (!controller.signal.aborted) setExactSceneLoading(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [exactSceneRetry, layout, roomConfigs, settings, stage, token, view]);
 
   // ── Autosave ─────────────────────────────────────────────────────────────
   // Drawing a home takes real effort; geometry is saved in normalized canvas
@@ -1220,6 +1290,10 @@ export default function WalkthroughScreen() {
               roomConfigs={roomConfigs}
               settings={settings}
               furnitureEdits={furnitureEdits}
+              exactScene={exactScene}
+              exactSceneBaseUrl={exactSceneBaseUrl}
+              exactSceneLoading={exactSceneLoading}
+              exactSceneError={exactSceneError}
               viewMode={viewMode}
               night={night}
               selectedRoom={selectedRoom}
@@ -1237,6 +1311,11 @@ export default function WalkthroughScreen() {
               onSnapshot={handleSnapshot}
               onFurnitureChange={updateFurnitureEdit}
               onDiagnostic={setNotice}
+              onExactError={(message) => {
+                setExactScene(null);
+                setExactSceneError(message);
+              }}
+              onRetryExact={() => setExactSceneRetry((value) => value + 1)}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
               onFocusRoom={focusRoom}
@@ -1684,6 +1763,10 @@ function WalkthroughStage({
   roomConfigs,
   settings,
   furnitureEdits,
+  exactScene,
+  exactSceneBaseUrl,
+  exactSceneLoading,
+  exactSceneError,
   viewMode,
   night,
   selectedRoom,
@@ -1701,6 +1784,8 @@ function WalkthroughStage({
   onSnapshot,
   onFurnitureChange,
   onDiagnostic,
+  onExactError,
+  onRetryExact,
   onChangeMode,
   onToggleNight,
   onFocusRoom,
@@ -1726,22 +1811,49 @@ function WalkthroughStage({
 
   return (
     <View style={styles.viewerWrap}>
-      <WalkthroughViewer
-        ref={viewerRef}
-        layout={layout}
-        roomConfigs={roomConfigs}
-        settings={settings}
-        furnitureEdits={furnitureEdits}
-        mode={viewMode}
-        roomIndex={selectedRoom}
-        night={night}
-        onReady={onReady}
-        onSceneUpdate={onSceneUpdate}
-        onSelect={onSelect}
-        onSnapshot={onSnapshot}
-        onFurnitureChange={onFurnitureChange}
-        onDiagnostic={onDiagnostic}
-      />
+      {exactScene ? (
+        <WalkthroughViewer
+          ref={viewerRef}
+          layout={layout}
+          roomConfigs={roomConfigs}
+          settings={settings}
+          furnitureEdits={furnitureEdits}
+          exactScene={exactScene}
+          exactBaseUrl={exactSceneBaseUrl}
+          mode={viewMode}
+          roomIndex={selectedRoom}
+          night={night}
+          onReady={onReady}
+          onSceneUpdate={onSceneUpdate}
+          onSelect={onSelect}
+          onSnapshot={onSnapshot}
+          onFurnitureChange={onFurnitureChange}
+          onDiagnostic={onDiagnostic}
+          onError={onExactError}
+        />
+      ) : (
+        <View style={styles.exactSceneState}>
+          {exactSceneLoading ? (
+            <>
+              <ActivityIndicator size="large" color={COLORS.brand800} />
+              <Text style={styles.exactSceneTitle}>Building the exact Livinai_web scene</Text>
+              <Text style={styles.exactSceneBody}>
+                Loading the original dimensions, furniture, placement and PBR materials.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="warning-outline" size={30} color={COLORS.danger} />
+              <Text style={styles.exactSceneTitle}>Exact walkthrough unavailable</Text>
+              <Text style={styles.exactSceneBody}>{exactSceneError || "The canonical renderer did not respond."}</Text>
+              <Pressable style={styles.exactSceneRetry} onPress={onRetryExact}>
+                <Ionicons name="refresh" size={16} color={COLORS.white} />
+                <Text style={styles.exactSceneRetryText}>Try again</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+      )}
 
       {showingAi && (
         <View style={styles.aiLayer}>
@@ -3099,6 +3211,36 @@ const styles = StyleSheet.create({
   // stacks in flow, so adding or hiding a control cannot push another one off
   // screen or under the home indicator.
   viewerWrap: { flex: 1, backgroundColor: COLORS.surfaceAlt },
+  exactSceneState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: SPACING.xxl,
+    backgroundColor: COLORS.surfaceAlt,
+  },
+  exactSceneTitle: {
+    ...TYPE.h3,
+    color: COLORS.textPrimary,
+    marginTop: SPACING.base,
+    textAlign: "center",
+  },
+  exactSceneBody: {
+    ...TYPE.small,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+    textAlign: "center",
+  },
+  exactSceneRetry: {
+    marginTop: SPACING.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.brand800,
+  },
+  exactSceneRetryText: { ...TYPE.button, color: COLORS.white },
   viewerOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "space-between",

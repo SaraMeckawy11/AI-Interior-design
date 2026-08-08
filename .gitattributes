@@ -1,0 +1,6 @@
+backend/renderer/engine/interior_plan/assets/**/*.bin filter=lfs diff=lfs merge=lfs -text
+backend/renderer/engine/interior_plan/assets/**/*.blend filter=lfs diff=lfs merge=lfs -text
+backend/renderer/engine/interior_plan/assets/**/*.glb filter=lfs diff=lfs merge=lfs -text
+backend/renderer/engine/interior_plan/assets/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+backend/renderer/engine/interior_plan/assets/**/*.png filter=lfs diff=lfs merge=lfs -text
+backend/renderer/engine/interior_plan/assets/**/*.usdc filter=lfs diff=lfs merge=lfs -text

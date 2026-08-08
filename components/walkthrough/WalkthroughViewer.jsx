@@ -14,6 +14,7 @@ import COLORS from "../../constants/colors";
 import { RADIUS, SPACING, TYPE } from "../../constants/theme";
 import { buildWalkthroughHtml, catalogKeysFor } from "../../lib/walkthroughScene";
 import { loadFurnitureModel } from "../../lib/furnitureCatalog";
+import { buildExactWalkthroughHtml } from "../../lib/exactWalkthroughScene";
 
 /**
  * Hosts the three.js walkthrough document and forwards camera / scene commands
@@ -45,6 +46,8 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     roomConfigs,
     settings,
     furnitureEdits = {},
+    exactScene = null,
+    exactBaseUrl = "",
     mode = "walk",
     roomIndex = 0,
     night = false,
@@ -64,13 +67,18 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
   const [message, setMessage] = useState("");
 
   const html = useMemo(
-    () => buildWalkthroughHtml({ layout, roomConfigs, settings, furnitureEdits, mode, roomIndex, night }),
+    () => exactScene
+      ? buildExactWalkthroughHtml({ scene: exactScene, settings, furnitureEdits, mode, roomIndex, night })
+      : buildWalkthroughHtml({ layout, roomConfigs, settings, furnitureEdits, mode, roomIndex, night }),
     // Deliberately excludes mode/roomIndex/night — see the note above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layout, roomConfigs, settings],
+    [exactScene, layout, roomConfigs, settings],
   );
 
-  const catalogKeys = useMemo(() => catalogKeysFor(roomConfigs), [roomConfigs]);
+  const catalogKeys = useMemo(
+    () => exactScene ? [] : catalogKeysFor(roomConfigs),
+    [exactScene, roomConfigs],
+  );
 
   useEffect(() => {
     setStatus("loading");
@@ -147,13 +155,13 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
       if (data.type === "ready") {
         setStatus("ready");
         if (__DEV__) {
-          console.log(
-            `[walkthrough] engine=${data.engine} three=r${data.threeVersion} `
-            + `${data.objects} pieces staged, ${data.catalogRequested} models queued`,
-          );
+          console.log(data.exact
+            ? `[walkthrough] exact Livinai_web scene: ${data.rooms} rooms, ${data.objects} editable objects`
+            : `[walkthrough] engine=${data.engine} three=r${data.threeVersion} `
+              + `${data.objects} pieces staged, ${data.catalogRequested} models queued`);
         }
         onReady?.(data);
-        streamCatalog();
+        if (!data.exact) streamCatalog();
       } else if (data.type === "sceneUpdate") {
         // A model finished streaming and swapped in. Same shape as `ready`, so
         // the furniture counters stay live as the room sharpens.
@@ -182,7 +190,12 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     <View style={styles.container}>
       <WebView
         ref={webRef}
-        source={{ html, baseUrl: "https://livinai.local/" }}
+        source={{
+          html,
+          baseUrl: exactScene && exactBaseUrl
+            ? `${exactBaseUrl.replace(/\/$/, "")}/`
+            : "https://livinai.local/",
+        }}
         originWhitelist={["*"]}
         style={styles.web}
         containerStyle={styles.web}

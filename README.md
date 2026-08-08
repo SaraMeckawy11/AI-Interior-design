@@ -5,7 +5,7 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ## 🚀 Features
 
 - **AI Room Generation:** Redesign interiors (bedrooms, living rooms, kitchens, etc.) and exteriors with different architectural styles (modern, minimalist, industrial, etc.), powered by `black-forest-labs/FLUX.2-klein-4B` with the Gen‑Klein prompt architecture shared with the Livinai web studio.
-- **3D Walkthrough:** Draw a floor plan on a metric grid, assign a type and style to each room, then walk through the furnished result in real time. The scene — walls, openings, materials, lighting and furniture — is generated entirely on the device. From any viewpoint you can hand the live frame to the AI, which resolves it into a photoreal render while preserving the exact geometry, openings and furniture placement.
+- **3D Walkthrough:** Draw a floor plan on a metric grid, assign a type and style to each room, then walk through the furnished result in real time. The exact `Livinai_web` walkthrough exporter—vendored in this repository—builds the measured geometry, web furniture variations, placement, and PBR materials as one textured GLB. The app displays that scene instead of reconstructing an approximation on-device.
 - **One entry point per starting material:** a room photo (Interior), an outdoor photo (Exterior), or a plan (3D Walkthrough — which also links through to the AI floor-plan render for anyone starting from a photo of a plan).
 - **Smart Image Processing:** Advanced AI models seamlessly apply requested color tones and styles to the user's provided baseline images.
 - **Virtual Coins System:** A flexible monetization system where users consume virtual coins to generate designs.

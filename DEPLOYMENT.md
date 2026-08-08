@@ -1,13 +1,13 @@
 # Livinai — updating the deployed stack
 
-This release changes the AI engine and adds a new client-side feature. Nothing
-breaks if you deploy only part of it, but the new engine will not be used until
-step 1 and step 2 are both done.
+This release changes the AI engine and makes the canonical Livinai_web
+exporter authoritative for the 3D walkthrough. Its Python source and assets
+are bundled inside this repository's backend.
 
 | Piece | Where it runs | Must be redeployed? |
 |---|---|---|
 | Gen‑Klein (FLUX.2 [klein]) inference | Modal | **Yes** |
-| Node API (`/api/designs`, `/api/designs/walkthrough`) | your Node host (Render/Railway/VPS) | **Yes** |
+| Node API + bundled Livinai_web GLB exporter | backend Docker image | **Yes** |
 | Expo app (3D walkthrough, new UI) | EAS build / OTA update | **Yes** |
 | RunPod handlers (`interiorAI/`, `interio/`) | RunPod | Only if you still use them |
 
@@ -85,8 +85,8 @@ Redeploy `backend/`. Changes:
 * `POST /api/designs` now forwards `material`, `lighting`, `preserveGeometry`
   and `creativity` to Modal. Older app builds that omit them still work — the
   prompt engine applies the same defaults.
-* `POST /api/designs/walkthrough` is **new**: it stores a frame captured from
-  the on-device 3D walkthrough. It uploads to Cloudinary and saves a `Design`,
+* `POST /api/designs/walkthrough` stores a frame captured from the live 3D
+  walkthrough. It uploads to Cloudinary and saves a `Design`,
   and it consumes **no** design credits or coins, because no inference runs.
 * The walkthrough's **"Render with AI"** button goes through the normal
   `POST /api/designs` route — it sends the live 3D frame with
@@ -101,7 +101,12 @@ Redeploy `backend/`. Changes:
   removed from Cloudinary. Existing documents keep the old behaviour; new ones
   delete cleanly.
 
-No new environment variables.
+Deploy `backend/Dockerfile` with the service's **root/build directory set to
+`backend`**. It installs Node, Python, Open3D, Shapely and
+Trimesh, then runs the normal Express API. The API launches
+`backend/renderer/render_worker.py` directly and serves its content-addressed
+GLB from the same `/api/walkthrough` origin. There is no renderer URL,
+`INTERIOR_PLAN_ROOT`, second checkout, or sidecar service to configure.
 
 ---
 
@@ -116,31 +121,27 @@ npx expo start --dev-client     # verify locally
 eas build --platform android    # or ios
 ```
 
-### Furniture catalogue
+### Canonical walkthrough renderer
 
-The walkthrough uses the web studio's own furniture meshes. The `.glb` files
-live in `assets/models/`, and `lib/furnitureCatalog.js` is generated from them:
+The Explore screen sends the measured polygons, openings, pixels-per-metre,
+room configurations and finish settings to the exact Livinai_web exporter
+snapshot under `backend/renderer`. It does not substitute the small legacy catalogue if that
+request fails: the app shows a retryable error instead of presenting incorrect
+geometry or furniture as an exact result.
 
-```bash
-node scripts/build-furniture-catalog.mjs
-```
-
-Re-run that after changing anything in `assets/models/` and commit the result.
-The generated module holds baked geometry as typed arrays, so the WebView needs
-no glTF loader — three.js dropped its UMD loader builds at r148, and shipping an
-import map would have meant a hard failure on older WebViews.
+For local development, create `backend/renderer/.venv`, install
+`backend/renderer/requirements.txt`, and optionally set `WALKTHROUGH_PYTHON` to
+that environment's Python executable. The Expo app uses only
+`EXPO_PUBLIC_SERVER_URI`, exactly like the rest of the API.
 
 ### One runtime dependency to know about
 
-The walkthrough loads **three.js r159 from a CDN** inside the WebView
-(`unpkg`, falling back to `jsdelivr`, then `cdnjs`). The scene itself — geometry,
-furniture, materials, textures — is generated entirely on the device; only the
-engine script is fetched. The screen shows a clear message if all three CDNs are
-unreachable.
-
-If you would rather not depend on a CDN, vendor `three.min.js` into
-`assets/` and inline it in `lib/walkthroughScene.js` where `THREE_SOURCES` is
-declared. That adds roughly 600 KB to the bundle.
+The app bundles the same **three.js r185**, GLTFLoader and RoomEnvironment used
+by Livinai_web in `lib/exactThreeRuntime.js`; the walkthrough has no CDN runtime
+dependency. Geometry, furniture identity, dimensions, transforms, and mapped
+materials come from the exporter-produced GLB. Run
+`npm run build:exact-viewer` after intentionally changing the pinned Three.js
+version.
 
 ---
 

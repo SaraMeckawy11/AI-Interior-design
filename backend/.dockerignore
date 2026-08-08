@@ -1,0 +1,7 @@
+node_modules
+.env
+.expo
+renderer/generated/*.glb
+renderer/generated/*.json
+**/__pycache__
+**/*.pyc
