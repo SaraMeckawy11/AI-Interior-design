@@ -2372,7 +2372,7 @@ function WalkthroughStage({
 }) {
   const insets = useSafeAreaInsets();
   const showingAi = outputMode === "ai" && currentRender;
-  const sheetOpen = !!inspected || panel === "ai" || panel === "info";
+  const sheetOpen = !!inspected || panel === "ai";
   const showStick = viewMode === "walk" && !showingAi && !sheetOpen;
   const showRooms = roomConfigs.length > 1 && !showingAi;
   // Controls only make sense once there is a home to point them at. Showing a
@@ -2669,55 +2669,40 @@ function WalkthroughStage({
 
           {showStick && <MoveStick onChange={drive} />}
 
-          {/* Two buttons, one line. The dock used to carry a status strip, a
-              furniture-count chip, a "Photo" button and the render button —
-              four things over the room, three of which were read-only. The
-              state they reported now lives behind the info button, which spins
-              while the scene is still being prepared, so "not ready yet" is
-              still visible without a strip to say it. */}
+          {/* The dock as it originally was: the status chip taking the width,
+              and the Render pill beside it. The camera button that used to sit
+              at the far end is gone — it was a bare circle with no label, under
+              the thumb steering the walk, as easy to hit by accident as on
+              purpose. */}
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              <View style={styles.dockActions} pointerEvents="box-none">
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Scene details"
-                  accessibilityState={{ expanded: panel === "info", busy: status.busy }}
-                  accessibilityLiveRegion="polite"
-                  android_ripple={{ color: "rgba(30,36,31,0.14)" }}
-                  style={({ pressed }) => [styles.dockSecondary, pressed && styles.pressedSurface]}
-                  onPress={() => onSetPanel(panel === "info" ? null : "info")}
-                >
-                  {status.busy
-                    ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
-                    : <Ionicons name="information-circle-outline" size={19} color={COLORS.primaryDark} />}
-                  <Text style={styles.dockSecondaryText} numberOfLines={1}>
-                    {status.busy ? "Preparing" : "Scene"}
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Render this view with AI"
-                  accessibilityState={{ expanded: panel === "ai" }}
-                  android_ripple={{ color: "rgba(255,255,255,0.18)" }}
-                  style={({ pressed }) => [
-                    styles.dockPrimary,
-                    panel === "ai" && styles.dockPrimaryActive,
-                    pressed && styles.pressedSurface,
-                  ]}
-                  onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
-                >
-                  <LinearGradient
-                    colors={COLORS.gradientAccent}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="none"
-                  />
-                  <Ionicons name="sparkles" size={18} color={COLORS.white} />
-                  <Text style={styles.dockPrimaryText} numberOfLines={1}>AI render</Text>
-                </Pressable>
+              <View
+                style={styles.statusChip}
+                accessibilityRole="text"
+                accessibilityLiveRegion="polite"
+                accessibilityLabel={status.label}
+              >
+                {status.busy
+                  ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                  : <View style={styles.statusDot} />}
+                <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
               </View>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="AI render options"
+                accessibilityState={{ expanded: panel === "ai" }}
+                android_ripple={{ color: "rgba(255,255,255,0.18)", borderless: false }}
+                style={({ pressed }) => [
+                  styles.dockPrimary,
+                  panel === "ai" && styles.dockPrimaryActive,
+                  pressed && styles.pressedSurface,
+                ]}
+                onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
+              >
+                <Ionicons name="sparkles" size={18} color={COLORS.white} />
+                <Text style={styles.dockPrimaryText}>Render</Text>
+              </Pressable>
             </View>
           )}
         </View>
@@ -2746,80 +2731,7 @@ function WalkthroughStage({
         }}
         onRender={onRender}
       />
-
-      <SceneSheet
-        visible={panel === "info" && !showingAi}
-        status={status}
-        sceneInfo={sceneInfo}
-        room={roomConfigs[selectedRoom]}
-        viewMode={viewMode}
-        onClose={() => onSetPanel(null)}
-      />
     </View>
-  );
-}
-
-/**
- * What the dock's status strip used to say, on request.
- *
- * It was three read-only elements permanently over the room — an eyebrow, a
- * truncating status line and a furniture-count chip — competing with the two
- * controls that actually do something. None of it changes more than twice in a
- * session, so it belongs behind a tap.
- */
-function SceneSheet({ visible, status, sceneInfo, room, viewMode, onClose }) {
-  const rows = [
-    { icon: "cube-outline", label: "Scene", value: status.label },
-    { icon: "bed-outline", label: "Furniture", value: `${sceneInfo?.objects || 0} pieces` },
-    { icon: "home-outline", label: "Room", value: room?.name || room?.roomType || "Interior" },
-    {
-      icon: viewMode === "plan" ? "map-outline" : "walk-outline",
-      label: "View",
-      value: viewMode === "plan" ? "Floor plan, from above" : "Walking through the room",
-    },
-  ];
-
-  return (
-    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.sheetHandle} />
-
-          <View style={styles.sheetHead}>
-            <View style={styles.sheetIcon}>
-              {status.busy
-                ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
-                : <Ionicons name="information-circle-outline" size={18} color={COLORS.primaryDark} />}
-            </View>
-            <View style={styles.sheetHeadCopy}>
-              <Text style={styles.sheetTitle}>Scene details</Text>
-              <Text style={styles.sheetSubtitle}>
-                {status.busy ? "Still preparing this view" : "Ready to render"}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              hitSlop={LAYOUT.hitSlop}
-              style={({ pressed }) => [styles.sheetCloseIcon, pressed && styles.pressedSurface]}
-              onPress={onClose}
-            >
-              <Ionicons name="close" size={18} color={COLORS.textSecondary} />
-            </Pressable>
-          </View>
-
-          <View style={styles.sceneRows}>
-            {rows.map((row) => (
-              <View key={row.label} style={styles.sceneRow}>
-                <Ionicons name={row.icon} size={16} color={COLORS.textSecondary} />
-                <Text style={styles.sceneRowLabel}>{row.label}</Text>
-                <Text style={styles.sceneRowValue} numberOfLines={1}>{row.value}</Text>
-              </View>
-            ))}
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
   );
 }
 
@@ -5244,39 +5156,25 @@ const styles = StyleSheet.create({
   stickRight: { position: "absolute", right: ms(8) },
 
   // ── Dock ─────────────────────────────────────────────────────────────────
-  dock: {
-    gap: SPACING.md,
-    padding: SPACING.md,
-    borderRadius: RADIUS.xl,
-    backgroundColor: "rgba(255,255,255,0.95)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.78)",
-    ...SHADOW.lg,
+  // A bare row again: the chip and the pill each carry their own surface and
+  // shadow, so the dock floats over the room instead of laying a white panel
+  // across the bottom of it.
+  dock: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  statusChip: {
+    flex: 1, minWidth: 0, height: ms(48),
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface, ...SHADOW.md,
   },
-  // Two buttons, centred labels, one line each. The icon chips, the second
-  // "hint" line under each label and the status strip above them are gone: at
-  // 58pt tall with two stacked texts they were a panel, not a control bar.
-  dockActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
+  statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
   dockPrimary: {
-    flex: 1.4, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: SPACING.sm, height: ms(50), paddingHorizontal: SPACING.md, overflow: "hidden",
-    borderRadius: RADIUS.lg, backgroundColor: COLORS.accent, ...SHADOW.sm,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(48), paddingHorizontal: SPACING.lg,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.accent, ...SHADOW.md,
   },
   dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
   dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
-  dockSecondary: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: SPACING.sm, height: ms(50), paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border,
-  },
-  dockSecondaryText: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-
-  // ── Scene sheet ──────────────────────────────────────────────────────────
-  sceneRows: { gap: SPACING.base, marginTop: SPACING.sm },
-  sceneRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  sceneRowLabel: { ...TYPE.small, color: COLORS.textSecondary, width: ms(86) },
-  sceneRowValue: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "right" },
 
   // ── Sheets ───────────────────────────────────────────────────────────────
   // One shape for everything that slides up in this flow — the render brief, the

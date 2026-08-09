@@ -1,23 +1,26 @@
 /**
- * The store: subscriptions and coin packs, on one screen.
+ * Upgrade to Pro.
  *
- * Two rules hold this screen together, and both exist because the last version
- * broke them:
+ * This is the original screen's design — a subtitle, a coins card, a feature
+ * checklist, two plan cards side by side and one pill button — kept as the
+ * shape it always was, and rebuilt on the design tokens rather than on the
+ * `scale()` / `verticalScale()` helpers and hardcoded `fontSize` / `fontWeight`
+ * pairs it used to carry. The layout is the old one on purpose; what changed is
+ * everything that was wrong underneath it:
  *
- * 1. **Only interactive things get a surface.** A border or a fill means "you
- *    can press this". Benefits, the balance and the price list are statements,
- *    so they sit directly on the page. The previous pass wrapped every one of
- *    them in its own bordered, shadowed, tinted card, which left eight competing
- *    rectangles on a screen that asks one question.
- *
- * 2. **Sage is selection and action; clay is coins.** Nothing else gets a tint.
- *    Before this, `brand100` icon chips, an `accentTint` panel, a `successSoft`
- *    banner and an `accent` badge all appeared within one scroll, none of them
- *    meaning anything by being that colour.
- *
- * Type comes from the ramp in `constants/theme` with no per-style `fontSize`
- * overrides. The old file had nine of them — 9, 9.5, 10, 10.5, 12.5, 14, 15 —
- * which is what made the screen read as unsettled rather than as designed.
+ * * **The selected plan was `#eef7ff`** — a cold blue, in an app whose entire
+ *   palette is warm sage and clay. It is now the sage tint, so a chosen plan
+ *   looks like it belongs to this product.
+ * * **"Best Value" hung off the card at `top: -8, right: -8`.** Anything drawn
+ *   outside its parent's bounds is clipped on Android, so on most phones the
+ *   badge was cut in half. It sits inside the card now, in a band both cards
+ *   reserve so their titles stay on one line.
+ * * **Touch targets.** The button was `paddingVertical: 8` — about 30pt tall
+ *   against the 44pt minimum. Plan cards had no selected state beyond a border
+ *   colour, which is the one cue a colour-blind user cannot rely on, so there
+ *   is a real radio in the corner now.
+ * * **Type.** Nineteen hardcoded sizes and weights became the shared ramp, so
+ *   this screen sets text the same way the rest of the app does.
  */
 
 import { StyleSheet } from 'react-native';
@@ -25,185 +28,143 @@ import { StyleSheet } from 'react-native';
 import COLORS from '../../constants/colors';
 import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, ms } from '../../constants/theme';
 
-/** The one selectable surface: a plan row or a coin tile, unselected. */
-const SELECTABLE = {
-  borderRadius: RADIUS.lg,
-  backgroundColor: COLORS.surface,
-  borderWidth: 1.5,
-  borderColor: COLORS.border,
-};
-
-/** And selected. Sage, everywhere, because "chosen" is one idea. */
-const SELECTED = {
-  borderColor: COLORS.primaryDark,
-  backgroundColor: COLORS.primaryTint,
-};
-
 export default StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
-  // Explicit, because the action bar below is a second flex child: without it
-  // the scroll view sizes to its content and pushes the bar off screen.
-  scroll: { flex: 1 },
   container: {
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.sm,
-    paddingBottom: SPACING.xl,
-    gap: SPACING.lg,
+    paddingHorizontal: SPACING.xl,
+    paddingTop: SPACING.lg,
+    paddingBottom: SPACING.xxxl,
   },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // ── Loading ──────────────────────────────────────────────────────────────
-  skeletonHero: {
-    height: ms(140),
-    borderRadius: RADIUS.xl,
-    backgroundColor: COLORS.surfaceSunken,
-  },
-  skeletonBar: {
-    height: ms(48),
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surfaceSunken,
-  },
-  skeletonRow: {
-    height: ms(76),
-    borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surfaceSunken,
-  },
+  subtitle: { ...TYPE.body, color: COLORS.textSecondary, marginBottom: SPACING.xl },
 
-  // ── Hero ─────────────────────────────────────────────────────────────────
-  // A gradient, a label, a sentence. The floating glow blob and the boxed
-  // diamond glyph were ornament on a screen already carrying too much.
-  hero: {
+  // ── Coins ────────────────────────────────────────────────────────────────
+  // The card the old screen opened with, still a card, but it now says what a
+  // coin is actually worth. It used to claim "each design costs 2 coins" in a
+  // sentence that had gone out of date — the server charges one.
+  coinCard: {
     padding: SPACING.lg,
-    borderRadius: RADIUS.xl,
-    gap: SPACING.sm,
+    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.xl,
+    ...SHADOW.sm,
   },
-  heroPill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs + 2,
-    paddingVertical: 5,
-    paddingHorizontal: SPACING.md,
+  coinTopRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
+  coinBadge: {
+    width: ms(44),
+    height: ms(44),
     borderRadius: RADIUS.pill,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-  },
-  heroPillText: { ...TYPE.overline, color: COLORS.white },
-  heroTitle: { ...TYPE.h2, color: COLORS.white },
-  heroText: { ...TYPE.small, color: 'rgba(255,255,255,0.78)' },
-
-  // ── Segmented control ────────────────────────────────────────────────────
-  // Shown to everyone. Hiding coins from subscribers meant a Pro member who
-  // wanted to top up before cancelling had nowhere on the screen to do it.
-  segment: {
-    flexDirection: 'row',
-    gap: SPACING.xs,
-    padding: SPACING.xs,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surfaceSunken,
-  },
-  segmentTab: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    height: ms(40),
-    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accentSoft,
   },
-  segmentTabOn: { backgroundColor: COLORS.surface, ...SHADOW.xs },
-  segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
-  segmentTextOn: { color: COLORS.textPrimary },
+  coinCopy: { flex: 1, minWidth: 0 },
+  coinValue: { ...TYPE.h1, color: COLORS.textPrimary },
+  coinLabel: { ...TYPE.small, color: COLORS.textSecondary },
 
-  // ── Sections ─────────────────────────────────────────────────────────────
-  panel: { gap: SPACING.lg },
-  sectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
-  sectionHint: { ...TYPE.small, color: COLORS.textSecondary, marginTop: 2 },
-
-  // ── Statements: no card, no border, no fill ──────────────────────────────
-  benefitList: { gap: SPACING.md },
-  benefitRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-  benefitText: { flex: 1, ...TYPE.body, color: COLORS.textPrimary },
-
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-  statusText: { flex: 1, ...TYPE.body, color: COLORS.textPrimary },
-
-  balanceValue: { ...TYPE.display, color: COLORS.textPrimary },
-  balanceLabel: { ...TYPE.small, color: COLORS.textSecondary, marginTop: -2 },
-
-  // What a coin buys. Without it the balance is a number with no unit.
-  priceList: {
+  coinPrices: {
     marginTop: SPACING.base,
-    paddingTop: SPACING.base,
+    paddingTop: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
-    gap: SPACING.md,
+    gap: SPACING.sm,
   },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
-  priceLabel: { flex: 1, ...TYPE.small, color: COLORS.textSecondary },
-  priceValue: { ...TYPE.caption, color: COLORS.textPrimary },
+  coinPriceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  coinPriceLabel: { flex: 1, ...TYPE.small, color: COLORS.textSecondary },
+  coinPriceValue: { ...TYPE.caption, color: COLORS.textPrimary },
 
-  note: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
+  watchAdButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    height: ms(46),
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accentStrong,
+    marginTop: SPACING.base,
+  },
+  watchAdButtonBusy: { backgroundColor: COLORS.surfaceSunken },
+  watchAdButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
+  adStatusText: {
+    ...TYPE.caption,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: SPACING.sm,
+  },
 
-  // ── Plans ────────────────────────────────────────────────────────────────
+  // ── Features ─────────────────────────────────────────────────────────────
+  featureList: { marginBottom: SPACING.xl, gap: SPACING.md },
+  featureItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  featureText: { flex: 1, ...TYPE.body, color: COLORS.textPrimary },
+
+  // ── Plans, side by side ──────────────────────────────────────────────────
+  planLabel: { ...TYPE.h3, color: COLORS.textPrimary, marginBottom: SPACING.md },
+  planOptions: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
   planCard: {
-    ...SELECTABLE,
-    flexDirection: 'row',
+    flex: 1,
+    overflow: 'hidden',
     alignItems: 'center',
-    gap: SPACING.md,
-    padding: SPACING.base,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingBottom: SPACING.base,
   },
-  planCardSelected: SELECTED,
-  // Read-only variant for a subscriber: same geometry, no affordance.
-  planCardStatic: {
-    flexDirection: 'row',
+  // Warm sage, not the cold `#eef7ff` this used to be.
+  planCardSelected: {
+    borderColor: COLORS.primaryDark,
+    backgroundColor: COLORS.primaryTint,
+    ...SHADOW.sm,
+  },
+  // Reserved on both cards, filled on one, so the two titles align.
+  planBadge: {
+    alignSelf: 'stretch',
+    height: ms(20),
     alignItems: 'center',
-    gap: SPACING.md,
-    paddingVertical: SPACING.md,
+    justifyContent: 'center',
   },
+  planBadgeOn: { backgroundColor: COLORS.accent },
+  planBadgeText: { ...TYPE.overline, color: COLORS.white },
+  planBody: { alignItems: 'center', paddingTop: SPACING.base, paddingHorizontal: SPACING.sm },
   radio: {
-    width: ms(22),
-    height: ms(22),
+    width: ms(20),
+    height: ms(20),
     borderRadius: RADIUS.pill,
     borderWidth: 2,
     borderColor: COLORS.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: SPACING.sm,
   },
   radioOn: { borderColor: COLORS.primaryDark },
   radioDot: {
-    width: ms(11),
-    height: ms(11),
+    width: ms(10),
+    height: ms(10),
     borderRadius: RADIUS.pill,
     backgroundColor: COLORS.primaryDark,
   },
-  planCopy: { flex: 1, minWidth: 0, gap: 3 },
-  planTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
   planTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  planNote: { ...TYPE.caption, color: COLORS.textSecondary },
-  planPriceBlock: { alignItems: 'flex-end', flexShrink: 0 },
-  planPrice: { ...TYPE.h3, color: COLORS.textPrimary },
+  planPrice: { ...TYPE.h3, color: COLORS.textPrimary, marginTop: 2 },
   planPeriod: { ...TYPE.caption, color: COLORS.textTertiary },
-
-  // Tinted, not filled. A saturated pill on every second row was half the noise.
-  badge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.brand100,
-  },
-  badgeText: { ...TYPE.overline, color: COLORS.brand700 },
+  planSavings: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: SPACING.sm },
+  planSavingsPlaceholder: { height: ms(16), marginTop: SPACING.sm },
 
   // ── Coin packs ───────────────────────────────────────────────────────────
-  // The badge is a band inside the tile. The old one was an absolutely
-  // positioned pill sized to "Most popular" — wider than the third-of-a-phone
-  // tile it hung off, and clipped on Android for sitting outside its parent.
-  packRow: { flexDirection: 'row', gap: SPACING.sm },
+  packRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg },
   pack: {
-    ...SELECTABLE,
     flex: 1,
     overflow: 'hidden',
     alignItems: 'center',
-    paddingBottom: SPACING.base,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingBottom: SPACING.md,
   },
-  packSelected: SELECTED,
-  // Present on every tile, badge or not, so all three read off one baseline.
+  packSelected: { borderColor: COLORS.primaryDark, backgroundColor: COLORS.primaryTint },
   packBadge: {
     alignSelf: 'stretch',
     height: ms(18),
@@ -212,83 +173,71 @@ export default StyleSheet.create({
   },
   packBadgeOn: { backgroundColor: COLORS.accentSoft },
   packBadgeText: { ...TYPE.overline, color: COLORS.accentStrong },
-  packBody: { alignItems: 'center', paddingHorizontal: SPACING.xs, paddingTop: SPACING.base },
+  packBody: { alignItems: 'center', paddingTop: SPACING.md, paddingHorizontal: SPACING.xs },
   packCoins: { ...TYPE.h2, color: COLORS.textPrimary },
   packUnit: { ...TYPE.caption, color: COLORS.textSecondary },
   packPrice: { ...TYPE.bodyStrong, color: COLORS.textPrimary, marginTop: SPACING.sm },
-  packSaving: { ...TYPE.caption, color: COLORS.success },
-  // Holds the line the saving would occupy on the tile that has none, so the
-  // three stay the same height without a hidden string a screen reader reads.
+  packSaving: { ...TYPE.caption, color: COLORS.accentStrong },
   packSavingPlaceholder: { height: ms(16) },
 
-  // ── Earn ─────────────────────────────────────────────────────────────────
-  // Interactive, so it gets a surface — but an outline rather than the clay
-  // wash it used to have, because it is the cheapest option, not the loudest.
-  earnRow: {
+  // ── Buttons ──────────────────────────────────────────────────────────────
+  // The old pill, at a size a thumb can actually hit: `paddingVertical: 8` put
+  // it around 30pt tall against the 44pt minimum.
+  upgradeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    height: ms(52),
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.primaryDark,
+  },
+  upgradeButtonDisabled: { backgroundColor: COLORS.surfaceSunken },
+  upgradeButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
+  upgradeButtonTextDisabled: { color: COLORS.textTertiary },
+
+  // Coins are the alternative, not a second headline act, so this is outlined
+  // where the plan button is filled. Two identical dark pills on one screen
+  // would leave nothing saying which one the screen wants pressed.
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    height: ms(52),
+    borderRadius: RADIUS.pill,
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryDark,
+    backgroundColor: 'transparent',
+  },
+  secondaryButtonText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
+
+  pressed: { opacity: 0.82 },
+
+  sectionGap: { marginTop: SPACING.xxl },
+  trustNote: {
+    ...TYPE.caption,
+    color: COLORS.textTertiary,
+    textAlign: 'center',
+    marginTop: SPACING.base,
+    lineHeight: 17,
+  },
+
+  // ── Subscriber state ─────────────────────────────────────────────────────
+  activeCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
     padding: SPACING.base,
     borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.successSoft,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: COLORS.brand200,
+    marginBottom: SPACING.xl,
   },
-  earnCopy: { flex: 1, minWidth: 0, gap: 1 },
-  earnTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  earnText: { ...TYPE.caption, color: COLORS.textSecondary },
-  earnButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: ms(76),
-    height: ms(38),
-    paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.accentStrong,
-  },
-  earnButtonBusy: { backgroundColor: COLORS.surfaceSunken },
-  earnButtonText: { ...TYPE.caption, color: COLORS.white },
-
-  // ── Docked action bar ────────────────────────────────────────────────────
-  // The price you are about to pay and the one button that pays it, pinned
-  // where a thumb already is. Two identically styled full-width buttons in the
-  // scroll — "Subscribe" and "Buy 30 coins" — was the original screen's worst
-  // problem: nothing on it said which one it wanted you to press.
-  footer: {
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
-    gap: SPACING.sm,
-    backgroundColor: COLORS.background,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
-  },
-  footerSummary: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: SPACING.md,
-  },
-  footerLabel: { flexShrink: 1, ...TYPE.small, color: COLORS.textSecondary },
-  footerValue: { ...TYPE.h3, color: COLORS.textPrimary },
-  footerNote: { ...TYPE.caption, color: COLORS.textTertiary, textAlign: 'center' },
-
-  // ── Actions ──────────────────────────────────────────────────────────────
-  // No `flex: 1` on the label. With a leading icon and no trailing one it made
-  // the text centre itself in the leftover space, which read as off-centre.
-  primary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    height: ms(54),
-    paddingHorizontal: SPACING.lg,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.primaryDark,
-  },
-  primaryText: { ...TYPE.bodyStrong, color: COLORS.white },
-  primaryDisabled: { backgroundColor: COLORS.surfaceSunken },
-  primaryTextDisabled: { color: COLORS.textTertiary },
-  pressed: { opacity: 0.82 },
+  activeCopy: { flex: 1, minWidth: 0, gap: 2 },
+  activeTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  activeText: { ...TYPE.caption, color: COLORS.textSecondary },
 
   // ── Dialog ───────────────────────────────────────────────────────────────
   dialogBackdrop: {
@@ -313,7 +262,7 @@ export default StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     height: ms(48),
-    borderRadius: RADIUS.md,
+    borderRadius: RADIUS.pill,
     backgroundColor: COLORS.primaryDark,
     marginTop: SPACING.sm,
   },
