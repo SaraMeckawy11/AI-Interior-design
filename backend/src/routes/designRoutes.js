@@ -34,10 +34,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || "9x2kmfa8z6483c";
 const RUNPOD_POLL_INTERVAL_MS = 2_000;
-// 30 polls at 2s covers a warm worker comfortably. A cold RunPod worker pulling
-// its image can take longer than this; that is a timeout, and a timeout is one
-// of the failures Modal is here to absorb.
-const RUNPOD_MAX_POLLS = 30;
+// Budget for queue time *plus* inference, not just inference. The endpoint
+// scales from zero with a 5s idle timeout, so a design that arrives cold waits
+// for a worker first: a measured run spent 59.8s queued and 12.9s generating.
+// The old 60s budget would have abandoned that job one second before it
+// finished and handed the request to Modal, which makes "RunPod first" a
+// formality. 150s covers a cold start with room to spare; past that it really
+// is stuck, and Modal is the faster answer.
+const RUNPOD_MAX_POLLS = 75;
 
 /**
  * Submit to the RunPod serverless endpoint and poll until it finishes.
@@ -204,25 +208,25 @@ router.post("/", isAuthenticated, async (req, res) => {
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
     };
 
-    // Modal first, RunPod second. The design credit was already spent above and
+    // RunPod first, Modal second. The design credit was already spent above and
     // is not refunded if both fail — same as before this fallback existed.
     let generatedImageBase64 = null;
-    let engine = "modal";
+    let engine = "runpod";
 
-    console.log("Submitting job to Modal endpoint");
+    console.log("Submitting job to RunPod endpoint", RUNPOD_ENDPOINT_ID);
     try {
-      generatedImageBase64 = await generateWithModal(payload);
-    } catch (modalError) {
-      console.error(
-        "Modal request failed, falling back to RunPod:",
-        modalError.response?.status,
-        modalError.response?.data || modalError.message,
-      );
-      engine = "runpod";
+      generatedImageBase64 = await generateWithRunPod(payload);
+    } catch (runpodError) {
+      console.error("RunPod request failed, falling back to Modal:", runpodError.message);
+      engine = "modal";
       try {
-        generatedImageBase64 = await generateWithRunPod(payload);
-      } catch (runpodError) {
-        console.error("RunPod request failed too:", runpodError.message);
+        generatedImageBase64 = await generateWithModal(payload);
+      } catch (modalError) {
+        console.error(
+          "Modal request failed too:",
+          modalError.response?.status,
+          modalError.response?.data || modalError.message,
+        );
         return res.status(502).json({ message: "AI service failed. Please try again." });
       }
     }
@@ -429,3 +433,8 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
 });
 
 export default router;
+
+// Exported so the two engines can be exercised against the real services
+// without standing up Mongo, Cloudinary and an authenticated session first.
+// Nothing in the app imports these.
+export { generateWithRunPod, generateWithModal };
