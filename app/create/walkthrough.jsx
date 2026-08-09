@@ -253,11 +253,6 @@ export default function WalkthroughScreen() {
   // ── Viewer state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("walk");
   const [night, setNight] = useState(false);
-  // Which walls the user has taken out, and what there is to choose from. Both
-  // belong to the render brief: taking a wall out is how a room is framed from
-  // further back than its own walls allow, which is most of the good shots.
-  const [hiddenWalls, setHiddenWalls] = useState([]);
-  const [wallOptions, setWallOptions] = useState([]);
   const [inspected, setInspected] = useState(null);
   const [sceneInfo, setSceneInfo] = useState(null);
   const [panel, setPanel] = useState(null); // null | 'ai'
@@ -1263,19 +1258,6 @@ export default function WalkthroughScreen() {
     viewerRef.current?.setNight(next);
   };
 
-  const toggleWall = (id) => {
-    const next = hiddenWalls.includes(id)
-      ? hiddenWalls.filter((value) => value !== id)
-      : [...hiddenWalls, id];
-    setHiddenWalls(next);
-    viewerRef.current?.setHiddenWalls(next);
-  };
-
-  const restoreWalls = () => {
-    setHiddenWalls([]);
-    viewerRef.current?.setHiddenWalls([]);
-  };
-
   /**
    * Show the designer viewpoint rather than only promising it.
    *
@@ -1716,8 +1698,6 @@ export default function WalkthroughScreen() {
               exactSceneDetail={exactSceneDetail}
               viewMode={viewMode}
               night={night}
-              hiddenWalls={hiddenWalls}
-              wallOptions={wallOptions}
               selectedRoom={selectedRoom}
               inspected={inspected}
               sceneInfo={sceneInfo}
@@ -1742,9 +1722,6 @@ export default function WalkthroughScreen() {
               onBackToDesign={goBack}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
-              onToggleWall={toggleWall}
-              onRestoreWalls={restoreWalls}
-              onWalls={setWallOptions}
               onFocusRoom={focusRoom}
               onCapture={() => requestCapture("photo")}
               onRender={() => requestCapture("ai")}
@@ -2367,8 +2344,6 @@ function WalkthroughStage({
   exactSceneDetail,
   viewMode,
   night,
-  hiddenWalls,
-  wallOptions,
   selectedRoom,
   inspected,
   sceneInfo,
@@ -2389,9 +2364,6 @@ function WalkthroughStage({
   onBackToDesign,
   onChangeMode,
   onToggleNight,
-  onToggleWall,
-  onRestoreWalls,
-  onWalls,
   onFocusRoom,
   onCapture,
   onRender,
@@ -2436,7 +2408,6 @@ function WalkthroughStage({
           mode={viewMode}
           roomIndex={selectedRoom}
           night={night}
-          onWalls={onWalls}
           onReady={onReady}
           onSceneUpdate={onSceneUpdate}
           onSelect={onSelect}
@@ -2702,47 +2673,24 @@ function WalkthroughStage({
 
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              {/* State on one line, the two things you can do on the next.
-                  All three used to share a row: an information chip that shrank
-                  to fit, a filled "Render" pill, and a bare 48pt circle holding
-                  a camera. Nothing said what the circle did — it read as a third
-                  view mode, or a settings button — and it sat at the far edge
-                  under the thumb that was steering, so it was as easy to hit by
-                  accident as on purpose. Two labelled buttons, sized by which
-                  one matters, is what a bottom action bar is.
-
-                  Removing a wall is not among them: that belongs to the render
-                  brief, because it is something you do *in order to* take a
-                  picture, and the dock is where the picture is taken. The chip
-                  reports work the person did not start and cannot see finish,
-                  so it is announced rather than only drawn. */}
-              {hiddenWalls.length > 0 ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${hiddenWalls.length} ${hiddenWalls.length === 1 ? "wall" : "walls"} removed. Put them back`}
-                  android_ripple={{ color: "rgba(255,255,255,0.20)" }}
-                  style={({ pressed }) => [styles.wallNotice, pressed && styles.pressedSurface]}
-                  onPress={onRestoreWalls}
-                >
-                  <Ionicons name="eye-off-outline" size={15} color={COLORS.white} />
-                  <Text style={styles.wallNoticeText} numberOfLines={1}>
-                    {hiddenWalls.length === 1 ? "1 wall off" : `${hiddenWalls.length} walls off`}
-                  </Text>
-                  <Text style={styles.wallNoticeUndo}>Undo</Text>
-                </Pressable>
-              ) : (
-                <View
-                  style={styles.statusChip}
-                  accessibilityRole="text"
-                  accessibilityLiveRegion="polite"
-                  accessibilityLabel={status.label}
-                >
+              <View style={styles.dockSummary} accessibilityLiveRegion="polite">
+                <View style={styles.dockSceneIcon}>
                   {status.busy
                     ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
-                    : <View style={styles.statusDot} />}
+                    : <Ionicons name="cube" size={17} color={COLORS.primaryDark} />}
+                </View>
+                <View style={styles.dockSummaryCopy}>
+                  <Text style={styles.dockEyebrow}>{status.busy ? "Preparing scene" : "Ready to capture"}</Text>
                   <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
                 </View>
-              )}
+                {!status.busy && (
+                  <View style={styles.furnitureCount} accessibilityLabel={`${sceneInfo?.objects || 0} furniture pieces`}>
+                    <Ionicons name="bed-outline" size={15} color={COLORS.primaryDark} />
+                    <Text style={styles.furnitureCountValue}>{sceneInfo?.objects || 0}</Text>
+                    <Text style={styles.furnitureCountLabel}>pieces</Text>
+                  </View>
+                )}
+              </View>
 
               <View style={styles.dockActions} pointerEvents="box-none">
                 <Pressable
@@ -2758,10 +2706,15 @@ function WalkthroughStage({
                   onPress={onCapture}
                   disabled={busy === "capture"}
                 >
-                  {busy === "capture"
-                    ? <ActivityIndicator color={COLORS.textPrimary} size="small" />
-                    : <Ionicons name="camera-outline" size={19} color={COLORS.textPrimary} />}
-                  <Text style={styles.dockSecondaryText} numberOfLines={1}>Photo</Text>
+                  <View style={styles.dockActionIconSecondary}>
+                    {busy === "capture"
+                      ? <ActivityIndicator color={COLORS.primaryDark} size="small" />
+                      : <Ionicons name="camera-outline" size={19} color={COLORS.primaryDark} />}
+                  </View>
+                  <View style={styles.dockActionCopy}>
+                    <Text style={styles.dockSecondaryText} numberOfLines={1}>Photo</Text>
+                    <Text style={styles.dockActionHint} numberOfLines={1}>Save this view</Text>
+                  </View>
                 </Pressable>
 
                 <Pressable
@@ -2776,8 +2729,21 @@ function WalkthroughStage({
                   ]}
                   onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
                 >
-                  <Ionicons name="sparkles" size={18} color={COLORS.white} />
-                  <Text style={styles.dockPrimaryText} numberOfLines={1}>Render with AI</Text>
+                  <LinearGradient
+                    colors={COLORS.gradientAccent}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                  />
+                  <View style={styles.dockActionIconPrimary}>
+                    <Ionicons name="sparkles" size={18} color={COLORS.white} />
+                  </View>
+                  <View style={styles.dockActionCopy}>
+                    <Text style={styles.dockPrimaryText} numberOfLines={1}>AI render</Text>
+                    <Text style={styles.dockPrimaryHint} numberOfLines={1}>Photorealistic</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.82)" />
                 </Pressable>
               </View>
             </View>
@@ -2800,10 +2766,6 @@ function WalkthroughStage({
         cameraSource={cameraSource}
         hasRender={!!currentRender}
         rendering={rendering}
-        wallOptions={wallOptions}
-        hiddenWalls={hiddenWalls}
-        onToggleWall={onToggleWall}
-        onListWalls={() => viewerRef.current?.listWalls()}
         onClose={() => onSetPanel(null)}
         onSetCameraSource={onSetCameraSource}
         onShowLast={() => {
@@ -2875,32 +2837,18 @@ function AiRenderLayer({ render }) {
  * both options visible and a sentence underneath saying what the chosen one
  * does, rather than a note the reader has to map back onto a toggle.
  */
-const WALL_SIDES = { front: "In front", behind: "Behind you", left: "On your left", right: "On your right" };
-
 function RenderSheet({
   visible,
   viewMode,
   cameraSource,
   hasRender,
   rendering,
-  wallOptions,
-  hiddenWalls,
-  onToggleWall,
-  onListWalls,
   onClose,
   onSetCameraSource,
   onShowLast,
   onRender,
 }) {
   const bird = viewMode === "plan";
-
-  // Ask the scene which walls are around this room the moment the sheet opens,
-  // and only then. The names are relative to where the camera is standing, and
-  // the camera does not move while the sheet is up — so a wall cannot be called
-  // "on your left" in a list the user is part-way through reading.
-  useEffect(() => {
-    if (visible && !bird) onListWalls?.();
-  }, [bird, onListWalls, visible]);
 
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -2953,51 +2901,6 @@ function RenderSheet({
                       onPress={() => onSetCameraSource(option.key)}
                     >
                       <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{option.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          )}
-
-          {/* Take a wall out to get further back.
-              A room can only be photographed from inside its own walls, which
-              in a small room means standing in the middle of it and seeing
-              almost nothing. Removing one lets the camera stand where it was.
-              Which one is the user's call: the app tried choosing for them, by
-              hiding whatever the view passed through, and that meant the room
-              rebuilt itself every time they turned. */}
-          {!bird && !!wallOptions.length && (
-            <View style={styles.sheetField}>
-              <Text style={styles.fieldLabel}>Walls</Text>
-              <View style={styles.wallRow}>
-                {wallOptions.map((wall) => {
-                  const off = hiddenWalls.includes(wall.id);
-                  return (
-                    <Pressable
-                      key={wall.id}
-                      accessibilityRole="switch"
-                      accessibilityLabel={`Wall ${WALL_SIDES[wall.side] || wall.side}`}
-                      accessibilityState={{ checked: off }}
-                      android_ripple={{ color: "rgba(30,36,31,0.10)" }}
-                      style={({ pressed }) => [
-                        styles.wallChip,
-                        off && styles.wallChipOff,
-                        pressed && styles.pressedSurface,
-                      ]}
-                      onPress={() => onToggleWall(wall.id)}
-                    >
-                      <Ionicons
-                        name={off ? "eye-off-outline" : "square-outline"}
-                        size={14}
-                        color={off ? COLORS.white : COLORS.textSecondary}
-                      />
-                      <Text
-                        style={[styles.wallChipText, off && styles.wallChipTextOff]}
-                        numberOfLines={1}
-                      >
-                        {WALL_SIDES[wall.side] || wall.side}
-                      </Text>
                     </Pressable>
                   );
                 })}
@@ -5296,60 +5199,58 @@ const styles = StyleSheet.create({
   stickRight: { position: "absolute", right: ms(8) },
 
   // ── Dock ─────────────────────────────────────────────────────────────────
-  // A status line, then an action bar. Stacking them is what lets both buttons
-  // carry a label: on one row with the chip there was width for a filled pill
-  // and a bare circle, and the circle is the one that had to be guessed at.
-  dock: { gap: SPACING.sm },
-  statusChip: {
-    alignSelf: "flex-start", maxWidth: "100%", height: ms(40),
-    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface, ...SHADOW.sm,
+  dock: {
+    gap: SPACING.md,
+    padding: SPACING.md,
+    borderRadius: RADIUS.xl,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.78)",
+    ...SHADOW.lg,
   },
+  dockSummary: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  dockSceneIcon: {
+    width: ms(38), height: ms(38), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+  },
+  dockSummaryCopy: { flex: 1, minWidth: 0 },
+  dockEyebrow: { ...TYPE.overline, fontSize: 9, color: COLORS.textTertiary },
+  statusText: { ...TYPE.caption, color: COLORS.textPrimary, marginTop: 1 },
+  furnitureCount: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    height: ms(36), paddingHorizontal: SPACING.sm + 2,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.brand100,
+  },
+  furnitureCountValue: { ...TYPE.bodyStrong, fontSize: 13, color: COLORS.primaryDark },
+  furnitureCountLabel: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textSecondary },
   dockActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
-  statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
-  // Takes the status chip's slot, but only while a wall is actually missing —
-  // so the one state a person could otherwise forget they were in says so, and
-  // carries its own way out.
-  wallNotice: {
-    alignSelf: "flex-start", maxWidth: "100%", height: ms(40),
-    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.brand800, ...SHADOW.sm,
+  dockActionCopy: { flex: 1, minWidth: 0 },
+  dockActionIconSecondary: {
+    width: ms(36), height: ms(36), borderRadius: RADIUS.sm,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
-  wallNoticeText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.white },
-  wallNoticeUndo: { ...TYPE.caption, color: "rgba(255,255,255,0.82)" },
-
-  wallRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
-  wallChip: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.xs + 2,
-    minHeight: ms(42), paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border,
+  dockActionIconPrimary: {
+    width: ms(36), height: ms(36), borderRadius: RADIUS.sm,
+    alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.18)",
   },
-  wallChipOff: { backgroundColor: COLORS.brand800, borderColor: COLORS.brand800 },
-  wallChipText: { ...TYPE.caption, color: COLORS.textSecondary },
-  wallChipTextOff: { color: COLORS.white },
-  // The AI render costs a credit and is the reason this step exists, so it is
-  // filled, wider, and carries the elevation. Photo is free and reversible, so
-  // it is the quiet one — but it is still a labelled button rather than an
-  // unexplained circle.
+  dockActionHint: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary, marginTop: 1 },
+  dockPrimaryHint: { ...TYPE.caption, fontSize: 9.5, color: "rgba(255,255,255,0.74)", marginTop: 1 },
   dockPrimary: {
-    flex: 1.6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(52), paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.accent, ...SHADOW.md,
+    flex: 1.3, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    height: ms(58), paddingHorizontal: SPACING.md, overflow: "hidden",
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.accent, ...SHADOW.sm,
   },
   dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
-  dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  dockPrimaryText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.white },
   dockSecondary: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(52), paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    flex: 1, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    height: ms(58), paddingHorizontal: SPACING.sm,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
   dockSecondaryBusy: { backgroundColor: COLORS.surfaceSunken },
-  dockSecondaryText: { ...TYPE.caption, color: COLORS.textPrimary },
+  dockSecondaryText: { ...TYPE.bodyStrong, fontSize: 13, color: COLORS.textPrimary },
 
   // ── Sheets ───────────────────────────────────────────────────────────────
   // One shape for everything that slides up in this flow — the render brief, the

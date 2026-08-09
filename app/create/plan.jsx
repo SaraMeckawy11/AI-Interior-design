@@ -26,10 +26,6 @@ import {
     TouchableWithoutFeedback,
     View,
 } from "react-native";
-import {
-    RewardedAd,
-    RewardedAdEventType,
-} from "react-native-google-mobile-ads";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, {
     Circle,
@@ -43,6 +39,11 @@ import RoomTypeSelector from "../../components/create/RoomTypeSelector";
 import COLORS from "../../constants/colors";
 import { apiUrl } from "../../configs/api";
 import { paletteForRequest } from "../../lib/colorPalettes";
+import useRewardedCoins from "../../lib/useRewardedCoins";
+import { FREE_DESIGNS, coinCost, coinLabel } from "../../constants/pricing";
+
+/** What one plan render costs, from the one table that decides. */
+const PRICE = coinCost("design");
 
 const { width, height } = Dimensions.get("window");
 const scale = (size) => (width / 375) * size;
@@ -50,8 +51,6 @@ const verticalScale = (size) => (height / 667) * size;
 const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
-const adUnitId = "ca-app-pub-4470538534931449/2411201644";
-const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
 
 /** Space options on plan — narrower list than the global selector */
 const PLAN_EXCLUDED_ROOM_TYPES = [
@@ -267,8 +266,8 @@ export default function PlanEditor() {
   const [isSubscribed, setIsSubscribed] = useState(null);
   const [isPremium, setIsPremium] = useState(null);
   const [isManualDisabled, setIsManualDisabled] = useState(false);
-  const [coins, setCoins] = useState(0);
-  const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
+  // One ad instance, one coin per ad, one place the wiring lives.
+  const { coins, setCoins, status: adStatus, watchAd: handleWatchAd } = useRewardedCoins(token);
 
   const pathsRef = useRef([]);
   const verticesRef = useRef([]);
@@ -886,66 +885,6 @@ export default function PlanEditor() {
     []
   );
 
-  // ═══════════════════════════════════════════════════════════════
-  // AD SETUP
-  // ═══════════════════════════════════════════════════════════════
-  useEffect(() => {
-    if (!RewardedAdEventType || typeof RewardedAdEventType !== "object") return;
-    const listeners = [];
-
-    if (RewardedAdEventType.LOADED) {
-      listeners.push(
-        rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          if (userInitiatedLoad) {
-            rewardedAd.show();
-            setUserInitiatedLoad(false);
-          }
-        }),
-      );
-    }
-
-    if (RewardedAdEventType.EARNED_REWARD) {
-      listeners.push(
-        rewardedAd.addAdEventListener(
-          RewardedAdEventType.EARNED_REWARD,
-          async () => {
-            try {
-              const res = await fetch(
-                apiUrl("/api/users/watch-ad"),
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                  },
-                },
-              );
-              const data = await res.json();
-              if (data.success) setCoins(Number(data.adCoins || coins + 1));
-              else setCoins((prev) => prev + 1);
-            } catch {
-              setCoins((prev) => prev + 1);
-            }
-          },
-        ),
-      );
-    }
-
-    if (RewardedAdEventType.CLOSED) {
-      listeners.push(
-        rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-          rewardedAd.load();
-        }),
-      );
-    }
-
-    return () => listeners.forEach((unsub) => unsub());
-  }, [token, userInitiatedLoad]);
-
-  const handleWatchAd = () => {
-    setUserInitiatedLoad(true);
-    rewardedAd.load();
-  };
 
   // ═══════════════════════════════════════════════════════════════
   // FETCH USER STATUS
@@ -974,7 +913,7 @@ export default function PlanEditor() {
         }
       };
       fetchUserStatus();
-    }, [token]),
+    }, [setCoins, token]),
   );
 
   // ═══════════════════════════════════════════════════════════════
@@ -1315,7 +1254,15 @@ export default function PlanEditor() {
       );
       return;
     }
-    if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins < 2) {
+    // The same gate the server applies, from the same price table. It used to
+    // be a hardcoded `coins < 2` here against a server that charged 2 and an ad
+    // that paid 1 — three numbers, three files, no agreement.
+    if (
+      !isSubscribed
+      && !isPremium
+      && freeDesignsUsed >= FREE_DESIGNS
+      && coins < PRICE
+    ) {
       router.push("/profile/upgrade");
       return;
     }
@@ -1368,6 +1315,12 @@ export default function PlanEditor() {
       );
 
       const data = await response.json();
+      // Out of coins is not a server fault, and it has its own way out.
+      if (response.status === 403) {
+        if (typeof data.adCoins === "number") setCoins(data.adCoins);
+        router.push("/profile/upgrade");
+        return;
+      }
       if (!response.ok) throw new Error(data.message || "Something went wrong");
 
       const imageUri =
@@ -1378,9 +1331,10 @@ export default function PlanEditor() {
         null;
 
       if (imageUri) {
-        if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins >= 2) {
-          setCoins((prev) => prev - 2);
-        }
+        // The balance as the server now has it, rather than a local subtraction
+        // of a price the server did not necessarily charge.
+        if (typeof data.adCoins === "number") setCoins(data.adCoins);
+        if (typeof data.freeDesignsUsed === "number") setFreeDesignsUsed(data.freeDesignsUsed);
         router.push({
           pathname: "/outputScreen",
           params: {
@@ -1459,10 +1413,18 @@ export default function PlanEditor() {
               <Text style={styles.planHeaderChipText}>3D design</Text>
             </View>
           </View>
-          {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
-            <View style={styles.coinsContainer}>
+          {/* The balance is shown from the start, not only once the free
+              designs have run out. Finding out a currency exists at the moment
+              you can no longer generate is finding out too late. */}
+          {!isSubscribed && !isPremium && (
+            <TouchableOpacity
+              style={styles.coinsContainer}
+              accessibilityRole="button"
+              accessibilityLabel={`${coins} coins. Tap to get more.`}
+              onPress={() => router.push("/profile/upgrade")}
+            >
               <Text style={styles.coinsText}>{coins} Coins</Text>
-            </View>
+            </TouchableOpacity>
           )}
         </View>
 
@@ -1512,14 +1474,20 @@ export default function PlanEditor() {
           <View style={styles.formGroup}>
             <View style={styles.labelRow}>
               <Text style={styles.label}>Upload floor plan</Text>
-              {!isSubscribed && (
+              {!isSubscribed && !isPremium && (
                 <TouchableOpacity
                   onPress={handleWatchAd}
                   activeOpacity={0.8}
-                  style={styles.watchAdButton}
+                  disabled={adStatus !== "idle"}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Watch an ad to earn ${coinLabel(1)}`}
+                  accessibilityState={{ busy: adStatus !== "idle", disabled: adStatus !== "idle" }}
+                  style={[styles.watchAdButton, adStatus !== "idle" && { opacity: 0.6 }]}
                 >
                   <Ionicons name="play-circle-outline" size={14} color="#fff" />
-                  <Text style={styles.watchAdText}>Watch Ad</Text>
+                  <Text style={styles.watchAdText}>
+                    {adStatus === "idle" ? "Watch ad" : "Loading…"}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>

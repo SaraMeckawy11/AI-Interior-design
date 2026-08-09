@@ -4,6 +4,7 @@ import cloudinary from "../lib/cloudinary.js";
 import Design from "../models/Design.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
+import { FREE_DESIGNS, coinCost } from "../config/pricing.js";
 
 const router = express.Router();
 
@@ -242,6 +243,11 @@ router.post("/", isAuthenticated, async (req, res) => {
       lighting,
       preserveGeometry,
       creativity,
+      // Which price list entry this render is billed against — "design" for the
+      // interior/exterior/plan paths, "walkthrough" for a frame rendered out of
+      // the 3D view. Only the *name* comes from the client; the price attached
+      // to that name is decided here.
+      product,
     } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
@@ -256,25 +262,41 @@ router.post("/", isAuthenticated, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // ✅ Combined freeDesign + coin logic
-    const COST_PER_DESIGN = 2;
+    /**
+     * ✅ Free allowance, then coins, then the paywall.
+     *
+     * The price comes from the price list by product name, so a walkthrough
+     * frame costs what a walkthrough frame costs and a flat design costs what a
+     * flat design costs — a distinction the old flat `COST_PER_DESIGN = 2` could
+     * not make, and one the app was disagreeing with anyway (it gated the button
+     * on a hardcoded 2 while the ad paid 1).
+     *
+     * The 403 now carries the numbers. "Upgrade required" told a person nothing
+     * about how short they were, so the screen that opened next could not say
+     * either — it just asked for money.
+     */
+    const price = coinCost(product);
 
     if (!user.isSubscribed && !user.isPremium) {
-      if (user.freeDesignsUsed >= 2) {
-        // If no free designs left, try using coins
-        if ((user.adCoins || 0) >= COST_PER_DESIGN) {
-          user.adCoins -= COST_PER_DESIGN;
+      if ((user.freeDesignsUsed || 0) >= FREE_DESIGNS) {
+        if ((user.adCoins || 0) >= price) {
+          user.adCoins -= price;
           await user.save();
-          console.log(`Deducted ${COST_PER_DESIGN} coins from user ${user._id}. Remaining coins: ${user.adCoins}`);
+          console.log(`Deducted ${price} coin(s) from user ${user._id}. Remaining: ${user.adCoins}`);
         } else {
           console.log("User has no free designs and insufficient coins:", user._id);
           return res.status(403).json({
-            message: "Upgrade required",
-            reason: "You have used your 2 free designs and don't have enough coins.",
+            message: "Not enough coins",
+            reason:
+              `This ${product === "walkthrough" ? "walkthrough render" : "design"} costs `
+              + `${price} ${price === 1 ? "coin" : "coins"}, and you have ${user.adCoins || 0}.`,
+            required: price,
+            adCoins: user.adCoins || 0,
+            freeDesignsUsed: user.freeDesignsUsed || 0,
           });
         }
       } else {
-        // Still has free designs → consume one
+        // Still inside the free allowance → consume one, charge nothing.
         user.freeDesignsUsed += 1;
         await user.save();
         console.log(`Used one free design for user ${user._id}. Total used: ${user.freeDesignsUsed}`);
@@ -398,6 +420,14 @@ router.post("/", isAuthenticated, async (req, res) => {
       roomType: newDesign.roomType,
       designStyle: newDesign.designStyle,
       colorTone: newDesign.colorTone,
+      // What this actually cost and what is left. The app used to subtract the
+      // price from its own copy of the balance after a successful render, which
+      // meant two devices — or one device and a refund — drifted apart until the
+      // next fetch of /me. The charge happened here, so the new balance ships
+      // back with the result.
+      charged: user.isSubscribed || user.isPremium ? 0 : price,
+      adCoins: user.adCoins || 0,
+      freeDesignsUsed: user.freeDesignsUsed || 0,
     });
   } catch (error) {
     console.error("POST /designs error:", error);

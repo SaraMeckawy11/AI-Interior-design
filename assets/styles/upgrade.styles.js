@@ -1,376 +1,384 @@
-import { StyleSheet, Dimensions } from 'react-native';
-import COLORS from '../../constants/colors';
-//import { scale, verticalScale } from 'react-native-size-matters';
-const { width, height } = Dimensions.get("window");
+/**
+ * The store: subscriptions and coin packs, on one screen.
+ *
+ * This used to be two half-designed things stacked — a "coins" card with a
+ * balance and a Watch Ad button, then a pair of plan cards — with no statement
+ * anywhere of what a coin was for or how many a design took, beyond one grey
+ * sentence that had gone out of date. It is now one screen with two ways to pay
+ * and a price list, because "which of these should I buy?" is the only question
+ * it exists to answer.
+ *
+ * Rebuilt on the design tokens, so it looks like the rest of the app rather than
+ * like a page from a different product: the old version had `#eef7ff` — a cold
+ * blue — as the selected-plan fill, in an app whose entire palette is warm sage
+ * and clay.
+ */
 
-// Scaling functions
-const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
-const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
-const moderateScale = (size, factor = 0.5) =>
-  size + (scale(size) - size) * factor;
+import { StyleSheet } from 'react-native';
+
+import COLORS from '../../constants/colors';
+import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, ms } from '../../constants/theme';
 
 export default StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
   container: {
-    paddingHorizontal: scale(24),
-    paddingTop: verticalScale(24),
-    paddingBottom: verticalScale(36),
-    backgroundColor: COLORS.background,
-    flexGrow: 1,
+    paddingHorizontal: SPACING.base,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xxxl,
+    gap: SPACING.md,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginBottom: verticalScale(16),
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // ── Hero ────────────────────────────────────────────────────────────────
+  hero: {
+    position: 'relative',
+    overflow: 'hidden',
+    minHeight: ms(250),
+    padding: SPACING.xl,
+    borderRadius: RADIUS.xxl,
+    ...SHADOW.lg,
   },
-  subtitle: {
-    fontSize: 14,
-    fontWeight: '400',
-    color:  COLORS.textPrimary,
-    marginBottom: verticalScale(24),
+  heroGlow: {
+    position: 'absolute',
+    width: ms(210),
+    height: ms(210),
+    borderRadius: RADIUS.pill,
+    right: -74,
+    top: -82,
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
-  featureList: {
-    marginBottom: verticalScale(24),
-  },
-  featureItem: {
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: verticalScale(10),
+    gap: 6,
+    height: ms(30),
+    paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.pill,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
-  featureText: {
-    fontSize: 14,
-    marginLeft: 8,
-    fontWeight: '400',
-    color: COLORS.textPrimary,
+  heroPillText: { ...TYPE.overline, fontSize: 9.5, color: COLORS.white },
+  heroMark: {
+    width: ms(42),
+    height: ms(42),
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
-  planLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: verticalScale(14),
-    color: COLORS.textPrimary,
+  heroTitle: { ...TYPE.display, color: COLORS.white, maxWidth: '88%', marginTop: SPACING.lg },
+  heroText: {
+    ...TYPE.small,
+    color: 'rgba(255,255,255,0.78)',
+    maxWidth: '92%',
+    marginTop: SPACING.sm,
   },
-  planOptions: {
+  heroBenefits: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginTop: SPACING.lg },
+  heroBenefit: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: verticalScale(24),
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 5,
+    borderRadius: RADIUS.pill,
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
-  planCard: {
-    flex: 1,
-    padding: scale(16),
-    marginHorizontal: scale(6),
-    borderRadius: 14,
+  heroBenefitText: { ...TYPE.caption, fontSize: 9.5, color: COLORS.white },
+
+  // ── Balance ──────────────────────────────────────────────────────────────
+  // The one number the person came here about, at the size of a headline, with
+  // the price list directly under it so "43 coins" means something.
+  balanceCard: {
+    borderRadius: RADIUS.lg,
+    padding: SPACING.lg,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.inputBackground,
+    ...SHADOW.sm,
+  },
+  balanceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
+  balanceIcon: {
+    width: ms(46),
+    height: ms(46),
+    borderRadius: RADIUS.pill,
     alignItems: 'center',
-    position: 'relative',
+    justifyContent: 'center',
+    backgroundColor: COLORS.brand100,
+  },
+  balanceCopy: { flex: 1, gap: 1 },
+  balanceValue: { ...TYPE.h1, color: COLORS.textPrimary },
+  balanceLabel: { ...TYPE.small, color: COLORS.textSecondary },
+
+  priceList: {
+    marginTop: SPACING.base,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+    gap: SPACING.sm,
+  },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  priceLabel: { flex: 1, ...TYPE.small, color: COLORS.textSecondary },
+  priceValue: { ...TYPE.caption, color: COLORS.textPrimary },
+
+  // ── Earn ─────────────────────────────────────────────────────────────────
+  earnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    marginTop: SPACING.base,
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.accentTint,
+    borderWidth: 1,
+    borderColor: COLORS.accentSoft,
+  },
+  earnIcon: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: RADIUS.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.accentSoft,
+  },
+  earnCopy: { flex: 1, gap: 1 },
+  earnTitle: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.textPrimary },
+  earnText: { ...TYPE.caption, color: COLORS.textSecondary },
+  earnButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs + 1,
+    height: ms(38),
+    paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accentStrong,
+  },
+  earnButtonBusy: { backgroundColor: COLORS.accentSoft },
+  earnButtonText: { ...TYPE.caption, color: COLORS.white },
+
+  // ── Sections ─────────────────────────────────────────────────────────────
+  sectionHead: { marginTop: SPACING.lg, gap: 3 },
+  sectionEyebrow: { ...TYPE.overline, color: COLORS.accentStrong },
+  sectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  sectionHint: { ...TYPE.small, color: COLORS.textSecondary },
+
+  // ── Plans ────────────────────────────────────────────────────────────────
+  /**
+   * Full-width rows, not two squeezed side-by-side cards.
+   *
+   * Two plans in a row meant the yearly price, its per-month equivalent and its
+   * saving all had to fit in half a phone's width, so the saving became a "Save
+   * 80%" badge that was not true of the prices next to it. Down the page there
+   * is room to state the actual arithmetic.
+   */
+  planCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    padding: SPACING.base,
+    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
   },
   planCardSelected: {
     borderColor: COLORS.primaryDark,
-    backgroundColor: '#eef7ff',
-    shadowColor: COLORS.primaryDark,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.primaryTint,
+    ...SHADOW.sm,
   },
-  planTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+  plansPanel: {
+    gap: SPACING.sm,
+    padding: SPACING.sm,
+    borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
+    ...SHADOW.sm,
   },
-  planPrice: {
-    fontSize: 14,
-    fontWeight: '400',
-    marginTop: 4,
-    color: '#333',
+  availablePlanCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surfaceAlt,
+    borderWidth: 1,
+    borderColor: COLORS.borderSubtle,
   },
-  planSavings: {
-    marginTop: 4,
-    fontSize: 12,
-    fontWeight: '500',
-    color: COLORS.accent,
+  availablePlanIcon: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.primaryTint,
   },
-  bestValueBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    zIndex: 10,
+  // A real radio, so which plan is about to be charged for is legible without
+  // having to compare two border colours.
+  radio: {
+    width: ms(22),
+    height: ms(22),
+    borderRadius: RADIUS.pill,
+    borderWidth: 2,
+    borderColor: COLORS.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bestValueText: {
-    color: COLORS.white,
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  upgradeButton: {
+  radioOn: { borderColor: COLORS.primaryDark },
+  radioDot: {
+    width: ms(11),
+    height: ms(11),
+    borderRadius: RADIUS.pill,
     backgroundColor: COLORS.primaryDark,
-    paddingVertical: verticalScale(8),
-    paddingHorizontal: scale(24),
-    borderRadius: 24,
-    alignItems: 'center',
-    marginTop: verticalScale(10),
   },
-  upgradeButtonText: {
-    color: COLORS.white,
-    fontSize: 15,
-    fontWeight: '600',
+  planCopy: { flex: 1, minWidth: 0, gap: 2 },
+  planTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  planTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  planPrice: { ...TYPE.h3, color: COLORS.textPrimary },
+  planPriceBlock: { alignItems: 'flex-end', flexShrink: 0 },
+  planPeriod: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary },
+  planNote: { ...TYPE.caption, color: COLORS.textSecondary },
+  badge: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 2,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accent,
   },
-  trustNote: {
-    textAlign: 'center',
-    marginTop: verticalScale(14),
-    fontSize: 12,
-    fontWeight: '400',
-    color: COLORS.textSecondary,
-  },
-  cardInteractive: {
-    backgroundColor: COLORS.inputBackground,
-    flexDirection: 'row',
-    padding: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: verticalScale(16),
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  cardDestructive: {
-    backgroundColor: COLORS.dangerSoft,
-    flexDirection: 'row',
-    padding: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: verticalScale(16),
-    borderWidth: 1,
-    borderColor: '#f5c6cb',
-  },
-  cardElevated: {
-    backgroundColor: COLORS.white,
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: verticalScale(20),
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  unsubscribedWrapper: {
+  badgeText: { ...TYPE.caption, fontSize: 10, color: COLORS.white },
+
+  featureList: { gap: SPACING.sm, marginTop: SPACING.sm },
+  featureItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  featureText: { flex: 1, ...TYPE.small, color: COLORS.textPrimary },
+
+  // ── Coin packs ───────────────────────────────────────────────────────────
+  packRow: { flexDirection: 'row', gap: SPACING.sm },
+  pack: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: scale(20),
-    backgroundColor: COLORS.background,
-  },
-  unsubscribedCard: {
-    backgroundColor: COLORS.cardBackground,
-    padding: scale(18),
-    borderRadius: 14,
-    borderWidth: 1,
+    gap: 2,
+    paddingVertical: SPACING.base,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
+  },
+  packSelected: { borderColor: COLORS.primaryDark, backgroundColor: COLORS.primaryTint },
+  packBadge: {
+    position: 'absolute',
+    top: -9,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 2,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.accent,
+  },
+  packBadgeText: { ...TYPE.caption, fontSize: 9.5, color: COLORS.white },
+  packCoins: { ...TYPE.h3, color: COLORS.textPrimary, marginTop: SPACING.xs },
+  packUnit: { ...TYPE.caption, color: COLORS.textSecondary },
+  packPrice: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.primaryDark, marginTop: SPACING.xs },
+  packSaving: { ...TYPE.caption, fontSize: 10, color: COLORS.success },
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  primary: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: verticalScale(24),
-    shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    gap: SPACING.sm,
+    height: ms(54),
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryDark,
+    marginTop: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    ...SHADOW.brand,
   },
-  unsubscribedTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginBottom: 8,
+  primaryText: { flex: 1, ...TYPE.bodyStrong, fontSize: 15, color: COLORS.white, textAlign: 'center' },
+  primaryDisabled: { backgroundColor: COLORS.surfaceSunken, ...SHADOW.none },
+  primaryTextDisabled: { color: COLORS.textTertiary },
+  secondary: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: ms(48),
+    borderRadius: RADIUS.md,
+    marginTop: SPACING.xs,
+  },
+  secondaryText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.primaryDark },
+  pressed: { opacity: 0.78 },
+
+  trustNote: {
+    ...TYPE.caption,
+    color: COLORS.textTertiary,
     textAlign: 'center',
+    marginTop: SPACING.md,
+    lineHeight: 16,
   },
-  unsubscribedText: {
-    fontSize: 14,
-    fontWeight: '400',
+
+  // ── Subscriber state ─────────────────────────────────────────────────────
+  activeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    padding: SPACING.base,
+    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.successSoft,
+    borderWidth: 1,
+    borderColor: COLORS.brand200,
+  },
+  activeIcon: {
+    width: ms(52),
+    height: ms(52),
+    borderRadius: RADIUS.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+  },
+  activeCopy: { flex: 1, minWidth: 0 },
+  activeTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  activeText: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2 },
+  activeAction: {
+    width: ms(40),
+    height: ms(40),
+    borderRadius: RADIUS.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+  },
+
+  // ── Dialog ───────────────────────────────────────────────────────────────
+  dialogBackdrop: {
+    flex: 1,
+    backgroundColor: COLORS.scrim,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.xl,
+  },
+  dialog: {
+    width: '100%',
+    maxWidth: LAYOUT.maxContentWidth,
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    alignItems: 'center',
+    gap: SPACING.sm,
+    ...SHADOW.lg,
+  },
+  dialogTitle: { ...TYPE.h3, color: COLORS.textPrimary, textAlign: 'center' },
+  dialogMessage: {
+    ...TYPE.small,
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
-    marginBottom: 16,
-    paddingHorizontal: 6,
   },
-  unsubscribedButton: {
+  dialogButton: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: ms(48),
+    borderRadius: RADIUS.md,
     backgroundColor: COLORS.primaryDark,
-    paddingVertical: verticalScale(9),
-    paddingHorizontal: scale(24),
-    borderRadius: 22,
-    shadowColor: COLORS.primaryDark,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    marginTop: SPACING.sm,
   },
-  unsubscribedButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  cardSubtitle: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: COLORS.textSecondary,
-    marginTop: 3,
-  },
-  cardSmall: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  warningBox: {
-  backgroundColor: COLORS.dangerSoft,
-  padding: 12,
-  borderRadius: 8,
-  marginBottom: 20,
-  borderColor: COLORS.danger,
-  borderWidth: 1,
-},
-
-warningTitle: {
-  color: COLORS.danger,
-  fontWeight: 'bold',
-  fontSize: 16,
-  marginBottom: 4,
-},
-
-warningText: {
-  color: '#555',
-  fontSize: 14,
-},
-
-modalMissingOverlay: {
-  flex: 1,
-  justifyContent: 'center',
-  alignItems: "center",
-  backgroundColor: 'rgba(0,0,0,0.4)',
-},
-modalMissingContainer: {
-  backgroundColor: COLORS.cardBackground,
-  width: "80%",
-  borderRadius: moderateScale(20),  
-  padding: moderateScale(20),
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: -2 },
-  shadowOpacity: 0.15,
-  shadowRadius: 6,
-  elevation: 6,
-},
-modalTitle: {
-  fontSize: moderateScale(16),
-  fontWeight: '600',
-  color: COLORS.primaryDark,
-  textAlign: 'center',
-  marginBottom: verticalScale(4),
-},
-modalSubtitle: {
-  fontSize: moderateScale(13),
-  color: COLORS.textSecondary,
-  textAlign: 'center',
-  marginBottom: verticalScale(4),
-},
-modalMissingButton: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: COLORS.primaryDark,
-  borderRadius: moderateScale(16),
-  paddingVertical: verticalScale(8),
-  marginBottom: verticalScale(10),
-},
-modalCancelButton: {
-  backgroundColor: COLORS.roomCard,
-  borderWidth: 1,
-  borderColor: COLORS.border,
-},
-modalButtonText: {
-  fontSize: moderateScale(14),
-  fontWeight: '600',
-  color: COLORS.white,
-},
-modalIcon: {
-  marginRight: moderateScale(8),
-},
-coinContainer: {
-  backgroundColor: COLORS.cardBackground || '#ffffff',
-  borderRadius: 20,
-  paddingVertical: verticalScale(18),
-  paddingHorizontal: scale(20),
-  marginBottom: verticalScale(28),
-  alignItems: 'center',
-  justifyContent: 'center',
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-  elevation: 4,
-  borderWidth: 1,
-  borderColor: 'rgba(0,0,0,0.05)',
-},
-
-coinRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginBottom: verticalScale(8),
-},
-
-coinIcon: {
-  marginRight: 8,
-},
-
-coinValue: {
-  fontSize: 22,
-  fontWeight: '700',
-  color: COLORS.primaryDark,
-},
-
-coinSubtitle: {
-  fontSize: 14,
-  color: COLORS.textSecondary,
-  textAlign: 'center',
-  marginBottom: verticalScale(12),
-},
-
-coinSubtitle: {
-  color: COLORS.textSecondary,       
-  fontSize: 14,
-  textAlign: 'center',
-  lineHeight: 20,
-},
-
-watchAdButton: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: COLORS.primaryDark,
-  borderRadius: 20,
-  paddingVertical: 10,
-  paddingHorizontal: 16,
-  marginTop: 12,
-  alignSelf: 'center',
-},
-watchAdButtonText: {
-  color: '#fff',
-  fontWeight: '600',
-  fontSize: 15,
-},
-adStatusText: {
-  marginTop: 6,
-  textAlign: 'center',
-  color: COLORS.textMedium,
-  fontSize: 13,
-},
-
+  dialogButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
 });

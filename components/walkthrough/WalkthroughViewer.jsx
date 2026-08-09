@@ -54,7 +54,6 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     onReady,
     onSceneUpdate,
     onSelect,
-    onWalls,
     onError,
     onSnapshot,
     onComposition,
@@ -135,8 +134,6 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     setNight: (value) => run(`window.LivinaiScene.setNight(${value ? "true" : "false"})`),
     setRoom: (index) => run(`window.LivinaiScene.setRoom(${index})`),
     setFreeExplore: (value) => run(`window.LivinaiScene.setFreeExplore(${value ? "true" : "false"})`),
-    listWalls: () => run("window.LivinaiScene.listWalls()"),
-    setHiddenWalls: (ids) => run(`window.LivinaiScene.setHiddenWalls(${JSON.stringify(ids || [])})`),
     setDesignerView: (value) => run(`window.LivinaiScene.setDesignerView(${value ? "true" : "false"})`),
     rotateSelected: (delta) => run(`window.LivinaiScene.rotateSelected(${delta})`),
     moveSelected: (direction, amount) =>
@@ -173,8 +170,6 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
       } else if (data.type === "diagnostic") {
         if (__DEV__) console.warn(`[walkthrough] ${data.message}`);
         onDiagnostic?.(data.message);
-      } else if (data.type === "walls") {
-        onWalls?.(data.walls || []);
       } else if (data.type === "select") {
         onSelect?.(data.info);
       } else if (data.type === "composition") {
@@ -189,7 +184,7 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         onError?.(data.message);
       }
     },
-    [onComposition, onDiagnostic, onError, onFurnitureChange, onReady, onSceneUpdate, onSelect, onSnapshot, onWalls, streamCatalog],
+    [onComposition, onDiagnostic, onError, onFurnitureChange, onReady, onSceneUpdate, onSelect, onSnapshot, streamCatalog],
   );
 
   return (

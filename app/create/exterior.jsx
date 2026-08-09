@@ -17,7 +17,6 @@ import {
     TouchableWithoutFeedback,
     View
 } from 'react-native';
-import { RewardedAd, RewardedAdEventType } from 'react-native-google-mobile-ads';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import styles from '../../assets/styles/create/create.styles';
 import { useAuthStore } from '../../authStore';
@@ -26,7 +25,13 @@ import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ExtTypeSelector from '../../components/create/extTypeSelector';
 import COLORS from '../../constants/colors';
 import { apiUrl } from '../../configs/api';
+import { FREE_DESIGNS, coinCost } from '../../constants/pricing';
+import useRewardedCoins from '../../lib/useRewardedCoins';
+
 import { paletteForRequest } from '../../lib/colorPalettes';
+
+/** What one render on this path costs, from the one table that decides. */
+const PRICE = coinCost('design');
 
 const { width, height } = Dimensions.get("window");
 
@@ -36,10 +41,6 @@ const verticalScale = (size) => (height / 667) * size; // vertical scaling (base
 const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
-// const adUnitId = __DEV__ ? TestIds.REWARDED : 'ca-app-pub-4470538534931449/2411201644';
-const adUnitId = 'ca-app-pub-4470538534931449/2411201644';
-const rewardedAd = RewardedAd.createForAdRequest(adUnitId);
-const autoAd = RewardedAd.createForAdRequest(adUnitId);
 
 export default function Exterior() {
   const router = useRouter();
@@ -59,74 +60,10 @@ export default function Exterior() {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalData, setModalData] = useState({ title: '', message: '' });
   const [isManualDisabled, setIsManualDisabled] = useState(false);
-  const [coins, setCoins] = useState(0);
-  const [adMessage, setAdMessage] = useState('');
-  const [isAdLoaded, setIsAdLoaded] = useState(false);
-  const [userInitiatedLoad, setUserInitiatedLoad] = useState(false);
+  // One ad instance owned by this screen, one coin per ad, and the wiring in
+  // one place instead of copied into five. See lib/useRewardedCoins.js.
+  const { coins, setCoins, watchAd: handleWatchAd } = useRewardedCoins(token);
   
-  // Setup rewarded ad logic
-  useEffect(() => {
-    if (!RewardedAdEventType || typeof RewardedAdEventType !== 'object') {
-      console.error('RewardedAdEventType is not defined properly');
-      return;
-    }
-
-    const listeners = [];
-
-    if (RewardedAdEventType.LOADED) {
-      listeners.push(
-        rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          setIsAdLoaded(true);
-          if (userInitiatedLoad) {
-            setAdMessage('Ad loaded. Playing now...');
-            rewardedAd.show();
-            setUserInitiatedLoad(false);
-          }
-        })
-      );
-    }
-
-    if (RewardedAdEventType.EARNED_REWARD) {
-      listeners.push(
-        rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, async () => {
-          try {
-            const res = await fetch(apiUrl('/api/users/watch-ad'), {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            });
-            const data = await res.json();
-            if (data.success) {
-              setCoins(Number(data.adCoins || coins + 1));
-            } else {
-              setCoins((prev) => prev + 1);
-            }
-          } catch (err) {
-            console.error('reward error', err);
-            setCoins((prev) => prev + 1);
-          } finally {
-            setAdMessage('');
-          }
-        })
-      );
-    }
-
-    if (RewardedAdEventType.CLOSED) {
-      listeners.push(
-        rewardedAd.addAdEventListener(RewardedAdEventType.CLOSED, () => {
-          setIsAdLoaded(false);
-          rewardedAd.load();
-        })
-      );
-    }
-
-    return () => listeners.forEach((unsub) => unsub());
-  }, [token, userInitiatedLoad]);
-
-  const handleWatchAd = () => {
-    setUserInitiatedLoad(true);
-    setAdMessage('Loading ad...');
-    rewardedAd.load();
-  };
   
  // Fetch user status
    useFocusEffect(
@@ -162,7 +99,7 @@ export default function Exterior() {
  
        // Refresh user on screen focus
        fetchUserStatus();
-     }, [token])
+     }, [setCoins, token])
    );
 
   // Pick image
@@ -273,9 +210,9 @@ export default function Exterior() {
     }
 
     // ✅ Access logic for non-premium / non-subscribed users
-    if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins < 2) {
-    router.push('/profile/upgrade');
-    return;
+    if (!isSubscribed && !isPremium && freeDesignsUsed >= FREE_DESIGNS && coins < PRICE) {
+      router.push('/profile/upgrade');
+      return;
     }
 
     try {
@@ -317,18 +254,25 @@ export default function Exterior() {
       });
 
       const data = await response.json();
-      console.log('Generated design response:', data);
 
+      // Out of coins is not a server fault, and it has its own way out. This
+      // used to fall through to the generic 'there was a problem generating
+      // your design', so running out of credit was reported as a failure.
+      if (response.status === 403) {
+        if (typeof data.adCoins === 'number') setCoins(data.adCoins);
+        router.push('/profile/upgrade');
+        return;
+      }
       if (!response.ok) throw new Error(data.message || 'Something went wrong');
 
       const imageUri =
         data.generatedImageUrl || data.generatedImage || data.image || data.output || null;
 
       if (imageUri) {
-        // Deduct coins if user spent any
-        if (!isSubscribed && !isPremium && freeDesignsUsed >= 2 && coins >= 2) {
-          setCoins(prev => prev - 2);
-        }
+        // The balance and the free-design count as the server now has
+        // them. Subtracting locally drifted from what was charged.
+        if (typeof data.adCoins === 'number') setCoins(data.adCoins);
+        if (typeof data.freeDesignsUsed === 'number') setFreeDesignsUsed(data.freeDesignsUsed);
 
         router.push({
           pathname: '/outputScreen',
@@ -382,7 +326,7 @@ export default function Exterior() {
           <View style={styles.titleHeader}>
             <Text style={styles.title}>LIVINAI</Text>
 
-            {!isSubscribed && !isPremium && freeDesignsUsed >= 2 && (
+            {!isSubscribed && !isPremium && freeDesignsUsed >= FREE_DESIGNS && (
               <View style={styles.coinsContainer}>
                 <Text style={styles.coinsText}>{coins} Coins</Text>
               </View>
