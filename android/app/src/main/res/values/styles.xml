@@ -1,9 +1,17 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
   <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
     <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
-    <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
     <item name="colorPrimary">@color/colorPrimary</item>
-    <item name="android:statusBarColor">#ffffff</item>
+    <!--
+      No windowOptOutEdgeToEdgeEnforcement and no statusBarColor here on purpose.
+
+      Both were the pre-API-35 way of keeping an opaque bar above the app. At
+      targetSdk 36 the opt-out is ignored on Android 16 (it still applies on
+      Android 15, which would leave us supporting two different layouts), and
+      statusBarColor has been ignored since targetSdk 35. The window is now
+      always edge-to-edge, so the bars are drawn by us: every screen pads
+      itself with useSafeAreaInsets.
+    -->
   </style>
   <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
     <item name="windowSplashScreenBackground">@color/splashscreen_background</item>

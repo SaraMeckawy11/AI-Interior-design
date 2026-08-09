@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { formatPublishDate } from '../lib/utils';
 import Slider from '@react-native-community/slider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from '../assets/styles/output.styles';
 import COLORS from '../constants/colors';
 
@@ -25,6 +26,11 @@ export default function OutputScreen() {
     useLocalSearchParams();
 
   const router = useRouter();
+  // The window is edge-to-edge at targetSdk 36, so the status and navigation
+  // bars sit on top of this screen rather than beside it. Every other screen
+  // pads itself through ScreenHeader or SafeScreen; this one has no header, so
+  // it reads the insets directly.
+  const insets = useSafeAreaInsets();
 
   const [imageHeight, setImageHeight] = useState(240);
   const [modalVisible, setModalVisible] = useState(false);
@@ -133,7 +139,7 @@ export default function OutputScreen() {
     <View style={{ flex: 1, backgroundColor: COLORS.background }}>
 
       {/* 🔙 BACK BUTTON */}
-      <View style={styles.backButtonContainer}>
+      <View style={[styles.backButtonContainer, { marginTop: insets.top }]}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backArrow}
@@ -145,7 +151,12 @@ export default function OutputScreen() {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, alignItems: 'center' }}
+        contentContainerStyle={{
+          padding: 16,
+          paddingTop: insets.top + 16,
+          paddingBottom: insets.bottom + 16,
+          alignItems: 'center',
+        }}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Your Design</Text>

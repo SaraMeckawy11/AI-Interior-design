@@ -27,6 +27,17 @@
     android:fullBackupContent="@xml/secure_store_backup_rules"
     android:dataExtractionRules="@xml/secure_store_data_extraction_rules">
 
+    <!--
+      At targetSdk 36 Android ignores android:screenOrientation on displays of
+      sw600dp and up, so the portrait lock below stops holding on tablets and
+      unfolded foldables. The screens are laid out for a phone, so opt out for
+      now. This is a stopgap with a shelf life: the framework drops the opt-out
+      at targetSdk 37, and the layouts have to handle landscape by then.
+    -->
+    <property
+        android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+        android:value="true"/>
+
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
