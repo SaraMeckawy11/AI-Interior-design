@@ -46,6 +46,23 @@ import useRewardedCoins from '../../lib/useRewardedCoins';
  * a hardcoded USD amount shown to someone paying in rupees is wrong about both
  * the number and the currency.
  */
+/**
+ * What Pro includes.
+ *
+ * Parallel and specific, and using the same two nouns the coin price list a few
+ * rows above uses — "design" and "3D walkthrough render". These read
+ * "Ad-free experience", "Unlimited design renders", "Unlimited 3D
+ * walkthroughs": three different grammatical shapes, and "design renders"
+ * named the same thing the price list called a "design", so the two blocks
+ * appeared to be about different products. Strongest benefit first; the
+ * absence of ads is a nice-to-have, not the reason anyone subscribes.
+ */
+const PRO_FEATURES = [
+  'Unlimited interior and exterior designs',
+  'Unlimited 3D walkthrough renders',
+  'No ads anywhere in the app',
+];
+
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
   const router = useRouter();
@@ -374,15 +391,22 @@ export default function Upgrade() {
         </View>
 
         {/* ── What Pro includes ──────────────────────────────────────────── */}
-        <View style={styles.featureList}>
-          {['Ad-free experience', 'Unlimited design renders', 'Unlimited 3D walkthroughs'].map(
-            (feature) => (
-              <View key={feature} style={styles.featureItem}>
-                <Ionicons name="checkmark" size={15} color={COLORS.primaryDark} />
-                <Text style={styles.featureText}>{feature}</Text>
-              </View>
-            ),
-          )}
+        <Text style={styles.sectionLabel}>What Pro includes</Text>
+        <View style={styles.featureList} accessibilityRole="list">
+          {PRO_FEATURES.map((feature) => (
+            <View key={feature} style={styles.featureItem} accessibilityRole="text">
+              {/* Decoration: the same tick three times, and a screen reader
+                  announcing "checkmark" before each line says nothing. */}
+              <Ionicons
+                name="checkmark"
+                size={15}
+                color={COLORS.primaryDark}
+                style={styles.featureIcon}
+                importantForAccessibility="no"
+              />
+              <Text style={styles.featureText}>{feature}</Text>
+            </View>
+          ))}
         </View>
 
         {/* ── Plans ──────────────────────────────────────────────────────── */}

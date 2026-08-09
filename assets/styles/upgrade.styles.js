@@ -143,8 +143,21 @@ export default StyleSheet.create({
   },
 
   // ── Features ─────────────────────────────────────────────────────────────
-  featureList: { marginBottom: SPACING.xl, gap: SPACING.sm },
-  featureItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  // ── What Pro includes ────────────────────────────────────────────────────
+  // Three things went wrong here. The list was the only block on the page with
+  // no heading, so between the coin balance and "Choose a plan" it read as
+  // three unexplained ticks. `alignItems: "center"` centred the tick against
+  // the whole row rather than the first line: the labels do fit on one line at
+  // default settings — the longest clears 320pt with about 10pt to spare — but
+  // they wrap as soon as the system font scale is turned up, and that is the
+  // case where a tick floating halfway down the row looks broken. And 8pt
+  // between rows was tighter than the 19pt line height inside them, which makes
+  // a list read as one grey mass.
+  featureList: { marginBottom: SPACING.xl, gap: SPACING.md },
+  featureItem: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm },
+  // (19pt line height - 15pt glyph) / 2, so the tick sits on the first line's
+  // optical centre however many lines follow it.
+  featureIcon: { marginTop: 2 },
   featureText: { flex: 1, ...TYPE.small, color: COLORS.textPrimary },
 
   // ── Plans, side by side ──────────────────────────────────────────────────
