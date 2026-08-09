@@ -26,7 +26,7 @@ Livinai is an innovative AI-powered mobile application designed to transform and
 ### Backend Services
 
 - **Main API (Node.js):** Handles authentication, subscription syncing, coin balance updates, and saving generated designs to collections.
-- **AI Processing (Python):** two engines behind one routing rule — FLUX.2 [klein] for photo redesigns, and SD 1.5 + depth/seg ControlNets for guided floor plans, where the drawn room polygons are rasterised into the conditioning mask. `modal/app.py` is the original; `interiorAI/` is the RunPod worker that serves requests first and runs the same engines, ported into `inference_core.py` alongside the shared `prompt_engine.py`. `interio/handler.py` is an older canny-based handler on its own endpoint.
+- **AI Processing (Python):** two engines behind one routing rule — FLUX.2 [klein] for photo redesigns, and SD 1.5 + depth/seg ControlNets for guided floor plans, where the drawn room polygons are rasterised into the conditioning mask. `modal/app.py` is the original and serves every design it can; `interiorAI/` is the RunPod worker the backend falls back to, running the same engines ported into `inference_core.py` alongside the shared `prompt_engine.py`. `interio/handler.py` is an older canny-based handler on its own endpoint.
 
 See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for what to redeploy and in what order.
 

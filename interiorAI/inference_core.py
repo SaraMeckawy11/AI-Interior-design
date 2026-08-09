@@ -1,11 +1,11 @@
 """The Modal engines, ported to run inside the RunPod worker.
 
-`POST /api/designs` calls RunPod first and Modal second. Those used to be two
+`POST /api/designs` calls Modal first and RunPod second. Those used to be two
 different engines — SD 1.5 + ControlNet here, FLUX.2 [klein] on Modal — so which
-host answered decided what the user got back, and a RunPod cold start that ran a
-second past the poll budget silently changed the picture. This module is a port
-of the two engine classes in `modal/app.py`, so the choice of host is no longer a
-choice of model.
+host answered decided what the user got back, and a fallback silently changed the
+picture rather than just the bill. This module is a port of the two engine classes
+in `modal/app.py`, so the choice of host is no longer a choice of model, and the
+order the backend tries them in is free to be an operational decision.
 
 Two engines live here, and RunPod routes between them by the rule Modal's router
 uses:

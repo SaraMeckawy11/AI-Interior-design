@@ -1,9 +1,10 @@
-"""Livinai RunPod worker — the primary engine behind `POST /api/designs`.
+"""Livinai RunPod worker — the fallback behind `POST /api/designs`.
 
-The backend submits here first and only falls back to Modal, so this worker has
-to answer with the same picture Modal would have produced. It therefore runs the
-engines ported from `modal/app.py` (see `inference_core.py`) and routes between
-them by the same rule Modal's router uses:
+The backend asks Modal first and only comes here when that fails, and a user
+cannot tell which host answered, so this worker has to produce the same picture
+Modal would have. It therefore runs the engines ported from `modal/app.py` (see
+`inference_core.py`) and routes between them by the same rule Modal's router
+uses:
 
 * `mode: "guided"` with drawn room polygons -> SD 1.5 + depth/seg ControlNets,
   because that mode is a rasterised mask of the user's polygons and FLUX.2
@@ -11,12 +12,12 @@ them by the same rule Modal's router uses:
 * everything else -> Gen-Klein, `black-forest-labs/FLUX.2-klein-4B`.
 
 This replaced a worker that ran SD 1.5 for *every* request. It shared
-`prompt_engine.py` with Modal, so a design meant the same thing on both hosts —
-but it was a different model, and since RunPod answers first that meant nearly
-every user got the SD 1.5 picture while the FLUX.2 [klein] path the prompts were
-written for only ran when RunPod failed.
+`prompt_engine.py` with Modal, so a design meant the same thing on both hosts,
+but it was a different model — which is why a fallback used to be a visibly
+different picture rather than the same one from somewhere else.
 
-Endpoint requirements, both new here:
+Endpoint requirements, both still needed here — a fallback that cannot start is
+not a fallback:
 
 * **A 48 GB GPU class.** Gen-Klein runs the 4B transformer plus the Qwen3 text
   encoder in bf16 with no CPU offload, the way `GenKlein` runs on Modal's L40S.

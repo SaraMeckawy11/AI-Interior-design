@@ -19,17 +19,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // ───────────────────────────────────────────────────────────────────────────
 // Inference hosts
 //
-// RunPod runs first and Modal catches whatever it drops. Both take the same
+// Modal runs first and RunPod catches whatever it drops. Both take the same
 // brief and return the same thing, so the route below does not care which one
 // answered.
 //
-// They run the same two engines, too: FLUX.2 [klein] for photo redesigns, SD 1.5
-// + ControlNet for guided floor plans, routed by the same rule. RunPod used to
-// be SD 1.5 for *everything* — and since it answers first, that meant nearly
-// every design came back from an engine the prompts were not written for, while
-// the FLUX.2 [klein] path only ran when RunPod happened to fail. `interiorAI/`
-// now runs the engines ported from `modal/app.py`, so falling back changes who
-// pays for the GPU and nothing else.
+// They run the same two engines: FLUX.2 [klein] for photo redesigns, SD 1.5 +
+// ControlNet for guided floor plans, routed by the same rule. `interiorAI/` runs
+// the engines ported from `modal/app.py`, so the order here is an operational
+// choice — which host is asked first — and not a choice of picture. It was not
+// always: RunPod was SD 1.5 for *everything*, so putting it first meant nearly
+// every design came back from an engine the prompts were not written for.
+//
+// Modal leads because it is the one that is provisioned for this work. It
+// answers a warm request in seconds from volume-cached weights, and Modal owns
+// its own capacity, so it does not queue behind somebody else's GPU. RunPod
+// stands behind it to keep a Modal outage from reaching the user as an error.
 //
 // The logs still name the host and the engine — a fallback is worth seeing, and
 // guided plans and photo redesigns are answered by different models on both.
@@ -38,12 +42,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || "9x2kmfa8z6483c";
 const RUNPOD_POLL_INTERVAL_MS = 2_000;
 // Budget for queue time *plus* inference, not just inference. The endpoint
-// scales from zero with a 5s idle timeout, so a design that arrives cold waits
-// for a worker first: a measured run spent 59.8s queued and 12.9s generating.
-// The old 60s budget would have abandoned that job one second before it
-// finished and handed the request to Modal, which makes "RunPod first" a
-// formality. 150s covers a cold start with room to spare; past that it really
-// is stuck, and Modal is the faster answer.
+// scales from zero, so a design that arrives cold waits for a worker before
+// anything runs: a measured run spent 59.8s queued and 12.9s generating. 150s
+// covers a cold start with room to spare; past that it really is stuck.
+//
+// This is the fallback path now, so the budget is spent after Modal has already
+// failed — the user has been waiting a while by the time it starts. Shortening
+// it would mean giving up on the last host that could still answer.
 const RUNPOD_MAX_POLLS = 75;
 
 /**
@@ -219,25 +224,26 @@ router.post("/", isAuthenticated, async (req, res) => {
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
     };
 
-    // RunPod first, Modal second. The design credit was already spent above and
+    // Modal first, RunPod second. The design credit was already spent above and
     // is not refunded if both fail — same as before this fallback existed.
     let result = null;
-    let host = "runpod";
+    let host = "modal";
 
-    console.log("Submitting job to RunPod endpoint", RUNPOD_ENDPOINT_ID);
+    console.log("Submitting job to Modal");
     try {
-      result = await generateWithRunPod(payload);
-    } catch (runpodError) {
-      console.error("RunPod request failed, falling back to Modal:", runpodError.message);
-      host = "modal";
+      result = await generateWithModal(payload);
+    } catch (modalError) {
+      console.error(
+        "Modal request failed, falling back to RunPod:",
+        modalError.response?.status,
+        modalError.response?.data || modalError.message,
+      );
+      host = "runpod";
+      console.log("Submitting job to RunPod endpoint", RUNPOD_ENDPOINT_ID);
       try {
-        result = await generateWithModal(payload);
-      } catch (modalError) {
-        console.error(
-          "Modal request failed too:",
-          modalError.response?.status,
-          modalError.response?.data || modalError.message,
-        );
+        result = await generateWithRunPod(payload);
+      } catch (runpodError) {
+        console.error("RunPod request failed too:", runpodError.message);
         return res.status(502).json({ message: "AI service failed. Please try again." });
       }
     }
