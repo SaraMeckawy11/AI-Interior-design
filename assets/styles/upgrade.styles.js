@@ -1,302 +1,375 @@
-/**
- * Upgrade to Pro.
- *
- * The screen's earliest design: a big in-page title rather than a header bar, a
- * centred coins card, a feature checklist, two plan cards side by side and a
- * pill button — with the violet that used to mark the premium plan.
- *
- * Rebuilt on the design tokens rather than restored byte for byte, because the
- * original carried defects that had nothing to do with how it looked:
- *
- * * **`#A084E8` under white text is about 2.4:1** — below every WCAG threshold,
- *   so "Best Value" was decoration a good number of people could not read. The
- *   violet is kept as the screen's premium accent, but the badge is a tint with
- *   dark violet text (7.4:1) instead of white on the mid tone.
- * * **The selected plan filled with `#eef7ff`**, a cold blue, in an app whose
- *   palette is warm sage and clay. Selection is the sage tint now — the same
- *   colour selection uses everywhere else in the app.
- * * **"Best Value" sat at `top: -8, right: -8`**, outside the card's bounds,
- *   which Android clips. It is a band inside the card, reserved on both cards
- *   so their titles stay level.
- * * **The button was `paddingVertical: 8`** — roughly 30pt against the 44pt
- *   minimum — and plan selection was signalled by border colour alone, the one
- *   cue a colour-blind user cannot rely on. Hence the radio in each card.
- * * Nineteen hardcoded `fontSize`/`fontWeight` pairs became the shared ramp.
- */
-
-import { StyleSheet } from 'react-native';
-
+import { StyleSheet, Dimensions } from 'react-native';
 import COLORS from '../../constants/colors';
-import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, ms } from '../../constants/theme';
+//import { scale, verticalScale } from 'react-native-size-matters';
+const { width, height } = Dimensions.get("window");
 
-/**
- * The screen's premium accent, from the original design.
- *
- * `base` is the `#A084E8` this screen always used. `strong` is the same hue
- * taken dark enough to carry text on paper (7.4:1) and white on itself, since
- * the mid tone cannot do either.
- */
-const VIOLET = {
-  soft: '#EFE9FA',
-  base: '#A084E8',
-  strong: '#563B9C',
-};
+// Scaling functions
+const scale = (size) => (width / 375) * size; // horizontal scaling (base: iPhone 8 width)
+const verticalScale = (size) => (height / 667) * size; // vertical scaling (base: iPhone 8 height)
+const moderateScale = (size, factor = 0.5) =>
+  size + (scale(size) - size) * factor;
 
 export default StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.background },
   container: {
-    paddingHorizontal: SPACING.xl,
-    paddingBottom: SPACING.xxxl,
+    paddingHorizontal: scale(24),
+    paddingTop: verticalScale(24),
+    paddingBottom: verticalScale(36),
+    backgroundColor: COLORS.background,
+    flexGrow: 1,
   },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-
-  // ── Title ────────────────────────────────────────────────────────────────
-  // The title is on the page, not in a bar, which is how this screen used to
-  // read. The back button is the one thing kept from the header: without it
-  // leaving a paid screen depends on knowing the platform gesture, which on
-  // Android with gesture navigation is a guess.
-  back: {
-    width: ms(40),
-    height: ms(40),
-    borderRadius: RADIUS.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: SPACING.md,
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: verticalScale(16),
   },
-  title: { ...TYPE.display, color: COLORS.textPrimary },
   subtitle: {
-    ...TYPE.body,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.xl,
+    fontSize: 14,
+    fontWeight: '400',
+    color:  COLORS.textPrimary,
+    marginBottom: verticalScale(24),
   },
-
-  // ── Coins ────────────────────────────────────────────────────────────────
-  // Centred, as it was: the balance, what a coin is worth, and the way to earn
-  // one. The old card claimed "each design costs 2 coins" in a sentence nothing
-  // kept in step with the server, which charges one — these come from the
-  // shared price table instead.
-  coinCard: {
-    alignItems: 'center',
-    paddingVertical: SPACING.lg,
-    paddingHorizontal: SPACING.lg,
-    borderRadius: RADIUS.xl,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: SPACING.xxl,
-    ...SHADOW.sm,
+  featureList: {
+    marginBottom: verticalScale(24),
   },
-  coinRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
-  coinValue: { ...TYPE.h1, color: COLORS.primaryDark },
-  coinSubtitle: {
-    ...TYPE.small,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginTop: SPACING.xs,
-  },
-
-  coinPrices: {
-    alignSelf: 'stretch',
-    marginTop: SPACING.base,
-    paddingTop: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.divider,
-    gap: SPACING.sm,
-  },
-  coinPriceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
-  coinPriceLabel: { flex: 1, ...TYPE.small, color: COLORS.textSecondary },
-  coinPriceValue: { ...TYPE.caption, color: COLORS.textPrimary },
-
-  watchAdButton: {
-    alignSelf: 'stretch',
+  featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    height: ms(46),
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.primaryDark,
-    marginTop: SPACING.base,
+    marginBottom: verticalScale(10),
   },
-  watchAdButtonBusy: { backgroundColor: COLORS.surfaceSunken },
-  watchAdButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
-  adStatusText: {
-    ...TYPE.caption,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginTop: SPACING.sm,
+  featureText: {
+    fontSize: 14,
+    marginLeft: 8,
+    fontWeight: '400',
+    color: COLORS.textPrimary,
   },
-
-  // ── Features ─────────────────────────────────────────────────────────────
-  featureList: { marginBottom: SPACING.xxl, gap: SPACING.md },
-  featureItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
-  featureText: { flex: 1, ...TYPE.body, color: COLORS.textPrimary },
-
-  // ── Plans, side by side ──────────────────────────────────────────────────
-  planLabel: { ...TYPE.h3, color: COLORS.textPrimary, marginBottom: SPACING.md },
-  planOptions: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
+  planLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: verticalScale(14),
+    color: COLORS.textPrimary,
+  },
+  planOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: verticalScale(24),
+  },
   planCard: {
     flex: 1,
-    overflow: 'hidden',
-    alignItems: 'center',
-    borderRadius: RADIUS.lg,
-    borderWidth: 1.5,
+    padding: scale(16),
+    marginHorizontal: scale(6),
+    borderRadius: 14,
+    borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    paddingBottom: SPACING.base,
+    backgroundColor: COLORS.inputBackground,
+    alignItems: 'center',
+    position: 'relative',
   },
   planCardSelected: {
     borderColor: COLORS.primaryDark,
-    backgroundColor: COLORS.primaryTint,
-    ...SHADOW.sm,
+    backgroundColor: '#eef7ff',
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  planBadge: {
-    alignSelf: 'stretch',
-    height: ms(20),
-    alignItems: 'center',
-    justifyContent: 'center',
+  planTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
   },
-  planBadgeOn: { backgroundColor: VIOLET.soft },
-  planBadgeText: { ...TYPE.overline, color: VIOLET.strong },
-  planBody: { alignItems: 'center', paddingTop: SPACING.base, paddingHorizontal: SPACING.sm },
-  radio: {
-    width: ms(20),
-    height: ms(20),
-    borderRadius: RADIUS.pill,
-    borderWidth: 2,
-    borderColor: COLORS.borderStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.sm,
+  planPrice: {
+    fontSize: 14,
+    fontWeight: '400',
+    marginTop: 4,
+    color: '#333',
   },
-  radioOn: { borderColor: COLORS.primaryDark },
-  radioDot: {
-    width: ms(10),
-    height: ms(10),
-    borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.primaryDark,
+  planSavings: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#A084E8',
   },
-  planTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  planPrice: { ...TYPE.h3, color: COLORS.textPrimary, marginTop: 2 },
-  planPeriod: { ...TYPE.caption, color: COLORS.textTertiary },
-  planSavings: { ...TYPE.caption, color: VIOLET.strong, marginTop: SPACING.sm },
-  planSavingsPlaceholder: { height: ms(16), marginTop: SPACING.sm },
-
-  // ── Coin packs ───────────────────────────────────────────────────────────
-  packRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg },
-  pack: {
-    flex: 1,
-    overflow: 'hidden',
-    alignItems: 'center',
-    borderRadius: RADIUS.lg,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    paddingBottom: SPACING.md,
+  bestValueBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#A084E8',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    zIndex: 10,
   },
-  packSelected: { borderColor: COLORS.primaryDark, backgroundColor: COLORS.primaryTint },
-  packBadge: {
-    alignSelf: 'stretch',
-    height: ms(18),
-    alignItems: 'center',
-    justifyContent: 'center',
+  bestValueText: {
+    color: COLORS.white,
+    fontSize: 9,
+    fontWeight: '700',
   },
-  packBadgeOn: { backgroundColor: VIOLET.soft },
-  packBadgeText: { ...TYPE.overline, color: VIOLET.strong },
-  packBody: { alignItems: 'center', paddingTop: SPACING.md, paddingHorizontal: SPACING.xs },
-  packCoins: { ...TYPE.h2, color: COLORS.textPrimary },
-  packUnit: { ...TYPE.caption, color: COLORS.textSecondary },
-  packPrice: { ...TYPE.bodyStrong, color: COLORS.textPrimary, marginTop: SPACING.sm },
-  packSaving: { ...TYPE.caption, color: VIOLET.strong },
-  packSavingPlaceholder: { height: ms(16) },
-
-  // ── Buttons ──────────────────────────────────────────────────────────────
   upgradeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    height: ms(52),
-    borderRadius: RADIUS.pill,
     backgroundColor: COLORS.primaryDark,
-  },
-  upgradeButtonDisabled: { backgroundColor: COLORS.surfaceSunken },
-  upgradeButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
-  upgradeButtonTextDisabled: { color: COLORS.textTertiary },
-
-  // Coins are the alternative, not a second headline act, so this is outlined
-  // where the plan button is filled. Two identical dark pills would leave
-  // nothing saying which one the screen wants pressed.
-  secondaryButton: {
-    flexDirection: 'row',
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: scale(24),
+    borderRadius: 24,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    height: ms(52),
-    borderRadius: RADIUS.pill,
-    borderWidth: 1.5,
-    borderColor: COLORS.primaryDark,
-    backgroundColor: 'transparent',
+    marginTop: verticalScale(10),
   },
-  secondaryButtonText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
-
-  pressed: { opacity: 0.82 },
-
-  sectionGap: { marginTop: SPACING.xxl },
+  upgradeButtonText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '600',
+  },
   trustNote: {
-    ...TYPE.caption,
-    color: COLORS.textTertiary,
     textAlign: 'center',
-    marginTop: SPACING.base,
-    lineHeight: 17,
+    marginTop: verticalScale(14),
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#777',
   },
-
-  // ── Subscriber state ─────────────────────────────────────────────────────
-  activeCard: {
+  cardInteractive: {
+    backgroundColor: COLORS.inputBackground,
     flexDirection: 'row',
+    padding: 14,
+    borderRadius: 12,
     alignItems: 'center',
-    gap: SPACING.md,
-    padding: SPACING.base,
-    borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.successSoft,
+    marginBottom: verticalScale(16),
     borderWidth: 1,
-    borderColor: COLORS.brand200,
-    marginBottom: SPACING.xl,
+    borderColor: '#e0e0e0',
   },
-  activeCopy: { flex: 1, minWidth: 0, gap: 2 },
-  activeTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  activeText: { ...TYPE.caption, color: COLORS.textSecondary },
-
-  // ── Dialog ───────────────────────────────────────────────────────────────
-  dialogBackdrop: {
+  cardDestructive: {
+    backgroundColor: '#fff5f5',
+    flexDirection: 'row',
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: verticalScale(16),
+    borderWidth: 1,
+    borderColor: '#f5c6cb',
+  },
+  cardElevated: {
+    backgroundColor: COLORS.white,
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: verticalScale(20),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  unsubscribedWrapper: {
     flex: 1,
-    backgroundColor: COLORS.scrim,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: scale(20),
+    backgroundColor: COLORS.background,
+  },
+  unsubscribedCard: {
+    backgroundColor: COLORS.cardBackground,
+    padding: scale(18),
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: SPACING.xl,
+    marginBottom: verticalScale(24),
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  dialog: {
-    width: '100%',
-    maxWidth: LAYOUT.maxContentWidth,
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.xl,
-    padding: SPACING.lg,
-    gap: SPACING.sm,
-    ...SHADOW.lg,
+  unsubscribedTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+    textAlign: 'center',
   },
-  dialogTitle: { ...TYPE.h3, color: COLORS.textPrimary },
-  dialogMessage: { ...TYPE.small, color: COLORS.textSecondary, lineHeight: 20 },
-  dialogButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: ms(48),
-    borderRadius: RADIUS.pill,
+  unsubscribedText: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+    paddingHorizontal: 6,
+  },
+  unsubscribedButton: {
     backgroundColor: COLORS.primaryDark,
-    marginTop: SPACING.sm,
+    paddingVertical: verticalScale(9),
+    paddingHorizontal: scale(24),
+    borderRadius: 22,
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  dialogButtonText: { ...TYPE.bodyStrong, color: COLORS.white },
+  unsubscribedButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#666',
+    marginTop: 3,
+  },
+  cardSmall: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#777',
+    marginTop: 2,
+  },
+  warningBox: {
+  backgroundColor: '#fff5f5',
+  padding: 12,
+  borderRadius: 8,
+  marginBottom: 20,
+  borderColor: '#e74c3c',
+  borderWidth: 1,
+},
+
+warningTitle: {
+  color: '#e74c3c',
+  fontWeight: 'bold',
+  fontSize: 16,
+  marginBottom: 4,
+},
+
+warningText: {
+  color: '#555',
+  fontSize: 14,
+},
+
+modalMissingOverlay: {
+  flex: 1,
+  justifyContent: 'center',
+  alignItems: "center",
+  backgroundColor: 'rgba(0,0,0,0.4)',
+},
+modalMissingContainer: {
+  backgroundColor: COLORS.cardBackground,
+  width: "80%",
+  borderRadius: moderateScale(20),  
+  padding: moderateScale(20),
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: -2 },
+  shadowOpacity: 0.15,
+  shadowRadius: 6,
+  elevation: 6,
+},
+modalTitle: {
+  fontSize: moderateScale(16),
+  fontWeight: '600',
+  color: COLORS.primaryDark,
+  textAlign: 'center',
+  marginBottom: verticalScale(4),
+},
+modalSubtitle: {
+  fontSize: moderateScale(13),
+  color: COLORS.textSecondary,
+  textAlign: 'center',
+  marginBottom: verticalScale(4),
+},
+modalMissingButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: COLORS.primaryDark,
+  borderRadius: moderateScale(16),
+  paddingVertical: verticalScale(8),
+  marginBottom: verticalScale(10),
+},
+modalCancelButton: {
+  backgroundColor: COLORS.roomCard,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+},
+modalButtonText: {
+  fontSize: moderateScale(14),
+  fontWeight: '600',
+  color: COLORS.white,
+},
+modalIcon: {
+  marginRight: moderateScale(8),
+},
+coinContainer: {
+  backgroundColor: COLORS.cardBackground || '#ffffff',
+  borderRadius: 20,
+  paddingVertical: verticalScale(18),
+  paddingHorizontal: scale(20),
+  marginBottom: verticalScale(28),
+  alignItems: 'center',
+  justifyContent: 'center',
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.08,
+  shadowRadius: 10,
+  elevation: 4,
+  borderWidth: 1,
+  borderColor: 'rgba(0,0,0,0.05)',
+},
+
+coinRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginBottom: verticalScale(8),
+},
+
+coinIcon: {
+  marginRight: 8,
+},
+
+coinValue: {
+  fontSize: 22,
+  fontWeight: '700',
+  color: COLORS.primaryDark,
+},
+
+coinSubtitle: {
+  fontSize: 14,
+  color: '#666',
+  textAlign: 'center',
+  marginBottom: verticalScale(12),
+},
+
+watchAdButton: {
+  backgroundColor: COLORS.primaryDark,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingVertical: verticalScale(10),
+  paddingHorizontal: scale(26),
+  borderRadius: 30,
+  shadowColor: COLORS.primaryDark,
+  shadowOffset: { width: 0, height: 3 },
+  shadowOpacity: 0.15,
+  shadowRadius: 5,
+  elevation: 3,
+},
+
+watchAdButtonText: {
+  color: '#fff',
+  fontSize: 15,
+  fontWeight: '600',
+},
+
+adStatusText: {
+  fontSize: 13,
+  color: COLORS.textSecondary || '#777',
+  textAlign: 'center',
+  marginTop: 10,
+},
+
+
 });
