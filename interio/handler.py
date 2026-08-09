@@ -82,11 +82,13 @@ def handler(event):
         canny_image, canny_edges = get_canny_image(room_image, target_size)
         controlnet_scale, seed = classify_room(canny_edges)
 
+        color_palette = body.get("color_palette")
         prompt = build_short_prompt(
             mode=body.get("mode") or "",
             space_type=room_type,
             design_style=design_style,
             color_tone=color_tone,
+            color_palette=color_palette if isinstance(color_palette, dict) else None,
         )
         negative_prompt = NEGATIVE_PROMPT
 

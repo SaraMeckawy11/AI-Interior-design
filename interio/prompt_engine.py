@@ -138,6 +138,40 @@ def _program_text(space_type: str, mode: str) -> str:
     return table.get(key, f"the essential functional elements of a premium {space_type or mode}")
 
 
+def _palette_names(color_palette) -> tuple[str, str, str] | None:
+    """The three colours of a 60/30/10 scheme, or None if the client sent none.
+
+    The app derives the secondary and the accent from the tone a person tapped
+    and shows all three as circles before they generate, so naming them here is
+    what makes the picture match the swatch. Older builds send only the tone
+    name; those fall through to the generic clause below.
+    """
+    if not isinstance(color_palette, dict):
+        return None
+    dominant = str(color_palette.get("dominant") or "").strip()
+    secondary = str(color_palette.get("secondary") or "").strip()
+    accent = str(color_palette.get("accent") or "").strip()
+    if not (dominant and secondary and accent):
+        return None
+    return dominant, secondary, accent
+
+
+def _color_clause(color_tone: str, color_palette) -> str:
+    """The 60/30/10 line, as specific as the client allows it to be."""
+    names = _palette_names(color_palette)
+    if names:
+        dominant, secondary, accent = names
+        return (
+            f"Color 60/30/10: 60% {dominant} on the largest surfaces, "
+            f"30% {secondary} on the secondary surfaces and soft furnishings, "
+            f"10% {accent} as the single controlled accent. Use no other colour family."
+        )
+    return (
+        f"Color 60/30/10: 60% {color_tone} dominant field, 30% one harmonizing "
+        f"secondary tone, 10% one controlled contrasting accent."
+    )
+
+
 def build_prompt(
     *,
     mode: str,
@@ -149,6 +183,7 @@ def build_prompt(
     preserve_geometry: bool = True,
     creativity: int = 42,
     custom_prompt: str = "",
+    color_palette=None,
 ) -> str:
     """The full Gen-Klein brief used by the FLUX.2 [klein] image-editing path."""
     mode = resolve_mode(mode, space_type)
@@ -196,7 +231,7 @@ NON-NEGOTIABLE SPATIAL CONSTRAINT:
 DESIGN DIRECTION:
 - Program: {program}.
 - Style vocabulary: {style_text}; make {material} the hero material.
-- Color 60/30/10: 60% {color_tone} dominant field, 30% one harmonizing secondary tone, 10% one controlled contrasting accent.
+- {_color_clause(color_tone, color_palette)}
 - Lighting: {lighting}. Preserve believable light direction from the source photograph.
 - Creative character: {freedom}.
 
@@ -216,6 +251,7 @@ def build_short_prompt(
     material: str = "",
     lighting: str = "",
     preserve_geometry: bool = True,
+    color_palette=None,
 ) -> str:
     """CLIP-budget version of the same brief for the SD 1.5 + ControlNet path.
 
@@ -230,8 +266,16 @@ def build_short_prompt(
     hero = f", {material.lower()} hero material" if material else ""
     light = lighting.lower() if lighting else ("soft natural daylight" if mode == "interior" else "credible daylight")
     lock = "same walls windows and camera, " if preserve_geometry else ""
+    # Three colour words instead of one costs about four tokens and is the
+    # difference between a palette and a single-hue wash, so it stays even here.
+    names = _palette_names(color_palette)
+    palette = (
+        f"{names[0].lower()} 60 {names[1].lower()} 30 {names[2].lower()} 10 palette"
+        if names
+        else f"{color_tone.lower()} 60/30/10 palette"
+    )
     return (
         f"photorealistic {design_style.lower()} {space_type.lower()} {mode}, {program}, "
-        f"{materials}{hero}, {color_tone.lower()} 60/30/10 palette, {light}, "
+        f"{materials}{hero}, {palette}, {light}, "
         f"{lock}architectural photography, 8k, sharp material detail"
     )

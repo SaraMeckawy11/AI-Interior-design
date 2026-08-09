@@ -17,19 +17,22 @@ async function getImageBase64FromUrl(url) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ───────────────────────────────────────────────────────────────────────────
-// Inference engines
+// Inference hosts
 //
-// Modal runs first and RunPod catches whatever it drops. Both take the same
-// brief and return the same thing — a base64 PNG — so the route below does not
-// care which one answered.
+// RunPod runs first and Modal catches whatever it drops. Both take the same
+// brief and return the same thing, so the route below does not care which one
+// answered.
 //
-// They are not the same engine, though. Modal is FLUX.2 [klein], which these
-// prompts were written for; RunPod is the older SD 1.5 + ControlNet handler in
-// `interiorAI/`. They share prompt_engine.py, so the brief means the same thing
-// to both, but the picture does not come out the same. RunPod is here to keep a
-// Modal outage from reaching the user as an error, not to share the load — so
-// it stays second even though it is the cheaper of the two. The logs name the
-// engine that answered for exactly that reason.
+// They run the same two engines, too: FLUX.2 [klein] for photo redesigns, SD 1.5
+// + ControlNet for guided floor plans, routed by the same rule. RunPod used to
+// be SD 1.5 for *everything* — and since it answers first, that meant nearly
+// every design came back from an engine the prompts were not written for, while
+// the FLUX.2 [klein] path only ran when RunPod happened to fail. `interiorAI/`
+// now runs the engines ported from `modal/app.py`, so falling back changes who
+// pays for the GPU and nothing else.
+//
+// The logs still name the host and the engine — a fallback is worth seeing, and
+// guided plans and photo redesigns are answered by different models on both.
 // ───────────────────────────────────────────────────────────────────────────
 
 const RUNPOD_ENDPOINT_ID = process.env.RUNPOD_ENDPOINT_ID || "9x2kmfa8z6483c";
@@ -46,8 +49,9 @@ const RUNPOD_MAX_POLLS = 75;
 /**
  * Submit to the RunPod serverless endpoint and poll until it finishes.
  *
- * Throws on anything that is not a finished image, so the caller has one thing
- * to catch rather than a status code to interpret.
+ * Resolves with the worker's output object — the same shape Modal returns —
+ * and throws on anything that is not a finished image, so the caller has one
+ * thing to catch rather than a status code to interpret.
  */
 async function generateWithRunPod(payload) {
   if (!process.env.RUNPOD_API_KEY) throw new Error("RUNPOD_API_KEY is not set");
@@ -57,8 +61,8 @@ async function generateWithRunPod(payload) {
     Authorization: `Bearer ${process.env.RUNPOD_API_KEY}`,
   };
 
-  // The handler reads `event["input"]`; the Gen-Klein-only controls in the
-  // payload are ignored by it rather than rejected.
+  // The handler reads `event["input"]` and understands every field, including
+  // the Gen-Klein brief controls, which it used to ignore.
   const jobResponse = await axios.post(
     `https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/run`,
     { input: payload },
@@ -80,9 +84,12 @@ async function generateWithRunPod(payload) {
     console.log(`Polling RunPod [attempt ${attempt}]:`, status);
 
     if (status === "COMPLETED") {
-      const generated = statusResp.data?.output?.generatedImage;
-      if (!generated) throw new Error("RunPod completed without returning an image");
-      return generated;
+      // The handler catches its own exceptions so the job completes rather than
+      // failing, which means an error arrives here as a normal output body.
+      const output = statusResp.data?.output;
+      if (output?.error) throw new Error(`RunPod handler failed: ${output.error}`);
+      if (!output?.generatedImage) throw new Error("RunPod completed without returning an image");
+      return output;
     }
     if (status === "FAILED" || status === "CANCELLED" || status === "TIMED_OUT") {
       throw new Error(`RunPod job ${status.toLowerCase()}: ${statusResp.data?.error || "no detail"}`);
@@ -112,9 +119,8 @@ async function generateWithModal(payload) {
     "has_window=", modalResp.data?.has_window,
   );
 
-  const generated = modalResp.data?.generatedImage || null;
-  if (!generated) throw new Error("Modal did not return a generated image");
-  return generated;
+  if (!modalResp.data?.generatedImage) throw new Error("Modal did not return a generated image");
+  return modalResp.data;
 }
 
 router.post("/", isAuthenticated, async (req, res) => {
@@ -123,6 +129,10 @@ router.post("/", isAuthenticated, async (req, res) => {
       roomType,
       designStyle,
       colorTone,
+      // The 60/30/10 scheme behind the chosen tone: { dominant, secondary,
+      // accent } names plus their hexes. Optional — older app builds send only
+      // `colorTone` and the prompt engine still writes the generic ratio clause.
+      colorPalette,
       customPrompt,
       image,
       // Guided-mode payload (drawn room polygons + canvas info). Used by the
@@ -194,6 +204,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       room_type: roomType,
       design_style: designStyle,
       color_tone: colorTone,
+      color_palette: colorPalette && typeof colorPalette === "object" ? colorPalette : null,
       custom_prompt: customPrompt || "",
       // Guided-mode spatial fields (optional, only populated by plan.jsx
       // when the user drew room outlines).
@@ -210,17 +221,17 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     // RunPod first, Modal second. The design credit was already spent above and
     // is not refunded if both fail — same as before this fallback existed.
-    let generatedImageBase64 = null;
-    let engine = "runpod";
+    let result = null;
+    let host = "runpod";
 
     console.log("Submitting job to RunPod endpoint", RUNPOD_ENDPOINT_ID);
     try {
-      generatedImageBase64 = await generateWithRunPod(payload);
+      result = await generateWithRunPod(payload);
     } catch (runpodError) {
       console.error("RunPod request failed, falling back to Modal:", runpodError.message);
-      engine = "modal";
+      host = "modal";
       try {
-        generatedImageBase64 = await generateWithModal(payload);
+        result = await generateWithModal(payload);
       } catch (modalError) {
         console.error(
           "Modal request failed too:",
@@ -231,7 +242,13 @@ router.post("/", isAuthenticated, async (req, res) => {
       }
     }
 
-    console.log(`Design generated by ${engine}, imageLen=${generatedImageBase64.length}`);
+    const generatedImageBase64 = result.generatedImage;
+    console.log(
+      `Design generated by ${host}:`,
+      `engine=${result.engine || "unknown"}`,
+      `model=${result.model || "unknown"}`,
+      `imageLen=${generatedImageBase64.length}`,
+    );
 
     // Upload AI-generated image to Cloudinary
     let generatedImageUrl = null;
@@ -434,7 +451,9 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
 
 export default router;
 
-// Exported so the two engines can be exercised against the real services
-// without standing up Mongo, Cloudinary and an authenticated session first.
-// Nothing in the app imports these.
+// Exported so the two hosts can be exercised against the real services without
+// standing up Mongo, Cloudinary and an authenticated session first. Both resolve
+// with the worker's full output object, so a smoke test can check which engine
+// and model answered, not just that an image came back. Nothing in the app
+// imports these.
 export { generateWithRunPod, generateWithModal };

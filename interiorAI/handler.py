@@ -1,812 +1,169 @@
+"""Livinai RunPod worker — the primary engine behind `POST /api/designs`.
+
+The backend submits here first and only falls back to Modal, so this worker has
+to answer with the same picture Modal would have produced. It therefore runs the
+engines ported from `modal/app.py` (see `inference_core.py`) and routes between
+them by the same rule Modal's router uses:
+
+* `mode: "guided"` with drawn room polygons -> SD 1.5 + depth/seg ControlNets,
+  because that mode is a rasterised mask of the user's polygons and FLUX.2
+  [klein] has no ControlNet.
+* everything else -> Gen-Klein, `black-forest-labs/FLUX.2-klein-4B`.
+
+This replaced a worker that ran SD 1.5 for *every* request. It shared
+`prompt_engine.py` with Modal, so a design meant the same thing on both hosts —
+but it was a different model, and since RunPod answers first that meant nearly
+every user got the SD 1.5 picture while the FLUX.2 [klein] path the prompts were
+written for only ran when RunPod failed.
+
+Endpoint requirements, both new here:
+
+* **A 48 GB GPU class.** Gen-Klein runs the 4B transformer plus the Qwen3 text
+  encoder in bf16 with no CPU offload, the way `GenKlein` runs on Modal's L40S.
+* **Room for ~16 GB of FLUX weights.** The Dockerfile bakes them in by default;
+  attach a network volume and build with `--build-arg PREFETCH_FLUX=0` to keep
+  them out of the image instead. `_cache_dir_for` finds them either way.
+
+Response shape matches Modal's exactly:
+
+    {"message", "generatedImage", "prompt", "negative_prompt",
+     "engine", "model", "mode", "has_window"}
+"""
+
+import os
+
 import runpod
-import base64
-import io
-import torch
-import cv2
-import numpy as np
-from PIL import Image
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
-from transformers import DPTImageProcessor, DPTForDepthEstimation, AutoImageProcessor, UperNetForSemanticSegmentation
 
-# Shared with modal/app.py and the web studio so every surface produces the same
-# design brief. See prompt_engine.py for why the clauses are ordered as they are.
-from prompt_engine import NEGATIVE_PROMPT, build_short_prompt, resolve_mode
-
-# --- Device setup ---
-use_cuda = torch.cuda.is_available()
-dtype = torch.float16 if use_cuda else torch.float32
-device = "cuda" if use_cuda else "cpu"
-
-CACHE_DIR = "/home/user/.cache/huggingface"
-
-# --- Load models once (cold start) ---
-dpt_processor = DPTImageProcessor.from_pretrained(
-    "Intel/dpt-large",
-    cache_dir=CACHE_DIR,
-)
-dpt_model = DPTForDepthEstimation.from_pretrained(
-    "Intel/dpt-large",
-    torch_dtype=dtype,
-    cache_dir=CACHE_DIR,
-).to(device)
-
-seg_processor = AutoImageProcessor.from_pretrained(
-    "openmmlab/upernet-convnext-small",
-    cache_dir=CACHE_DIR,
-)
-seg_model = UperNetForSemanticSegmentation.from_pretrained(
-    "openmmlab/upernet-convnext-small",
-    torch_dtype=dtype,
-    cache_dir=CACHE_DIR,
-).to(device)
-
-depth_controlnet = ControlNetModel.from_pretrained(
-    "lllyasviel/sd-controlnet-depth",
-    torch_dtype=dtype,
-    cache_dir=CACHE_DIR,
-)
-seg_controlnet = ControlNetModel.from_pretrained(
-    "lllyasviel/control_v11p_sd15_seg",
-    torch_dtype=dtype,
-    cache_dir=CACHE_DIR,
+from inference_core import (
+    FLUX_MODEL_ID,
+    SD_MODEL_ID,
+    ControlNetEngine,
+    GenKleinEngine,
+    is_guided_request,
 )
 
-pipe = StableDiffusionControlNetPipeline.from_pretrained(
-    "Lykon/dreamshaper-8",
-    controlnet=[depth_controlnet, seg_controlnet],
-    torch_dtype=dtype,
-    safety_checker=None,
-    cache_dir=CACHE_DIR,
-).to(device)
+# Weights baked into the image by the Dockerfile.
+BAKED_CACHE_DIR = "/home/user/.cache/huggingface"
+# RunPod mounts a network volume here when the endpoint has one attached.
+VOLUME_CACHE_DIR = "/runpod-volume/huggingface"
 
-pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
-# ---------------------------------------------------------------------------
-# PROMPT TEMPLATES
-# ---------------------------------------------------------------------------
+def _has_snapshot(cache_dir, model_id):
+    """True when `model_id` is already downloaded under `cache_dir`."""
+    folder = "models--" + model_id.replace("/", "--")
+    return os.path.isdir(os.path.join(cache_dir, folder, "snapshots"))
 
-ROOM_PROMPTS = {
-    "living room": (
-        "{design_style} living room interior, warm soft ambient lighting, "
-        "{color_tone} palette, professional interior designer style, "
-        "photorealistic 8k, high detail, natural shadows, "
-        "includes sofa sets, coffee tables, area rugs, wall art, curtains, "
-        "TV cabinets, indoor plants, bookshelves, accent lighting, "
-        "cohesive furniture arrangement matching the room layout"
-    ),
 
-    "bedroom": (
-        "{design_style} bedroom interior, cozy soft ambient lighting, "
-        "{color_tone} palette, professional interior designer style, "
-        "photorealistic 8k, high detail fabrics and materials, natural shadows, "
-        "includes beds with layered bedding, bedside tables with lamps, "
-        "wardrobes or built-in storage, textured rugs, decorative wall art, "
-        "balanced and restful room layout"
-    ),
+def _cache_dir_for(model_id):
+    """Where to read/write `model_id`, given what this worker actually has.
 
-    "kitchen": (
-        "{design_style} kitchen interior, premium materials and fixtures, "
-        "{color_tone} palette with cohesive tones, photorealistic 8k, high detail, "
-        "natural reflections on countertops, includes cooking area, cabinetry, "
-        "kitchen island or breakfast bar, realistic appliances, pendant lighting, "
-        "functional layout with clear workflow"
-    ),
+    Whichever cache already holds the checkpoint wins, so a baked image and an
+    attached network volume can both be right and neither re-downloads 16 GB.
+    Only when nothing has it yet does the choice matter: the volume, if one is
+    mounted, so the download survives the worker.
 
-    "bathroom": (
-        "{design_style} bathroom interior, soft indirect lighting, "
-        "{color_tone} tone palette, high detail tiles and stone surfaces, "
-        "photorealistic 8k, natural reflections, includes vanity mirrors, sinks, "
-        "shower areas or bathtubs, storage cabinets, clean minimalist finishes"
-    ),
+    `LIVINAI_CACHE_DIR` overrides all of it.
+    """
+    override = os.environ.get("LIVINAI_CACHE_DIR")
+    if override:
+        return override
+    for cache_dir in (BAKED_CACHE_DIR, VOLUME_CACHE_DIR):
+        if _has_snapshot(cache_dir, model_id):
+            return cache_dir
+    volume_mounted = os.path.isdir(os.path.dirname(VOLUME_CACHE_DIR))
+    return VOLUME_CACHE_DIR if volume_mounted else BAKED_CACHE_DIR
 
-    "dining room": (
-        "{design_style} dining room interior, elegant warm lighting, "
-        "{color_tone} tones, photorealistic 8k, high detail shadows, "
-        "includes dining table with multiple chairs, sideboard or buffet, wall art, "
-        "textured or wooden flooring, centerpiece lighting, cohesive arrangement"
-    ),
 
-    "office": (
-        "{design_style} home office interior, ergonomic workspace, "
-        "{color_tone} palette, clean contemporary lighting, photorealistic 8k, high detail, "
-        "includes desk, office chair, bookshelves, storage units, task lighting, "
-        "organized functional layout"
-    ),
-
-    "entryway": (
-        "{design_style} entryway foyer interior, soft ambient lighting, "
-        "{color_tone} tone palette, photorealistic 8k, high detail decor, "
-        "includes console table, wall mirror, coat storage, indoor plants, welcoming layout"
-    ),
-
-    "basement": (
-        "{design_style} finished basement interior, warm ambient lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail textures, "
-        "includes seating or entertainment area, multipurpose layout, wall decor"
-    ),
-
-    "attic": (
-        "{design_style} attic interior with angled ceilings, warm lighting, "
-        "{color_tone} tones, photorealistic 8k, high detail wood textures, "
-        "includes seating, storage units, rugs, cozy ambient design"
-    ),
-
-    "laundry room": (
-        "{design_style} laundry room interior, bright clean lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail surfaces, "
-        "includes washer and dryer, storage cabinets, shelving, organized layout"
-    ),
-
-    "sunroom": (
-        "{design_style} sunroom interior, abundant natural daylight, "
-        "{color_tone} palette, photorealistic 8k, high detail, "
-        "includes comfortable seating sets, many plants, glass windows, airy fresh atmosphere"
-    ),
-
-    "closet": (
-        "{design_style} walk-in closet interior, soft diffused lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail, "
-        "includes wardrobe shelves, drawers, mirrors, organized storage"
-    ),
-
-    "balcony": (
-        "{design_style} balcony outdoor space, warm ambient lighting, "
-        "{color_tone} tones, photorealistic 8k, high detail textures, "
-        "includes outdoor seating, potted plants, railing, clean aesthetic, cohesive layout"
-    ),
-
-    "hallway": (
-        "{design_style} hallway corridor interior, soft lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail wall textures, "
-        "includes wall art, minimal clean decor, clear pathway layout"
-    ),
+_ENGINE_TYPES = {
+    "gen-klein": (GenKleinEngine, FLUX_MODEL_ID),
+    "controlnet": (ControlNetEngine, SD_MODEL_ID),
 }
 
-EXTERIOR_PROMPTS = {
-    "balcony": (
-        "{design_style} balcony exterior scene, warm ambient lighting, "
-        "{color_tone} palette, photorealistic 8k, high detail, "
-        "includes outdoor seating, potted plants, railing, textured flooring, "
-        "cohesive terrace layout and natural background"
-    ),
-
-    "building": (
-        "{design_style} building exterior architectural visualization, natural daylight, "
-        "{color_tone} palette, photorealistic 8k, high detail facade textures, realistic shadows, "
-        "includes windows, entryway, landscaping elements, professional architectural composition"
-    ),
-
-    "terrace": (
-        "{design_style} terrace outdoor space, soft warm lighting, {color_tone} palette, "
-        "photorealistic 8k, high detail materials, includes seating areas, planters, pergola or canopy, "
-        "cohesive outdoor layout and realistic background"
-    ),
-
-    "garden": (
-        "{design_style} garden landscape, natural daylight, {color_tone} palette, photorealistic 8k, "
-        "high botanical detail, includes planting beds, pathways, seating niches, decorative lighting, "
-        "balanced landscape composition"
-    ),
-
-    "driveway": (
-        "{design_style} driveway exterior scene, natural daylight, {color_tone} palette, "
-        "photorealistic 8k, high detail paving and materials, includes vehicle parking area, landscaping, "
-        "clean structural elements and realistic shadows"
-    ),
-
-    "swimming pool area": (
-        "{design_style} swimming pool outdoor area, natural daylight, {color_tone} palette, "
-        "photorealistic 8k, high detail water reflections, poolside seating, landscaping, "
-        "decking materials, ambient outdoor lighting and cohesive layout"
-    ),
-
-    "garage": (
-        "{design_style} organized garage exterior, {color_tone} palette, "
-        "photorealistic 8k, high detail industrial textures, clean concrete floors, "
-        "includes shelving units, tool storage, vehicle parking space, functional layout"
-    ),
-
-}
-
-# universal hybrid fallback (option C)
-FALLBACK_PROMPT = (
-    "{design_style} {room_type} space, realistic lighting, {color_tone} palette, "
-    "professional design style, photorealistic 8k, high detail textures, natural shadows, "
-    "includes layout-appropriate furniture or structural elements, cohesive arrangement matching the space type"
-)
-
-# Normalize list of exterior keys for lookups
-EXTERIOR_KEYS = {k.lower(): k for k in EXTERIOR_PROMPTS.keys()}
-
-# ---------------------------------------------------------------------------
-# ADE20K SEMANTIC ANCHORS (guided-mode polygon rasterization)
-#
-# Turns the room polygons drawn in plan.jsx into an ADE20K-style semantic
-# mask so ControlNet-Seg places each room EXACTLY where the user drew it.
-# ---------------------------------------------------------------------------
-ADE_WALL = (120, 120, 120)
-ADE_FLOOR = (80, 50, 50)
-ADE_CEILING = (120, 120, 80)
-ADE_WINDOW = (230, 230, 230)
-ADE_DOOR = (8, 255, 51)
-
-# Furniture colors -- standard ADE20K palette.
-ADE_SOFA   = (11, 102, 255)     # class 23
-ADE_BED    = (204, 5, 255)      # class 7
-ADE_TABLE  = (255, 6, 82)       # class 15
-ADE_CAB    = (224, 5, 255)      # class 10
-ADE_BATH   = (0, 102, 200)      # class 37
-ADE_DESK   = (8, 255, 214)      # class 33
-ADE_WARDR  = (0, 163, 255)      # class 35
-ADE_STOVE  = (255, 224, 0)
-ADE_DOORC  = (8, 255, 51)       # class 14
-
-ROOM_ANCHOR_COLORS = {
-    "living room":    ADE_SOFA,
-    "bedroom":        ADE_BED,
-    "kitchen":        ADE_CAB,
-    "bathroom":       ADE_BATH,
-    "dining room":    ADE_TABLE,
-    "office":         ADE_DESK,
-    "hallway":        None,
-    "closet":         ADE_WARDR,
-    "laundry room":   ADE_STOVE,
-    "entryway":       ADE_DOORC,
-    "balcony":        ADE_SOFA,
-    "basement":       ADE_SOFA,
-    "kids room":      ADE_BED,
-    "studio":         ADE_SOFA,
-    "full apartment": None,
-    "attic":          ADE_SOFA,
-    "sunroom":        ADE_SOFA,
-}
+# At most one entry: see the eviction in `_engine`.
+_loaded = {}
 
 
-def room_furniture_shapes(rtype, bbox):
-    """Sparse furniture layout per room (1-2 blobs, not fully staged). Keeps
-    the mask light so ControlNet-Seg doesn't over-constrain SD and the
-    render keeps the photorealistic feel of quick mode.
+def _engine(name):
+    """Return the named engine, loading it and evicting the other one first.
 
-    Returns list of (kind, color, (cx, cy, rx, ry))."""
-    xmin, ymin, xmax, ymax = bbox
-    w = max(1, xmax - xmin)
-    h = max(1, ymax - ymin)
-    cx = (xmin + xmax) / 2.0
-    cy = (ymin + ymax) / 2.0
-    long_horizontal = w >= h
-    shapes = []
-
-    if rtype in ("bedroom", "kids room"):
-        if long_horizontal:
-            rx, ry = w * 0.28, h * 0.22
-        else:
-            rx, ry = w * 0.22, h * 0.28
-        shapes.append(("rect", ADE_BED, (cx, cy, rx, ry)))
-        if long_horizontal:
-            shapes.append(("rect", ADE_WARDR, (cx, ymin + h * 0.10, w * 0.28, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_WARDR, (xmin + w * 0.10, cy, w * 0.06, h * 0.28)))
-
-    elif rtype == "living room":
-        if long_horizontal:
-            shapes.append(("rect", ADE_SOFA, (cx, cy - h * 0.08, w * 0.32, h * 0.12)))
-            shapes.append(("ellipse", ADE_TABLE, (cx, cy + h * 0.05, w * 0.10, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_SOFA, (cx - w * 0.08, cy, w * 0.12, h * 0.32)))
-            shapes.append(("ellipse", ADE_TABLE, (cx + w * 0.05, cy, w * 0.06, h * 0.10)))
-
-    elif rtype == "kitchen":
-        if long_horizontal:
-            shapes.append(("rect", ADE_CAB, (cx, ymin + h * 0.12, w * 0.38, h * 0.08)))
-            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.05, w * 0.22, h * 0.09)))
-        else:
-            shapes.append(("rect", ADE_CAB, (xmin + w * 0.12, cy, w * 0.08, h * 0.38)))
-            shapes.append(("rect", ADE_CAB, (cx + w * 0.05, cy, w * 0.09, h * 0.22)))
-
-    elif rtype == "bathroom":
-        if long_horizontal:
-            shapes.append(("rect", ADE_BATH, (cx, cy - h * 0.08, w * 0.30, h * 0.14)))
-            shapes.append(("rect", ADE_CAB, (cx, cy + h * 0.10, w * 0.22, h * 0.06)))
-        else:
-            shapes.append(("rect", ADE_BATH, (cx - w * 0.08, cy, w * 0.14, h * 0.30)))
-            shapes.append(("rect", ADE_CAB, (cx + w * 0.10, cy, w * 0.06, h * 0.22)))
-
-    elif rtype == "dining room":
-        r = min(w, h) * 0.22
-        shapes.append(("ellipse", ADE_TABLE, (cx, cy, r, r)))
-
-    elif rtype == "office":
-        if long_horizontal:
-            shapes.append(("rect", ADE_DESK, (cx, ymin + h * 0.20, w * 0.32, h * 0.08)))
-        else:
-            shapes.append(("rect", ADE_DESK, (xmin + w * 0.20, cy, w * 0.08, h * 0.32)))
-
-    elif rtype == "closet":
-        if long_horizontal:
-            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.38, h * 0.14)))
-        else:
-            shapes.append(("rect", ADE_WARDR, (cx, cy, w * 0.14, h * 0.38)))
-
-    elif rtype == "laundry room":
-        shapes.append(("rect", ADE_STOVE, (cx, cy, w * 0.28, h * 0.14)))
-
-    elif rtype == "entryway":
-        shapes.append(("rect", ADE_DOORC, (cx, cy, w * 0.22, h * 0.10)))
-
-    elif rtype in ("balcony", "sunroom"):
-        shapes.append(("ellipse", ADE_SOFA, (cx, cy, w * 0.20, h * 0.16)))
-
-    elif rtype in ("basement", "attic", "studio"):
-        shapes.append(("rect", ADE_SOFA, (cx, cy, w * 0.28, h * 0.14)))
-
-    return shapes
-
-
-def rasterize_rooms_mask(rooms, size_wh, user_doors=None):
+    Modal can keep both resident because each is a separate GPU container. Here
+    they would share one card, and they do not fit on it together — so the rare
+    guided request pays a reload rather than the common one risking an OOM.
+    Warm workers serving one kind of request, which is nearly all of them, load
+    once and keep it.
     """
-    Clean ADE20K semantic mask with auto geometry repair. See modal/app.py
-    for the full rationale. Summary:
-      - label map via painter's algorithm (later polygons win on overlap)
-      - iterative 1px dilation closes small accidental gaps
-      - walls painted only where LABELS change -> exactly one wall between
-        any two rooms, regardless of how the user drew them
-      - small centered furniture anchor blob per room
-      - balcony/sunroom: window strip on its longest edge
-    """
-    w, h = size_wh
+    existing = _loaded.get(name)
+    if existing is not None:
+        return existing
 
-    parsed = []
-    for r in rooms or []:
-        rtype = (r.get("type") or "").strip().lower()
-        pts = []
-        for p in r.get("polygon") or []:
-            try:
-                px = max(0.0, min(1.0, float(p.get("x", 0)))) * (w - 1)
-                py = max(0.0, min(1.0, float(p.get("y", 0)))) * (h - 1)
-                pts.append([px, py])
-            except (TypeError, ValueError):
-                continue
-        if len(pts) >= 3:
-            parsed.append({"type": rtype, "pts": np.array(pts, dtype=np.int32)})
+    for other, engine in list(_loaded.items()):
+        print(f"[engine] unloading {other} to make room for {name}")
+        engine.unload()
+        _loaded.pop(other, None)
 
-    if not parsed:
-        return Image.new("RGB", (w, h), (0, 0, 0))
-
-    label_map = np.zeros((h, w), dtype=np.int32)
-    for idx, poly in enumerate(parsed, start=1):
-        cv2.fillPoly(label_map, [poly["pts"]], idx)
-
-    max_gap_px = max(4, int(min(w, h) * 0.025))
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    for _ in range(max_gap_px):
-        background = label_map == 0
-        if not background.any():
-            break
-        next_map = label_map.copy()
-        changed = False
-        for idx in range(1, len(parsed) + 1):
-            mask = (label_map == idx).astype(np.uint8)
-            dilated = cv2.dilate(mask, kernel, iterations=1)
-            write = background & (dilated > 0) & (next_map == 0)
-            if write.any():
-                next_map[write] = idx
-                changed = True
-        label_map = next_map
-        if not changed:
-            break
-
-    out = np.zeros((h, w, 3), dtype=np.uint8)
-    out[label_map > 0] = ADE_FLOOR
-
-    # Realistic furniture layouts per room type (clipped to room territory)
-    for idx, poly in enumerate(parsed, start=1):
-        room_mask = label_map == idx
-        if not room_mask.any():
-            continue
-        xs, ys = poly["pts"][:, 0], poly["pts"][:, 1]
-        bbox = (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
-        shapes = room_furniture_shapes(poly["type"], bbox)
-
-        for kind, color, params in shapes:
-            scratch = np.zeros((h, w), dtype=np.uint8)
-            pcx, pcy, prx, pry = params
-            cx_i, cy_i = int(pcx), int(pcy)
-            rx_i = max(1, int(prx))
-            ry_i = max(1, int(pry))
-            if kind == "rect":
-                x0 = max(0, cx_i - rx_i)
-                y0 = max(0, cy_i - ry_i)
-                x1 = min(w - 1, cx_i + rx_i)
-                y1 = min(h - 1, cy_i + ry_i)
-                cv2.rectangle(scratch, (x0, y0), (x1, y1), 255, -1)
-            else:
-                cv2.ellipse(scratch, (cx_i, cy_i), (rx_i, ry_i),
-                            0, 0, 360, 255, -1)
-            write = (scratch > 0) & room_mask
-            out[write] = color
-
-        if poly["type"] in ("balcony", "sunroom"):
-            pts = poly["pts"]
-            best = (0.0, 0, 1)
-            for i in range(len(pts)):
-                a = pts[i]
-                b = pts[(i + 1) % len(pts)]
-                L = float(np.hypot(b[0] - a[0], b[1] - a[1]))
-                if L > best[0]:
-                    best = (L, i, (i + 1) % len(pts))
-            a = tuple(int(v) for v in pts[best[1]])
-            b = tuple(int(v) for v in pts[best[2]])
-            win_w = max(8, int(min(w, h) * 0.018))
-            cv2.line(out, a, b, ADE_WINDOW, thickness=win_w)
-
-    boundaries = np.zeros((h, w), dtype=np.uint8)
-    diff_v = (label_map[:-1, :] != label_map[1:, :])
-    diff_h = (label_map[:, :-1] != label_map[:, 1:])
-    boundaries[:-1, :] |= diff_v.astype(np.uint8)
-    boundaries[1:, :] |= diff_v.astype(np.uint8)
-    boundaries[:, :-1] |= diff_h.astype(np.uint8)
-    boundaries[:, 1:] |= diff_h.astype(np.uint8)
-
-    wall_thickness = max(8, int(min(w, h) * 0.016))
-    wall_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (wall_thickness, wall_thickness)
-    )
-    boundaries = cv2.dilate(boundaries, wall_kernel, iterations=1)
-    out[boundaries > 0] = ADE_WALL
-
-    # AUTO DOOR OPENINGS on shared walls: one per room-pair, centered on
-    # the shared edge, painted ONLY over wall pixels (no floor bleed).
-    door_thickness = wall_thickness + 2
-    wall_rgb = np.array(ADE_WALL, dtype=np.uint8)
-    is_wall = np.all(out == wall_rgb, axis=-1)
-    placed_pairs = set()
-    for idx, poly in enumerate(parsed, start=1):
-        pts = poly["pts"]
-        n = len(pts)
-        for i in range(n):
-            a = pts[i]
-            b = pts[(i + 1) % n]
-            dx = float(b[0] - a[0])
-            dy = float(b[1] - a[1])
-            L = float(np.hypot(dx, dy))
-            if L < wall_thickness * 3:
-                continue
-            mx = (a[0] + b[0]) / 2.0
-            my = (a[1] + b[1]) / 2.0
-            nx = -dy / L
-            ny = dx / L
-            step = wall_thickness * 1.5
-            s1x = int(mx + nx * step)
-            s1y = int(my + ny * step)
-            s2x = int(mx - nx * step)
-            s2y = int(my - ny * step)
-            outside_label = 0
-            if 0 <= s1x < w and 0 <= s1y < h and label_map[s1y, s1x] != idx:
-                outside_label = int(label_map[s1y, s1x])
-            elif 0 <= s2x < w and 0 <= s2y < h and label_map[s2y, s2x] != idx:
-                outside_label = int(label_map[s2y, s2x])
-            if outside_label <= 0 or outside_label == idx:
-                continue  # skip exterior walls
-            pair = (min(idx, outside_label), max(idx, outside_label))
-            if pair in placed_pairs:
-                continue
-            placed_pairs.add(pair)
-            ux = dx / L
-            uy = dy / L
-            door_len = max(wall_thickness * 3, min(L * 0.28, min(w, h) * 0.12))
-            ax = int(mx - ux * door_len / 2)
-            ay = int(my - uy * door_len / 2)
-            bx = int(mx + ux * door_len / 2)
-            by = int(my + uy * door_len / 2)
-            scratch = np.zeros((h, w), dtype=np.uint8)
-            cv2.line(scratch, (ax, ay), (bx, by), 255,
-                     thickness=door_thickness)
-            paint = (scratch > 0) & is_wall
-            if paint.any():
-                out[paint] = ADE_DOOR
-                is_wall[paint] = False
-
-    # User-drawn doors (normalized coords) painted on top of wall pixels.
-    # Supports exterior walls too, so users can mark the apartment entrance.
-    if user_doors:
-        for d in user_doors:
-            try:
-                x1 = max(0.0, min(1.0, float(d.get("x1", 0)))) * (w - 1)
-                y1 = max(0.0, min(1.0, float(d.get("y1", 0)))) * (h - 1)
-                x2 = max(0.0, min(1.0, float(d.get("x2", 0)))) * (w - 1)
-                y2 = max(0.0, min(1.0, float(d.get("y2", 0)))) * (h - 1)
-            except (TypeError, ValueError):
-                continue
-            if (x1 - x2) ** 2 + (y1 - y2) ** 2 < 4.0:
-                continue
-            scratch = np.zeros((h, w), dtype=np.uint8)
-            cv2.line(
-                scratch,
-                (int(x1), int(y1)), (int(x2), int(y2)),
-                255,
-                thickness=door_thickness + 2,
-            )
-            paint = (scratch > 0) & is_wall
-            if paint.any():
-                out[paint] = ADE_DOOR
-                is_wall[paint] = False
-
-    return Image.fromarray(out)
+    engine_type, model_id = _ENGINE_TYPES[name]
+    cache_dir = _cache_dir_for(model_id)
+    print(f"[engine] loading {name} ({model_id}) from {cache_dir}")
+    engine = engine_type(cache_dir=cache_dir).load()
+    _loaded[name] = engine
+    return engine
 
 
-def synthesize_depth_from_mask(seg_img):
-    """
-    Clean ControlNet-Depth image built from the semantic mask. Skips DPT on
-    the noisy floor plan in guided mode (Arabic labels / dimensions /
-    electrical symbols were being read as 3D geometry -> hallucinations).
-    Convention: bright = close. walls 230, floor/anchors 110, windows 60,
-    background 0.
-    """
-    arr = np.array(seg_img).astype(np.int32)
-    h, w = arr.shape[:2]
-
-    def _match(color):
-        c = np.array(color, dtype=np.int32)
-        return np.all(arr == c, axis=-1)
-
-    # Per-furniture heights give ControlNet-Depth proper 3D object cues so
-    # SD renders real photorealistic furniture (not painted-on shapes).
-    depth = np.zeros((h, w), dtype=np.uint8)
-    depth[_match(ADE_FLOOR)] = 95
-    depth[_match(ADE_TABLE)] = 125
-    depth[_match(ADE_BED)] = 135
-    depth[_match(ADE_BATH)] = 140
-    depth[_match(ADE_SOFA)] = 145
-    depth[_match(ADE_DESK)] = 150
-    depth[_match(ADE_STOVE)] = 175
-    depth[_match(ADE_CAB)] = 185
-    depth[_match(ADE_WARDR)] = 210
-    depth[_match(ADE_DOORC)] = 220
-    depth[_match(ADE_WINDOW)] = 50
-    depth[_match(ADE_WALL)] = 240
-
-    # Stronger blur -> natural depth gradient (not hard object edges)
-    depth = cv2.GaussianBlur(depth, (11, 11), 0)
-    depth_rgb = cv2.cvtColor(depth, cv2.COLOR_GRAY2RGB)
-    return Image.fromarray(depth_rgb)
-
-# ---------------------------------------------------------------------------
-# UTILITIES
-# ---------------------------------------------------------------------------
-
-def decode_base64_image(base64_str):
-    if not isinstance(base64_str, str):
-        raise ValueError("Image must be a base64 string")
-    if base64_str.startswith("data:image"):
-        base64_str = base64_str.split(",")[1]
-
-    base64_str += "=" * (-len(base64_str) % 4)
-    img_bytes = base64.b64decode(base64_str)
-
-    img = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError("Invalid image provided")
-    return img  # BGR
-
-
-def resize_orientation(img):
-    h, w = img.shape[:2]
-    return (1024, 768) if w > h else (768, 1024)
-
-# ---------------------------------------------------------------------------
-# DEPTH (FP16)
-# ---------------------------------------------------------------------------
-def get_depth_image(image_bgr, size_wh):
-    width, height = size_wh
-
-    resized = cv2.resize(image_bgr, (width, height), interpolation=cv2.INTER_CUBIC)
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-
-    inputs = dpt_processor(images=Image.fromarray(rgb), return_tensors="pt").to(device)
-    inputs = {k: v.to(dtype=dtype) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        depth = dpt_model(**inputs).predicted_depth
-
-    depth_resized = torch.nn.functional.interpolate(
-        depth.unsqueeze(1),
-        size=(height, width),
-        mode="bicubic",
-        align_corners=False
-    ).squeeze().cpu().numpy()
-
-    depth_norm = ((depth_resized - depth_resized.min()) /
-                  (depth_resized.max() - depth_resized.min()) * 255).astype(np.uint8)
-
-    return Image.fromarray(depth_norm).convert("RGB")
-
-
-# ---------------------------------------------------------------------------
-# SEGMENTATION (FP16)
-# ---------------------------------------------------------------------------
-def get_segmentation_map(image_bgr):
-    width, height = resize_orientation(image_bgr)
-
-    resized = cv2.resize(image_bgr, (width, height), interpolation=cv2.INTER_CUBIC)
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-
-    inputs = seg_processor(images=Image.fromarray(rgb), return_tensors="pt").to(device)
-    inputs = {k: v.to(dtype=dtype) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        outputs = seg_model(**inputs)
-
-    seg_map = outputs.logits.argmax(dim=1)[0].cpu().numpy().astype(np.uint8)
-    return seg_map
-
-
-def get_segmentation_image(seg_map, size_wh):
-    w, h = size_wh
-    seg_color = cv2.applyColorMap((seg_map * 10).astype(np.uint8), cv2.COLORMAP_JET)
-    seg_color = cv2.resize(seg_color, (w, h), interpolation=cv2.INTER_NEAREST)
-    seg_rgb = cv2.cvtColor(seg_color, cv2.COLOR_BGR2RGB)
-    return Image.fromarray(seg_rgb)
-
-
-# ---------------------------------------------------------------------------
-# WINDOW DETECTION
-# ---------------------------------------------------------------------------
-WINDOW_KEYWORDS = ["window", "windowpane"]
-
-def detect_window(seg_map):
-    labels = seg_model.config.id2label
-    for class_id in np.unique(seg_map):
-        name = labels.get(int(class_id), "").lower()
-        if any(w in name for w in WINDOW_KEYWORDS):
-            return True
-    return False
-
-
-# ---------------------------------------------------------------------------
-# HANDLER
-# ---------------------------------------------------------------------------
 def handler(event):
     try:
-        body = event.get("input", {}) or {}
-        base64_image = body.get("image")
+        body = event.get("input") or {}
 
+        image = body.get("image")
+        if not image:
+            return {"error": "Missing image"}
+
+        mode = (body.get("mode") or "").strip()
+        rooms = body.get("rooms") if isinstance(body.get("rooms"), list) else None
+        doors = body.get("doors") if isinstance(body.get("doors"), list) else None
+        canvas = body.get("canvas") if isinstance(body.get("canvas"), dict) else None
         room_type = (body.get("room_type") or "").strip()
         design_style = (body.get("design_style") or "").strip()
         color_tone = (body.get("color_tone") or "").strip()
+        # The 60/30/10 scheme the app resolved from that tone and showed the user
+        # before they generated. Absent on older clients; the prompt engine falls
+        # back to naming only the dominant.
+        color_palette = body.get("color_palette") if isinstance(body.get("color_palette"), dict) else None
+        custom_prompt = body.get("custom_prompt") or ""
 
-        # Guided-mode fields (optional)
-        rooms = body.get("rooms")
-        user_doors = body.get("doors")
-        mode = (body.get("mode") or "").strip().lower()
+        if is_guided_request(mode, rooms):
+            return _engine("controlnet").run(
+                image=image,
+                room_type=room_type,
+                design_style=design_style,
+                color_tone=color_tone,
+                custom_prompt=custom_prompt,
+                rooms=rooms,
+                canvas=canvas,
+                mode=mode,
+                doors=doors,
+                color_palette=color_palette,
+            )
 
-        if not base64_image:
-            return {"error": "Missing image"}
-
-        # -------------------------
-        # IMAGE PROCESSING (correct order)
-        # -------------------------
-        image_bgr = decode_base64_image(base64_image)
-        size_wh = resize_orientation(image_bgr)
-
-        use_room_mask = (
-            mode == "guided"
-            and isinstance(rooms, list)
-            and any(r and r.get("polygon") for r in rooms)
+        return _engine("gen-klein").run(
+            image=image,
+            room_type=room_type,
+            design_style=design_style,
+            color_tone=color_tone,
+            custom_prompt=custom_prompt,
+            mode=mode or "interior",
+            material=(body.get("material") or "Natural oak").strip(),
+            lighting=(body.get("lighting") or "Natural daylight").strip(),
+            preserve_geometry=body.get("preserve_geometry", True),
+            creativity=int(body.get("creativity") or 42),
+            color_palette=color_palette,
         )
 
-        if use_room_mask:
-            # GUIDED MODE
-            # - mask from the drawn polygons (small furniture anchors, wall
-            #   outlines -- no whole-room furniture flood)
-            # - depth synthesized FROM that mask (skip DPT on the noisy
-            #   architectural plan)
-            seg_img = rasterize_rooms_mask(rooms, size_wh, user_doors=user_doors)
-            depth_img = synthesize_depth_from_mask(seg_img)
-            has_window = any(
-                (r.get("type") or "").strip().lower() in ("balcony", "sunroom")
-                for r in rooms
-                if r
-            )
-            # Mirror interior.jsx (quick) at EXACTLY [0.5, 0.1]. Layout is
-            # already carried by the synthesized DEPTH map (wall elevations
-            # + furniture heights); seg is a soft hint of furniture types.
-            # This keeps quick-mode photorealism in guided mode.
-            cn_scales = [0.5, 0.1]
-            guidance_scale = 7.5
-        else:
-            depth_img = get_depth_image(image_bgr, size_wh)
-            seg_map = get_segmentation_map(image_bgr)
-            seg_img = get_segmentation_image(seg_map, size_wh)
-            has_window = detect_window(seg_map)
-            cn_scales = [0.5, 0.1]
-            guidance_scale = 7.5
-
-        # --- PROMPTS ---
-        custom_prompt = body.get("custom_prompt")  # user-sent prompt (may be empty)
-
-        # Normalize room_type for lookups
-        room_key = (room_type or "").strip().lower()
-
-        prompt = None
-
-        # 1) If user supplied a custom prompt (non-empty) -> use it
-        if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
-            prompt = custom_prompt.strip()
-
-        # 2) Otherwise build it from the shared Gen-Klein prompt engine, which
-        #    is the same architecture the web studio and the Modal service use.
-        #    `build_short_prompt` keeps the programme/style/60-30-10/light order
-        #    inside CLIP's 77-token budget instead of silently truncating it.
-        if prompt is None:
-            prompt = build_short_prompt(
-                mode=resolve_mode(body.get("mode") or "", room_key),
-                space_type=room_type or "interior",
-                design_style=design_style or "Modern",
-                color_tone=color_tone or "neutral",
-            )
-
-        # Make sure prompt is a string
-        if not isinstance(prompt, str) or not prompt.strip():
-            prompt = build_short_prompt(
-                mode="interior",
-                space_type=room_type or "space",
-                design_style=design_style or "Modern",
-                color_tone=color_tone or "neutral",
-            )
-
-        # WINDOW-aware modification
-        if has_window:
-            prompt = prompt + ", window in place"
-        else:
-            # add to negative prompt instead of prompt
-            pass
-
-        # Keep the base negative IDENTICAL to the pre-fix version so the
-        # interior.jsx / exterior.jsx / quick-mode flows behave exactly as
-        # they did before. Extra drafting- and duplication-blockers only
-        # apply to plan.jsx guided mode (use_room_mask).
-        negative = "blurry, lowres, distorted, floating furniture, bad lighting, wrong perspective"
-        if not has_window:
-            negative += ", no window"
-        if use_room_mask:
-            negative += (
-                ", low quality, deformed, watermark, text, "
-                "duplicate rooms, repeated furniture, tiled pattern, multiple beds, "
-                "multiple sofas, mixed rooms, wrong room in wrong place, mismatched layout, "
-                "rooms outside their boundaries, overlapping room areas, fragmented layout, "
-                "2D floor plan, technical drawing, architectural drafting, dimension lines, "
-                "labels, arabic text, symbols, door swing arcs, plan annotations"
-            )
-
-        # --- Generate ---
-        steps = 35 if use_room_mask else 30
-        result = pipe(
-            prompt=prompt,
-            image=[depth_img, seg_img],
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            controlnet_conditioning_scale=cn_scales,
-            negative_prompt=negative,
-            generator=torch.manual_seed(42)
-        )
-
-        out = result.images[0]
-
-        buf = io.BytesIO()
-        out.save(buf, format="PNG")
-        img_str = base64.b64encode(buf.getvalue()).decode()
-
-        return {
-            "message": "Image generated successfully",
-            "generatedImage": img_str,
-            "prompt": prompt,
-            "negative_prompt": negative,
-            "has_window": has_window,
-            "guided_mask_used": use_room_mask,
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as error:
+        # RunPod reports this as a FAILED job, which is the backend's cue to fall
+        # back to Modal — so a bad request here still reaches the user as a
+        # design rather than as an error.
+        print(f"[handler] generation failed: {error}")
+        return {"error": str(error)}
 
 
 # ---------------------------------------------------------------------------

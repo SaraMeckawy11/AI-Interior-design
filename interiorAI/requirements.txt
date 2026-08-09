@@ -1,8 +1,20 @@
-torch
-opencv-python
-diffusers[torch]
-transformers
-accelerate
+# One worker, two engines — so one dependency set has to serve both.
+#
+# Modal can pin the guided ControlNet path to older versions (torch 2.4 /
+# diffusers 0.30) because it builds that engine its own image. A RunPod worker
+# gets one environment, and FLUX.2 [klein] needs diffusers >= 0.37 for
+# Flux2KleinPipeline plus transformers >= 4.57 for its Qwen3 text encoder, so the
+# newer set wins. StableDiffusionControlNetPipeline and its inpaint variant are
+# still supported pipelines there.
+torch>=2.6,<3
+diffusers>=0.37,<1
+transformers>=4.57,<5
+accelerate>=1.4
+safetensors>=0.4.5
+sentencepiece
+protobuf
+huggingface_hub[hf_transfer]>=0.30
+opencv-python-headless==4.10.0.84
+Pillow>=10.4,<12
+numpy==1.26.4
 runpod==1.6.2
-Pillow
-numpy
