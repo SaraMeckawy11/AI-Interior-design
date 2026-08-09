@@ -166,13 +166,36 @@ async function generateWithModal(payload) {
   }
   console.log("Modal job submitted:", callId);
 
+  /**
+   * Past this line a GPU is running and the bill for it is already incurred,
+   * whatever happens next. Anything that goes wrong from here is marked
+   * `committed` so the caller does not also pay RunPod to redo work Modal is
+   * still doing — which is the whole double-spend, and it survived the move to
+   * polling: a dropped poll or a job that ran past the budget still sent the
+   * same design to a second provider.
+   */
+  const committed = (message) => Object.assign(new Error(message), { modalCommitted: true });
+
+  let pollFailures = 0;
   for (let attempt = 1; attempt <= MODAL_MAX_POLLS; attempt += 1) {
     await sleep(MODAL_POLL_INTERVAL_MS);
 
-    const statusResp = await axios.get(
-      `${resultUrl}?callId=${encodeURIComponent(callId)}`,
-      { headers, timeout: 60_000, maxContentLength: Infinity },
-    );
+    let statusResp;
+    try {
+      statusResp = await axios.get(
+        `${resultUrl}?callId=${encodeURIComponent(callId)}`,
+        { headers, timeout: 60_000, maxContentLength: Infinity },
+      );
+    } catch (error) {
+      // A poll is a cheap CPU call on a network that occasionally blinks.
+      // Giving up on the first failure threw away a running GPU job.
+      pollFailures += 1;
+      console.error(`Modal poll failed (${pollFailures}):`, error.message);
+      if (pollFailures >= 5) throw committed("Modal stopped answering about this design");
+      continue;
+    }
+    pollFailures = 0;
+
     if (statusResp.data?.status !== "completed") continue;
 
     // The engine reduces its own failures to a sentence, so an error arrives
@@ -188,7 +211,9 @@ async function generateWithModal(payload) {
     return statusResp.data;
   }
 
-  throw new Error(`Modal job did not finish within ${(MODAL_MAX_POLLS * MODAL_POLL_INTERVAL_MS) / 1000}s`);
+  throw committed(
+    `Modal job did not finish within ${(MODAL_MAX_POLLS * MODAL_POLL_INTERVAL_MS) / 1000}s`,
+  );
 }
 
 router.post("/", isAuthenticated, async (req, res) => {
@@ -289,6 +314,12 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     // Modal first, RunPod second. The design credit was already spent above and
     // is not refunded if both fail — same as before this fallback existed.
+    //
+    // RunPod is a fallback for a Modal that *could not take the work*: not
+    // configured, unreachable, or it rejected the request. Once Modal has
+    // accepted a job the GPU is running and is billed whether or not this
+    // process is still listening, so sending the same design to a second
+    // provider does not rescue anything — it just buys the picture twice.
     let result = null;
     let host = "modal";
 
@@ -296,8 +327,14 @@ router.post("/", isAuthenticated, async (req, res) => {
     try {
       result = await generateWithModal(payload);
     } catch (modalError) {
+      if (modalError.modalCommitted) {
+        console.error("Modal job was accepted but never returned:", modalError.message);
+        return res.status(504).json({
+          message: "Your design is taking longer than expected. Please try again in a moment.",
+        });
+      }
       console.error(
-        "Modal request failed, falling back to RunPod:",
+        "Modal could not take this design, falling back to RunPod:",
         modalError.response?.status,
         modalError.response?.data || modalError.message,
       );

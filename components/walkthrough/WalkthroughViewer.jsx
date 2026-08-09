@@ -51,6 +51,7 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     mode = "walk",
     roomIndex = 0,
     night = false,
+    xray = false,
     onReady,
     onSceneUpdate,
     onSelect,
@@ -68,9 +69,9 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
 
   const html = useMemo(
     () => exactScene
-      ? buildExactWalkthroughHtml({ scene: exactScene, settings, furnitureEdits, mode, roomIndex, night })
+      ? buildExactWalkthroughHtml({ scene: exactScene, settings, furnitureEdits, mode, roomIndex, night, xray })
       : buildWalkthroughHtml({ layout, roomConfigs, settings, furnitureEdits, mode, roomIndex, night }),
-    // Deliberately excludes mode/roomIndex/night — see the note above.
+    // Deliberately excludes mode/roomIndex/night/xray — see the note above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [exactScene, layout, roomConfigs, settings],
   );
@@ -134,6 +135,8 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
     setNight: (value) => run(`window.LivinaiScene.setNight(${value ? "true" : "false"})`),
     setRoom: (index) => run(`window.LivinaiScene.setRoom(${index})`),
     setFreeExplore: (value) => run(`window.LivinaiScene.setFreeExplore(${value ? "true" : "false"})`),
+    setXray: (value) => run(`window.LivinaiScene.setXray(${value ? "true" : "false"})`),
+    setDesignerView: (value) => run(`window.LivinaiScene.setDesignerView(${value ? "true" : "false"})`),
     rotateSelected: (delta) => run(`window.LivinaiScene.rotateSelected(${delta})`),
     moveSelected: (direction, amount) =>
       run(`window.LivinaiScene.moveSelected(${JSON.stringify(direction)},${amount || 0.12})`),

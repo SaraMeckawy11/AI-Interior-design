@@ -342,7 +342,10 @@ def _decode_base64_image_bytes(base64_str):
     gpu="L40S",                 # 48 GB — the 4B transformer + Qwen3 encoder fit in bf16
     volumes={"/cache": hf_cache_vol},
     secrets=[api_key_secret],
-    scaledown_window=120,
+    # See InteriorAI: the window is sized against the cost of reloading, not
+    # against how long someone might browse. 120s meant a lone design paid for
+    # two idle minutes of L40S after it finished.
+    scaledown_window=90,
     min_containers=0,
     max_containers=3,
     timeout=900,
@@ -460,10 +463,16 @@ class GenKlein:
 
 @app.cls(
     image=controlnet_image,
-    gpu="L40S",                 # 48 GB, ~3-4x faster than T4 at fp16
+    # SD 1.5 with two ControlNets, a depth model and a segmenter is about 10 GB
+    # in fp16. It was on the same 48 GB L40S as FLUX.2 [klein] — roughly three
+    # times the hourly rate for a card that spent most of its memory empty.
+    gpu="A10G",
     volumes={"/cache": hf_cache_vol},
     secrets=[api_key_secret],
-    scaledown_window=60,
+    # Long enough that a second design started while looking at the first reuses
+    # the container, short enough that an idle GPU is never held longer than
+    # reloading would have cost. Both classes scale to zero between sessions.
+    scaledown_window=90,
     min_containers=0,
     max_containers=3,
     timeout=600,

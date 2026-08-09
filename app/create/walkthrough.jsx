@@ -251,6 +251,10 @@ export default function WalkthroughScreen() {
   // ── Viewer state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("walk");
   const [night, setNight] = useState(false);
+  // Walls between the camera and the room are hidden, and the camera may stand
+  // where they were. This is how a room is framed from further back than its own
+  // walls allow — which is most of the good shots.
+  const [xray, setXray] = useState(false);
   const [inspected, setInspected] = useState(null);
   const [sceneInfo, setSceneInfo] = useState(null);
   const [panel, setPanel] = useState(null); // null | 'ai'
@@ -1206,6 +1210,25 @@ export default function WalkthroughScreen() {
     viewerRef.current?.setNight(next);
   };
 
+  const toggleXray = () => {
+    const next = !xray;
+    setXray(next);
+    viewerRef.current?.setXray(next);
+  };
+
+  /**
+   * Show the designer viewpoint rather than only promising it.
+   *
+   * Choosing "Designer" used to change a caption and nothing else — the renderer
+   * captured whatever the user was already looking at, because the scene ignored
+   * the flag. Selecting it now moves the camera immediately, and the sheet is
+   * short enough that the move happens in plain sight above it.
+   */
+  const changeCameraSource = (source) => {
+    setCameraSource(source);
+    viewerRef.current?.setDesignerView(source === "designer");
+  };
+
   const focusRoom = (index) => {
     setSelectedRoom(index);
     setOutputMode("live");
@@ -1565,6 +1588,7 @@ export default function WalkthroughScreen() {
               exactSceneDetail={exactSceneDetail}
               viewMode={viewMode}
               night={night}
+              xray={xray}
               selectedRoom={selectedRoom}
               inspected={inspected}
               sceneInfo={sceneInfo}
@@ -1589,11 +1613,12 @@ export default function WalkthroughScreen() {
               onBackToDesign={goBack}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
+              onToggleXray={toggleXray}
               onFocusRoom={focusRoom}
               onCapture={() => requestCapture("photo")}
               onRender={() => requestCapture("ai")}
               onSetPanel={setPanel}
-              onSetCameraSource={setCameraSource}
+              onSetCameraSource={changeCameraSource}
               onSetOutputMode={setOutputMode}
               onSaveRender={(image) => {
                 setSnapshotKind("ai");
@@ -2188,6 +2213,7 @@ function WalkthroughStage({
   exactSceneDetail,
   viewMode,
   night,
+  xray,
   selectedRoom,
   inspected,
   sceneInfo,
@@ -2208,6 +2234,7 @@ function WalkthroughStage({
   onBackToDesign,
   onChangeMode,
   onToggleNight,
+  onToggleXray,
   onFocusRoom,
   onCapture,
   onRender,
@@ -2252,6 +2279,7 @@ function WalkthroughStage({
           mode={viewMode}
           roomIndex={selectedRoom}
           night={night}
+          xray={xray}
           onReady={onReady}
           onSceneUpdate={onSceneUpdate}
           onSelect={onSelect}
@@ -2517,19 +2545,55 @@ function WalkthroughStage({
 
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              {/* The chip reports work the person did not start and cannot see
-                  finish, so it is announced rather than only drawn. */}
-              <View
-                style={styles.statusChip}
-                accessibilityRole="text"
-                accessibilityLiveRegion="polite"
-                accessibilityLabel={status.label}
-              >
-                {status.busy
-                  ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
-                  : <View style={styles.statusDot} />}
-                <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
-              </View>
+              {/* Take the walls out of the way.
+                  A room can only be photographed from inside its own walls,
+                  which on a small room means standing in the middle of it and
+                  seeing almost nothing. With this on, any wall between the
+                  camera and the room disappears and the camera may stand where
+                  it was — so a shot can be framed from as far back as it needs.
+                  It lives in the dock, next to the two other things you do to a
+                  view, rather than in the top row, which is for choosing which
+                  view you are in. */}
+              {viewMode === "walk" ? (
+                <Pressable
+                  accessibilityRole="switch"
+                  accessibilityLabel={xray ? "Walls hidden. Show walls" : "Hide the walls in the way"}
+                  accessibilityState={{ checked: xray }}
+                  android_ripple={{ color: "rgba(30,36,31,0.16)" }}
+                  style={({ pressed }) => [
+                    styles.wallToggle,
+                    xray && styles.wallToggleOn,
+                    pressed && styles.pressedSurface,
+                  ]}
+                  onPress={onToggleXray}
+                >
+                  <Ionicons
+                    name={xray ? "eye-outline" : "square-outline"}
+                    size={17}
+                    color={xray ? COLORS.white : COLORS.textPrimary}
+                  />
+                  <Text
+                    style={[styles.wallToggleText, xray && styles.wallToggleTextOn]}
+                    numberOfLines={1}
+                  >
+                    {xray ? "Walls off" : "Walls"}
+                  </Text>
+                </Pressable>
+              ) : (
+                /* The chip reports work the person did not start and cannot see
+                   finish, so it is announced rather than only drawn. */
+                <View
+                  style={styles.statusChip}
+                  accessibilityRole="text"
+                  accessibilityLiveRegion="polite"
+                  accessibilityLabel={status.label}
+                >
+                  {status.busy
+                    ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                    : <View style={styles.statusDot} />}
+                  <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
+                </View>
+              )}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="AI render options"
@@ -4950,6 +5014,17 @@ const styles = StyleSheet.create({
   },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
   statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
+  // Takes the status chip's slot while walking, because while walking the thing
+  // worth a whole control is framing the shot, not the piece count.
+  wallToggle: {
+    flex: 1, minWidth: 0, height: ms(48),
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.md, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface, ...SHADOW.md,
+  },
+  wallToggleOn: { backgroundColor: COLORS.brand800 },
+  wallToggleText: { ...TYPE.caption, color: COLORS.textPrimary },
+  wallToggleTextOn: { color: COLORS.white },
   dockPrimary: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
     height: ms(48), paddingHorizontal: SPACING.lg,

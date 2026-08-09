@@ -114,6 +114,34 @@ counts on the dashboard: `generate` + `interiorai_generate` should be about
 `GenKlein.run` + `InteriorAI.run`, and `result` should be much larger than both
 (it is the poll, and it is CPU).
 
+### 1e. Reading the bill
+
+The dashboard aggregates a class as `GenKlein.*`, and that count includes the
+`@modal.enter` load as well as `run` — so roughly **twice** the number of
+requests means every request cold-started, which is the expensive shape. Three
+things keep that down:
+
+* **RunPod is not asked for work Modal already accepted.** Once `generate`
+  returns a `callId` the GPU is running and billed whether or not the API is
+  still listening, so a dropped poll or an over-budget job now returns 504
+  rather than buying the same picture from a second provider. Only a Modal that
+  could not *take* the job falls through to RunPod.
+* **The ControlNet engine is on an A10G, not an L40S.** SD 1.5 with two
+  ControlNets, a depth model and a segmenter is about 10 GB in fp16; it was
+  sharing FLUX.2 [klein]'s 48 GB card at roughly three times the hourly rate for
+  memory it never used.
+* **`scaledown_window` is 90s on both.** It is sized against what a reload
+  costs, not against how long someone might browse: long enough that a second
+  design started while looking at the first reuses the container, short enough
+  that a lone design does not leave a GPU idling for minutes afterwards. Both
+  classes still scale to zero between sessions.
+
+The remaining per-request cost is the cold start itself — reading the 16 GB
+FLUX.2 [klein] checkpoint from the volume onto the GPU. Modal memory snapshots
+would cut it, but they need the weights to fit in the container's CPU RAM first,
+so that is a change to make deliberately and measure, not one to switch on
+blind.
+
 ---
 
 ## 2. Node backend
