@@ -31,15 +31,18 @@ export const FREE_DESIGNS = 2;
 /**
  * The price list, in coins.
  *
- * A walkthrough render is three because that is roughly what it costs to make:
- * it runs the exporter, holds a GPU for the scene, and then does the same
- * image-to-image pass a flat design does. Charging the same for both would mean
- * the cheap path subsidising the expensive one, and the expensive one is the
- * reason anyone subscribes.
+ * One coin, whatever you render. A walkthrough does cost more to produce — it
+ * runs the exporter and holds a GPU for the scene before the same
+ * image-to-image pass a flat design does — but pricing it at three made the
+ * feature that best demonstrates Livinai the one people spent their coins most
+ * carefully on, which is the wrong way round. The subscription is what covers
+ * the difference.
+ *
+ * `backend/src/config/pricing.js` has to be changed with this file.
  */
 export const COIN_COST = {
   design: 1,
-  walkthrough: 3,
+  walkthrough: 1,
 };
 
 /** What a render of this kind costs, defaulting to the flat design price. */

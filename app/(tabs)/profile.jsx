@@ -19,9 +19,7 @@ export default function Profile() {
   const insets = useSafeAreaInsets();
   // Seed from the cached user so the plan badge does not flash the wrong state
   // for as long as the network round-trip takes.
-  const [isPremium, setIsPremium] = useState(
-    user?.isPremium === true || user?.isSubscribed === true,
-  );
+  const [isPremium, setIsPremium] = useState(!!user?.isPremium);
 
   useEffect(() => {
     const fetchUserStatus = async () => {
@@ -46,11 +44,10 @@ export default function Profile() {
         }
 
         const data = JSON.parse(text); // parse JSON
-        // Both flags, because they are set on different paths: `isPremium` by
-        // the entitlement sync and `isSubscribed` when an order is recorded.
-        // Reading only the first meant someone who had just paid still saw the
-        // "Free plan" badge and the upsell until the other flag caught up.
-        setIsPremium(data.user?.isPremium === true || data.user?.isSubscribed === true);
+        // Premium only. `isSubscribed` is set by any recorded order, including
+        // a lapsed one, so it is not the flag that says someone is a member
+        // today — and the family welcome belongs to members.
+        setIsPremium(data.user?.isPremium || false);
       } catch (err) {
         console.error("Failed to fetch user status:", err);
       }

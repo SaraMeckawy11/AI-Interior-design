@@ -331,10 +331,10 @@ export default function Upgrade() {
         <View style={styles.coinCard}>
           <View style={styles.coinRow}>
             <Ionicons name="ellipse" size={20} color={COLORS.primaryDark} />
-            <Text style={styles.coinValue}>{coinLabel(coins)}</Text>
+            <Text style={styles.coinValue}>{coins} Coins</Text>
           </View>
           <Text style={styles.coinSubtitle}>
-            Watch ads to earn coins and unlock new designs.
+            Watch ads to earn coins — each ad gives {coinLabel(AD_COIN_REWARD)}
           </Text>
 
           {/* What a coin buys. The old card said "each design costs 2 coins" in
@@ -381,7 +381,9 @@ export default function Upgrade() {
             )}
           </Pressable>
 
-          {adMessage ? <Text style={styles.adStatusText}>{adMessage}</Text> : null}
+          <Text style={styles.adStatusText}>
+            {adMessage || 'Watch an ad to earn a coin.'}
+          </Text>
         </View>
 
         {/* ── What Pro includes ──────────────────────────────────────────── */}

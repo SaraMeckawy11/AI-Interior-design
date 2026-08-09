@@ -18,10 +18,10 @@ export const AD_COIN_REWARD = 1;
 /** Renders every new account gets before coins or a subscription apply. */
 export const FREE_DESIGNS = 2;
 
-/** The price list, in coins. See the app's copy for why a walkthrough is three. */
+/** The price list, in coins. One coin, whatever you render. */
 export const COIN_COST = {
   design: 1,
-  walkthrough: 3,
+  walkthrough: 1,
 };
 
 /**

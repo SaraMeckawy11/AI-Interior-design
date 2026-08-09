@@ -692,15 +692,21 @@ def build_sofa(P, w=2.2, d=0.95):
     for sx in (-1, 1):
         ms.append(_bx(cw - 0.04, d - 0.42, 0.15, _shade(fab, 1.07),
                       cx=sx * (cw / 2 + 0.02), cy=0.08, z=lift + 0.34))  # seat cushions
-        ms.append(_bx(cw - 0.06, 0.16, 0.42, _shade(fab, 1.03),
-                      cx=sx * (cw / 2 + 0.02), cy=-(d / 2 - 0.19),
-                      z=lift + 0.40))                              # back cushions
-    # No throw pillows. They were upright 0.15 m slabs standing at z=0.56 with
-    # no lean and no rounding, set 0.15 m in front of a back cushion that spans
-    # 0.52-0.94 — so they intersected it, and what showed was a flat rectangle
-    # half-buried in the sofa. A cushion that reads as a cushion needs to lean
-    # and to be rounded; a box at right angles to everything around it is worse
-    # than no cushion at all, and the sofa is fully dressed without one.
+    # No back cushions and no throw pillows.
+    #
+    # The throw pillows went first: upright 0.15 m slabs at z=0.56, no lean, no
+    # rounding, standing 0.15 m in front of a back cushion they intersected, so
+    # what showed was a flat rectangle half-buried in the sofa.
+    #
+    # The back cushions were the same defect one layer down and outlived that
+    # fix. Each was a 0.42 m upright box at cy = -(d/2 - 0.19) spanning
+    # -(d/2)+0.11 to -(d/2)+0.27, while the backrest behind it spans -(d/2) to
+    # -(d/2)+0.20 — so they overlapped it by 9 cm and the visible result was a
+    # pair of flat panels growing out of the backrest at a hard right angle,
+    # mis-aligned with everything around them. A cushion only reads as a cushion
+    # if it leans and is rounded; a box that does neither is worse than none.
+    # The backrest already reads as upholstery, and the seat cushions still sit
+    # on the base, so the sofa is fully dressed without them.
     return ms, w, d
 
 
@@ -2589,6 +2595,18 @@ class RoomFurnisher:
         # before turning. The circle stays for the swing; the corridor is added
         # on top and is what stops furniture landing in the entry path.
         self.door_zones = []
+        # The line of sight straight in from each doorway, kept separately from
+        # the keep-clear zones above.
+        #
+        # Clearing the corridor is not the same as being out of the way. The
+        # corridor reaches at most 1.40 m into the room, so a dining table can
+        # clear it by a centimetre and still be the first thing you walk into
+        # coming through the front door — which is what happens, because the
+        # scoring below pulls groups toward the centroid and a door's axis
+        # usually runs straight through it. These axes let `find_open_pose`
+        # push a group sideways out of the entry sightline while the doorway
+        # itself stays clear.
+        self.door_axes = []
         for e in edges:
             p1, p2 = np.array(e["p1"], dtype=float), np.array(e["p2"], dtype=float)
             for typ, t0, t1 in e.get("openings", []):
@@ -2627,6 +2645,13 @@ class RoomFurnisher:
                 corridor = Polygon([(p[0], p[1]) for p in corners])
                 if corridor.is_valid and not corridor.is_empty:
                     self.door_zones.append(corridor)
+
+                self.door_axes.append({
+                    "c": c.astype(float),
+                    "normal": normal.astype(float),
+                    "tangent": tangent.astype(float),
+                    "half": half,
+                })
 
     @property
     def layered(self):
@@ -2903,6 +2928,50 @@ class RoomFurnisher:
 
         return sorted(slots, key=score, reverse=True)
 
+    def _door_sightline_penalty(self, position, width, depth):
+        """How much a group at `position` blocks the view in from a doorway.
+
+        A soft cost rather than a rejection. Being on a door's axis is only bad
+        relative to the alternatives — in a small room every candidate is on it,
+        and refusing them all would drop the group entirely, which is how the
+        dining set used to vanish from rooms that had one obvious place for it.
+        Scoring it means the sideways position wins whenever a sideways position
+        exists, and the room still gets its table when none does.
+
+        The penalty falls off with lateral offset and with distance into the
+        room, so "past the entry and off to one side" costs nothing while
+        "squarely in front of the door" costs a lot.
+        """
+        if not self.door_axes:
+            return 0.0
+
+        # Roughly how far this group sticks out from its own centre.
+        radius = math.hypot(width, depth) / 2.0
+        worst = 0.0
+        for axis in self.door_axes:
+            delta = np.asarray(position, dtype=float) - axis["c"]
+            along = float(np.dot(delta, axis["normal"]))
+            if along <= 0.0:
+                continue  # behind the doorway: another room's problem
+            lateral = abs(float(np.dot(delta, axis["tangent"])))
+
+            # Clear of the opening's width plus this group's own half-size?
+            # Then it is beside the entry path, not in it.
+            clear_at = axis["half"] + radius
+            if lateral >= clear_at:
+                continue
+
+            # 1.0 dead ahead, easing to 0 as it slides out of the opening.
+            centred = 1.0 - (lateral / clear_at)
+            # 1.0 at the threshold, 0 once it is 3.5 m into the room, by which
+            # point a person is well past the door and has turned.
+            near = max(0.0, 1.0 - along / 3.5)
+            worst = max(worst, centred * near)
+
+        # Weighted to outrank the centroid pull (0.05/m) and the boundary and
+        # separation bonuses, so it decides the placement rather than nudging it.
+        return worst * 6.0
+
     def find_open_pose(self, width, depth, preferred=None, yaws=None):
         """Find the best empty interior zone for a complete furniture group."""
         safe_room = self.poly.buffer(-0.12)
@@ -2968,6 +3037,7 @@ class RoomFurnisher:
                     ) * 0.16
                 else:
                     score -= np.linalg.norm(position - self.centroid) * 0.05
+                score -= self._door_sightline_penalty(position, width, depth)
                 if best is None or score > best[0]:
                     best = (score, position, yaw, fp)
         if best is None:

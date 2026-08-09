@@ -49,7 +49,7 @@ import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
 import { paletteForRequest, paletteForTone } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
-import { COIN_COST } from "../../constants/pricing";
+import { COIN_COST, coinLabel } from "../../constants/pricing";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
   COLOR_MOODS,
@@ -1342,7 +1342,7 @@ export default function WalkthroughScreen() {
         // "not enough coins" reads as "pay us" rather than as an answer.
         setNotice(
           data.reason
-            || `A walkthrough render costs ${COIN_COST.walkthrough} coins, and you do not have enough.`,
+            || `A walkthrough render costs ${coinLabel(COIN_COST.walkthrough)}, and you do not have enough.`,
         );
         router.push("/profile/upgrade");
         return;
