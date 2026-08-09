@@ -110,12 +110,30 @@ export default StyleSheet.create({
   coinPriceLabel: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
   coinPriceValue: { ...TYPE.caption, color: COLORS.textPrimary },
 
-  watchAdButton: {
-    ...BUTTON,
-    backgroundColor: COLORS.surfaceSunken,
-    marginTop: SPACING.md,
+  // Both of these were full-width bars: a 48pt grey pill for "Watch Ad" and a
+  // bordered card for "Pro is active". Neither is a primary action — one earns a
+  // single coin, the other states a fact — so at that size they read as more
+  // important than the button that actually buys something. They are the same
+  // compact tag the Premium badge uses elsewhere in the app: self-sizing, pill,
+  // tinted, caption text beside a small glyph.
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 5,
+    borderRadius: RADIUS.pill,
   },
-  watchAdButtonText: { ...TYPE.caption, color: COLORS.textPrimary },
+  tagText: { ...TYPE.caption, fontSize: 10.5 },
+
+  // Clay, because coins are clay everywhere on this screen.
+  watchAdTag: { backgroundColor: COLORS.accentSoft, marginLeft: 'auto' },
+  watchAdTagText: { color: COLORS.accentStrong },
+
+  // Sage, because it is a membership state, not a coin one.
+  activeTag: { backgroundColor: COLORS.brand100, marginBottom: SPACING.base },
+  activeTagText: { color: COLORS.brand700 },
 
   adStatusText: {
     ...TYPE.caption,
@@ -221,17 +239,6 @@ export default StyleSheet.create({
     marginTop: SPACING.base,
     lineHeight: 15,
   },
-
-  // ── Subscriber state ─────────────────────────────────────────────────────
-  activeCard: {
-    ...CARD,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  activeText: { flex: 1, ...TYPE.small, color: COLORS.textPrimary },
 
   // ── Dialog ───────────────────────────────────────────────────────────────
   dialogBackdrop: {

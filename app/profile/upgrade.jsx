@@ -312,9 +312,13 @@ export default function Upgrade() {
         </Text>
 
         {isSubscribed ? (
-          <View style={styles.activeCard}>
-            <Ionicons name="checkmark-circle" size={18} color={COLORS.primaryDark} />
-            <Text style={styles.activeText}>Pro is active on this account.</Text>
+          <View
+            style={[styles.tag, styles.activeTag]}
+            accessibilityRole="text"
+            accessibilityLabel="Pro is active on this account"
+          >
+            <Ionicons name="checkmark-circle" size={12} color={COLORS.brand700} />
+            <Text style={[styles.tagText, styles.activeTagText]}>Pro active</Text>
           </View>
         ) : null}
 
@@ -323,6 +327,31 @@ export default function Upgrade() {
           <View style={styles.coinRow}>
             <Ionicons name="ellipse" size={16} color={COLORS.primaryDark} />
             <Text style={styles.coinValue}>{coins} Coins</Text>
+
+            {/* On the balance's own line: earning a coin belongs beside the
+                count it changes, not on a full-width bar below the card. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Watch an ad to earn ${coinLabel(AD_COIN_REWARD)}`}
+              accessibilityState={{ busy: adStatus === 'showing', disabled: adStatus === 'showing' }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              android_ripple={{ color: 'rgba(30,36,31,0.08)' }}
+              style={({ pressed }) => [styles.tag, styles.watchAdTag, pressed && styles.pressed]}
+              // Only while an ad is on screen. Gating on "not idle" left this
+              // disabled from the moment the screen opened, because the hook
+              // reports `loading` for the whole background warm-up.
+              disabled={adStatus === 'showing'}
+              onPress={watchAd}
+            >
+              {adStatus === 'showing' ? (
+                <ActivityIndicator size="small" color={COLORS.accentStrong} />
+              ) : (
+                <>
+                  <Ionicons name="play" size={11} color={COLORS.accentStrong} />
+                  <Text style={[styles.tagText, styles.watchAdTagText]}>Watch ad</Text>
+                </>
+              )}
+            </Pressable>
           </View>
           <Text style={styles.coinSubtitle}>
             Watch ads to earn coins — each ad gives {coinLabel(AD_COIN_REWARD)}
@@ -341,33 +370,7 @@ export default function Upgrade() {
             </View>
           </View>
 
-          {/* Quiet, because it is the free option. A filled pill here competed
-              with the two buttons that actually take money. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Watch an ad to earn ${coinLabel(AD_COIN_REWARD)}`}
-            accessibilityState={{ busy: adStatus === 'showing', disabled: adStatus === 'showing' }}
-            android_ripple={{ color: 'rgba(30,36,31,0.08)' }}
-            style={({ pressed }) => [styles.watchAdButton, pressed && styles.pressed]}
-            // Only while an ad is on screen. Gating on "not idle" left this
-            // disabled and spinning from the moment the screen opened, because
-            // the hook reports `loading` for the whole background warm-up.
-            disabled={adStatus === 'showing'}
-            onPress={watchAd}
-          >
-            {adStatus === 'showing' ? (
-              <ActivityIndicator size="small" color={COLORS.textTertiary} />
-            ) : (
-              <>
-                <Ionicons name="play-circle-outline" size={15} color={COLORS.textPrimary} />
-                <Text style={styles.watchAdButtonText}>Watch Ad</Text>
-              </>
-            )}
-          </Pressable>
-
-          <Text style={styles.adStatusText}>
-            {adMessage || 'Watch an ad to earn a coin.'}
-          </Text>
+          {adMessage ? <Text style={styles.adStatusText}>{adMessage}</Text> : null}
         </View>
 
         {/* ── What Pro includes ──────────────────────────────────────────── */}
