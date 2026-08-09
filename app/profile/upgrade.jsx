@@ -10,9 +10,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import purchases, { LOG_LEVEL } from 'react-native-purchases';
 
-import ScreenHeader from '../../components/ScreenHeader';
 import styles from '../../assets/styles/upgrade.styles';
 import { useAuthStore } from '../../authStore';
 import { apiUrl } from '../../configs/api';
@@ -58,6 +58,7 @@ const PRO_FEATURES = [
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [selectedPlan, setSelectedPlan] = useState('yearly');
   const [selectedPack, setSelectedPack] = useState(COIN_PACKS[1].id);
@@ -279,10 +280,22 @@ export default function Upgrade() {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
+  const backButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Go back"
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+      onPress={() => router.back()}
+    >
+      <Ionicons name="chevron-back" size={21} color={COLORS.textPrimary} />
+    </Pressable>
+  );
+
   if (loading) {
     return (
-      <View style={styles.screen}>
-        <ScreenHeader title="Upgrade to Pro" />
+      <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+        <View style={styles.container}>{backButton}</View>
         <View style={styles.centered}>
           <ActivityIndicator color={COLORS.primaryDark} size="large" />
         </View>
@@ -291,10 +304,11 @@ export default function Upgrade() {
   }
 
   return (
-    <View style={styles.screen}>
-      <ScreenHeader title="Upgrade to Pro" />
-
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {backButton}
+
+        <Text style={styles.title}>Upgrade to Pro</Text>
         <Text style={styles.subtitle}>
           {isSubscribed
             ? 'Your Pro membership is active — every premium feature is unlocked.'
@@ -315,17 +329,13 @@ export default function Upgrade() {
 
         {/* ── Coins ──────────────────────────────────────────────────────── */}
         <View style={styles.coinCard}>
-          <View style={styles.coinTopRow}>
-            <View style={styles.coinBadge}>
-              <Ionicons name="ellipse" size={20} color={COLORS.accentStrong} />
-            </View>
-            <View style={styles.coinCopy}>
-              <Text style={styles.coinValue}>{coins}</Text>
-              <Text style={styles.coinLabel}>
-                {coins === 1 ? 'coin on your account' : 'coins on your account'}
-              </Text>
-            </View>
+          <View style={styles.coinRow}>
+            <Ionicons name="ellipse" size={20} color={COLORS.primaryDark} />
+            <Text style={styles.coinValue}>{coinLabel(coins)}</Text>
           </View>
+          <Text style={styles.coinSubtitle}>
+            Watch ads to earn coins and unlock new designs.
+          </Text>
 
           {/* What a coin buys. The old card said "each design costs 2 coins" in
               a sentence nothing kept in step with the server, which charges

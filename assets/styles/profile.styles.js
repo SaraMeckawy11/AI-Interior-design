@@ -413,6 +413,108 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: moderateScale(14),
   },
+
+  // ── Subscription summary ──────────────────────────────────────────────────
+  // What you are paying, what happens next, and whether it is still running —
+  // as one card, at the top. This used to be four undifferentiated rows in a
+  // list, so the plan's name carried the same weight as its auto-renew flag and
+  // the one fact people open this screen for (the next charge) had to be read
+  // out of the middle of a stack.
+  planSummary: {
+    borderRadius: RADIUS,
+    backgroundColor: COLORS.cardBackground,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: moderateScale(18),
+    marginBottom: verticalScale(20),
+  },
+  planSummaryTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: moderateScale(12),
+  },
+  planSummaryIcon: {
+    width: moderateScale(46),
+    height: moderateScale(46),
+    borderRadius: moderateScale(23),
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primaryTint,
+  },
+  planSummaryCopy: { flex: 1, minWidth: 0 },
+  planSummaryName: {
+    fontSize: moderateScale(17),
+    fontFamily: "Poppins_600SemiBold",
+    color: COLORS.textPrimary,
+    letterSpacing: -0.2,
+  },
+  planSummaryPrice: {
+    fontSize: moderateScale(13),
+    fontFamily: "Poppins_400Regular",
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  statusPill: {
+    paddingHorizontal: moderateScale(10),
+    paddingVertical: moderateScale(4),
+    borderRadius: 999,
+  },
+  statusPillActive: { backgroundColor: COLORS.successSoft },
+  statusPillEnding: { backgroundColor: COLORS.warningSoft },
+  statusPillText: {
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_600SemiBold",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  statusPillTextActive: { color: COLORS.success },
+  statusPillTextEnding: { color: COLORS.warning },
+
+  planFacts: {
+    marginTop: verticalScale(16),
+    paddingTop: verticalScale(14),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    gap: verticalScale(10),
+  },
+  planFactRow: { flexDirection: "row", alignItems: "center", gap: moderateScale(8) },
+  planFactLabel: {
+    flex: 1,
+    fontSize: moderateScale(13),
+    fontFamily: "Poppins_400Regular",
+    color: COLORS.textSecondary,
+  },
+  planFactValue: {
+    fontSize: moderateScale(13),
+    fontFamily: "Poppins_500Medium",
+    color: COLORS.textPrimary,
+  },
+
+  // ── The welcome a member sees ─────────────────────────────────────────────
+  familyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: moderateScale(12),
+    borderRadius: RADIUS,
+    backgroundColor: COLORS.primaryTint,
+    borderWidth: 1,
+    borderColor: COLORS.brand200,
+    padding: moderateScale(16),
+    marginBottom: verticalScale(20),
+  },
+  familyCopy: { flex: 1, minWidth: 0 },
+  familyTitle: {
+    fontSize: moderateScale(14),
+    fontFamily: "Poppins_600SemiBold",
+    color: COLORS.textPrimary,
+  },
+  familyText: {
+    fontSize: moderateScale(12.5),
+    fontFamily: "Poppins_400Regular",
+    color: COLORS.textSecondary,
+    lineHeight: moderateScale(18),
+    marginTop: 2,
+  },
 });
 
 export default styles;

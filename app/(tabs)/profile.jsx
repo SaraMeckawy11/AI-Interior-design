@@ -1,8 +1,10 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from '../../assets/styles/profile.styles';
+import COLORS from '../../constants/colors';
 import { TAB_BAR_CLEARANCE } from '../../components/navigation/FloatingTabBar';
 import { useAuthStore } from '../../authStore';
 import LogoutButton from '../../components/profile/LogoutButton';
@@ -17,7 +19,9 @@ export default function Profile() {
   const insets = useSafeAreaInsets();
   // Seed from the cached user so the plan badge does not flash the wrong state
   // for as long as the network round-trip takes.
-  const [isPremium, setIsPremium] = useState(!!user?.isPremium);
+  const [isPremium, setIsPremium] = useState(
+    user?.isPremium === true || user?.isSubscribed === true,
+  );
 
   useEffect(() => {
     const fetchUserStatus = async () => {
@@ -42,7 +46,11 @@ export default function Profile() {
         }
 
         const data = JSON.parse(text); // parse JSON
-        setIsPremium(data.user?.isPremium || false);
+        // Both flags, because they are set on different paths: `isPremium` by
+        // the entitlement sync and `isSubscribed` when an order is recorded.
+        // Reading only the first meant someone who had just paid still saw the
+        // "Free plan" badge and the upsell until the other flag caught up.
+        setIsPremium(data.user?.isPremium === true || data.user?.isSubscribed === true);
       } catch (err) {
         console.error("Failed to fetch user status:", err);
       }
@@ -70,22 +78,41 @@ export default function Profile() {
       <ProfileHeader isPremium={isPremium} />
 
       {isPremium ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Subscription</Text>
-          <View style={styles.card}>
-            <SettingsRow
-              icon="card-outline"
-              label="Manage Subscription"
-              onPress={() => router.push('/profile/manageSubscription')}
-            />
-            <SettingsRow
-              icon="receipt-outline"
-              label="Payment History"
-              showDivider
-              onPress={() => router.push('/profile/payment-history')}
-            />
+        <>
+          {/* A member should be thanked on the screen that shows their plan,
+              not only in the receipt e-mail. */}
+          <View
+            style={styles.familyCard}
+            accessibilityRole="summary"
+            accessibilityLabel="You are part of the Livinai family"
+          >
+            <Ionicons name="heart" size={22} color={COLORS.primaryDark} />
+            <View style={styles.familyCopy}>
+              <Text style={styles.familyTitle}>You&apos;re part of the Livinai family</Text>
+              <Text style={styles.familyText}>
+                Thank you for supporting Livinai. Every design, walkthrough and render is yours,
+                unlimited, for as long as you are with us.
+              </Text>
+            </View>
           </View>
-        </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Subscription</Text>
+            <View style={styles.card}>
+              <SettingsRow
+                icon="card-outline"
+                label="Manage Subscription"
+                onPress={() => router.push('/profile/manageSubscription')}
+              />
+              <SettingsRow
+                icon="receipt-outline"
+                label="Payment History"
+                showDivider
+                onPress={() => router.push('/profile/payment-history')}
+              />
+            </View>
+          </View>
+        </>
       ) : (
         <SubscriptionSection />
       )}

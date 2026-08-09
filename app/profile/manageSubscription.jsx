@@ -21,6 +21,24 @@ const formatDate = (value) => {
   return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleDateString();
 };
 
+/**
+ * What one billing period is called.
+ *
+ * This used to be `billingCycle === 'weekly' ? '/ week' : '/ year'`, written
+ * when weekly and yearly were the only two plans. Weekly has since gone and
+ * monthly has arrived, so every monthly subscriber was shown their monthly
+ * price labelled "/ year" — the single most misleading thing this screen could
+ * get wrong.
+ */
+const PERIOD_LABEL = {
+  weekly: '/ week',
+  monthly: '/ month',
+  yearly: '/ year',
+  annual: '/ year',
+};
+
+const periodLabel = (cycle) => PERIOD_LABEL[String(cycle || '').toLowerCase()] || '';
+
 export default function Subscription() {
   const router = useRouter();
   const { token } = useAuthStore();
@@ -63,8 +81,10 @@ export default function Subscription() {
       }
 
       setPlan({
-        name: `${capitalize(order.plan)} · ${capitalize(order.billingCycle)}`,
-        price: `${order.price} ${order.billingCycle === 'weekly' ? '/ week' : '/ year'}`,
+        // `order.plan` is already "Monthly Plan"; appending the cycle made it
+        // read "Monthly Plan · Monthly".
+        name: capitalize(order.plan) || 'Livinai Pro',
+        price: `${order.price} ${periodLabel(order.billingCycle)}`.trim(),
         renewsOn: formatDate(order.endDate),
         autoRenew: !!order.autoRenew,
         canceledAt: order.canceledAt ? formatDate(order.canceledAt) : null,
@@ -133,30 +153,59 @@ export default function Subscription() {
 
           {plan ? (
             <>
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Current plan</Text>
-                <View style={styles.card}>
-                  <SettingsRow icon="sparkles" label="Plan" value={plan.name} accent />
-                  <SettingsRow icon="pricetag-outline" label="Price" value={plan.price} showDivider />
-                  <SettingsRow
-                    icon="calendar-outline"
-                    label={plan.autoRenew ? 'Renews on' : 'Ends on'}
-                    value={plan.renewsOn}
-                    showDivider
-                  />
-                  <SettingsRow
-                    icon={plan.autoRenew ? 'refresh-outline' : 'pause-outline'}
-                    label="Auto-renewal"
-                    value={plan.autoRenew ? 'On' : 'Off'}
-                    showDivider
-                  />
-                  {!!plan.canceledAt && (
-                    <SettingsRow
-                      icon="close-circle-outline"
-                      label="Cancelled"
-                      value={plan.canceledAt}
-                      showDivider
+              {/* The plan, its price and whether it is still running, as one
+                  card. The four equal rows this replaces gave the auto-renew
+                  flag the same weight as the plan's name, and buried the date
+                  of the next charge — the fact people open this screen for. */}
+              <View style={styles.planSummary}>
+                <View style={styles.planSummaryTop}>
+                  <View style={styles.planSummaryIcon}>
+                    <Ionicons name="sparkles" size={20} color={COLORS.primaryDark} />
+                  </View>
+                  <View style={styles.planSummaryCopy}>
+                    <Text style={styles.planSummaryName} numberOfLines={1}>{plan.name}</Text>
+                    <Text style={styles.planSummaryPrice}>{plan.price}</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.statusPill,
+                      plan.autoRenew ? styles.statusPillActive : styles.statusPillEnding,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusPillText,
+                        plan.autoRenew ? styles.statusPillTextActive : styles.statusPillTextEnding,
+                      ]}
+                    >
+                      {plan.autoRenew ? 'Active' : 'Ending'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.planFacts}>
+                  <View style={styles.planFactRow}>
+                    <Ionicons name="calendar-outline" size={16} color={COLORS.textSecondary} />
+                    <Text style={styles.planFactLabel}>
+                      {plan.autoRenew ? 'Renews on' : 'Access ends on'}
+                    </Text>
+                    <Text style={styles.planFactValue}>{plan.renewsOn}</Text>
+                  </View>
+                  <View style={styles.planFactRow}>
+                    <Ionicons
+                      name={plan.autoRenew ? 'refresh-outline' : 'pause-outline'}
+                      size={16}
+                      color={COLORS.textSecondary}
                     />
+                    <Text style={styles.planFactLabel}>Auto-renewal</Text>
+                    <Text style={styles.planFactValue}>{plan.autoRenew ? 'On' : 'Off'}</Text>
+                  </View>
+                  {!!plan.canceledAt && (
+                    <View style={styles.planFactRow}>
+                      <Ionicons name="close-circle-outline" size={16} color={COLORS.textSecondary} />
+                      <Text style={styles.planFactLabel}>Cancelled on</Text>
+                      <Text style={styles.planFactValue}>{plan.canceledAt}</Text>
+                    </View>
                   )}
                 </View>
               </View>

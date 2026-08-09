@@ -1,26 +1,27 @@
 /**
  * Upgrade to Pro.
  *
- * This is the original screen's design — a subtitle, a coins card, a feature
- * checklist, two plan cards side by side and one pill button — kept as the
- * shape it always was, and rebuilt on the design tokens rather than on the
- * `scale()` / `verticalScale()` helpers and hardcoded `fontSize` / `fontWeight`
- * pairs it used to carry. The layout is the old one on purpose; what changed is
- * everything that was wrong underneath it:
+ * The screen's earliest design: a big in-page title rather than a header bar, a
+ * centred coins card, a feature checklist, two plan cards side by side and a
+ * pill button — with the violet that used to mark the premium plan.
  *
- * * **The selected plan was `#eef7ff`** — a cold blue, in an app whose entire
- *   palette is warm sage and clay. It is now the sage tint, so a chosen plan
- *   looks like it belongs to this product.
- * * **"Best Value" hung off the card at `top: -8, right: -8`.** Anything drawn
- *   outside its parent's bounds is clipped on Android, so on most phones the
- *   badge was cut in half. It sits inside the card now, in a band both cards
- *   reserve so their titles stay on one line.
- * * **Touch targets.** The button was `paddingVertical: 8` — about 30pt tall
- *   against the 44pt minimum. Plan cards had no selected state beyond a border
- *   colour, which is the one cue a colour-blind user cannot rely on, so there
- *   is a real radio in the corner now.
- * * **Type.** Nineteen hardcoded sizes and weights became the shared ramp, so
- *   this screen sets text the same way the rest of the app does.
+ * Rebuilt on the design tokens rather than restored byte for byte, because the
+ * original carried defects that had nothing to do with how it looked:
+ *
+ * * **`#A084E8` under white text is about 2.4:1** — below every WCAG threshold,
+ *   so "Best Value" was decoration a good number of people could not read. The
+ *   violet is kept as the screen's premium accent, but the badge is a tint with
+ *   dark violet text (7.4:1) instead of white on the mid tone.
+ * * **The selected plan filled with `#eef7ff`**, a cold blue, in an app whose
+ *   palette is warm sage and clay. Selection is the sage tint now — the same
+ *   colour selection uses everywhere else in the app.
+ * * **"Best Value" sat at `top: -8, right: -8`**, outside the card's bounds,
+ *   which Android clips. It is a band inside the card, reserved on both cards
+ *   so their titles stay level.
+ * * **The button was `paddingVertical: 8`** — roughly 30pt against the 44pt
+ *   minimum — and plan selection was signalled by border colour alone, the one
+ *   cue a colour-blind user cannot rely on. Hence the radio in each card.
+ * * Nineteen hardcoded `fontSize`/`fontWeight` pairs became the shared ramp.
  */
 
 import { StyleSheet } from 'react-native';
@@ -28,44 +29,78 @@ import { StyleSheet } from 'react-native';
 import COLORS from '../../constants/colors';
 import { LAYOUT, RADIUS, SHADOW, SPACING, TYPE, ms } from '../../constants/theme';
 
+/**
+ * The screen's premium accent, from the original design.
+ *
+ * `base` is the `#A084E8` this screen always used. `strong` is the same hue
+ * taken dark enough to carry text on paper (7.4:1) and white on itself, since
+ * the mid tone cannot do either.
+ */
+const VIOLET = {
+  soft: '#EFE9FA',
+  base: '#A084E8',
+  strong: '#563B9C',
+};
+
 export default StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
   container: {
     paddingHorizontal: SPACING.xl,
-    paddingTop: SPACING.lg,
     paddingBottom: SPACING.xxxl,
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  subtitle: { ...TYPE.body, color: COLORS.textSecondary, marginBottom: SPACING.xl },
-
-  // ── Coins ────────────────────────────────────────────────────────────────
-  // The card the old screen opened with, still a card, but it now says what a
-  // coin is actually worth. It used to claim "each design costs 2 coins" in a
-  // sentence that had gone out of date — the server charges one.
-  coinCard: {
-    padding: SPACING.lg,
-    borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    marginBottom: SPACING.xl,
-    ...SHADOW.sm,
-  },
-  coinTopRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-  coinBadge: {
-    width: ms(44),
-    height: ms(44),
+  // ── Title ────────────────────────────────────────────────────────────────
+  // The title is on the page, not in a bar, which is how this screen used to
+  // read. The back button is the one thing kept from the header: without it
+  // leaving a paid screen depends on knowing the platform gesture, which on
+  // Android with gesture navigation is a guess.
+  back: {
+    width: ms(40),
+    height: ms(40),
     borderRadius: RADIUS.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.accentSoft,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
   },
-  coinCopy: { flex: 1, minWidth: 0 },
-  coinValue: { ...TYPE.h1, color: COLORS.textPrimary },
-  coinLabel: { ...TYPE.small, color: COLORS.textSecondary },
+  title: { ...TYPE.display, color: COLORS.textPrimary },
+  subtitle: {
+    ...TYPE.body,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xl,
+  },
+
+  // ── Coins ────────────────────────────────────────────────────────────────
+  // Centred, as it was: the balance, what a coin is worth, and the way to earn
+  // one. The old card claimed "each design costs 2 coins" in a sentence nothing
+  // kept in step with the server, which charges one — these come from the
+  // shared price table instead.
+  coinCard: {
+    alignItems: 'center',
+    paddingVertical: SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+    borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.xxl,
+    ...SHADOW.sm,
+  },
+  coinRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  coinValue: { ...TYPE.h1, color: COLORS.primaryDark },
+  coinSubtitle: {
+    ...TYPE.small,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: SPACING.xs,
+  },
 
   coinPrices: {
+    alignSelf: 'stretch',
     marginTop: SPACING.base,
     paddingTop: SPACING.md,
     borderTopWidth: 1,
@@ -77,13 +112,14 @@ export default StyleSheet.create({
   coinPriceValue: { ...TYPE.caption, color: COLORS.textPrimary },
 
   watchAdButton: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.sm,
     height: ms(46),
     borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.accentStrong,
+    backgroundColor: COLORS.primaryDark,
     marginTop: SPACING.base,
   },
   watchAdButtonBusy: { backgroundColor: COLORS.surfaceSunken },
@@ -96,7 +132,7 @@ export default StyleSheet.create({
   },
 
   // ── Features ─────────────────────────────────────────────────────────────
-  featureList: { marginBottom: SPACING.xl, gap: SPACING.md },
+  featureList: { marginBottom: SPACING.xxl, gap: SPACING.md },
   featureItem: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
   featureText: { flex: 1, ...TYPE.body, color: COLORS.textPrimary },
 
@@ -113,21 +149,19 @@ export default StyleSheet.create({
     backgroundColor: COLORS.surface,
     paddingBottom: SPACING.base,
   },
-  // Warm sage, not the cold `#eef7ff` this used to be.
   planCardSelected: {
     borderColor: COLORS.primaryDark,
     backgroundColor: COLORS.primaryTint,
     ...SHADOW.sm,
   },
-  // Reserved on both cards, filled on one, so the two titles align.
   planBadge: {
     alignSelf: 'stretch',
     height: ms(20),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  planBadgeOn: { backgroundColor: COLORS.accent },
-  planBadgeText: { ...TYPE.overline, color: COLORS.white },
+  planBadgeOn: { backgroundColor: VIOLET.soft },
+  planBadgeText: { ...TYPE.overline, color: VIOLET.strong },
   planBody: { alignItems: 'center', paddingTop: SPACING.base, paddingHorizontal: SPACING.sm },
   radio: {
     width: ms(20),
@@ -149,7 +183,7 @@ export default StyleSheet.create({
   planTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
   planPrice: { ...TYPE.h3, color: COLORS.textPrimary, marginTop: 2 },
   planPeriod: { ...TYPE.caption, color: COLORS.textTertiary },
-  planSavings: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: SPACING.sm },
+  planSavings: { ...TYPE.caption, color: VIOLET.strong, marginTop: SPACING.sm },
   planSavingsPlaceholder: { height: ms(16), marginTop: SPACING.sm },
 
   // ── Coin packs ───────────────────────────────────────────────────────────
@@ -171,18 +205,16 @@ export default StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  packBadgeOn: { backgroundColor: COLORS.accentSoft },
-  packBadgeText: { ...TYPE.overline, color: COLORS.accentStrong },
+  packBadgeOn: { backgroundColor: VIOLET.soft },
+  packBadgeText: { ...TYPE.overline, color: VIOLET.strong },
   packBody: { alignItems: 'center', paddingTop: SPACING.md, paddingHorizontal: SPACING.xs },
   packCoins: { ...TYPE.h2, color: COLORS.textPrimary },
   packUnit: { ...TYPE.caption, color: COLORS.textSecondary },
   packPrice: { ...TYPE.bodyStrong, color: COLORS.textPrimary, marginTop: SPACING.sm },
-  packSaving: { ...TYPE.caption, color: COLORS.accentStrong },
+  packSaving: { ...TYPE.caption, color: VIOLET.strong },
   packSavingPlaceholder: { height: ms(16) },
 
   // ── Buttons ──────────────────────────────────────────────────────────────
-  // The old pill, at a size a thumb can actually hit: `paddingVertical: 8` put
-  // it around 30pt tall against the 44pt minimum.
   upgradeButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -197,8 +229,8 @@ export default StyleSheet.create({
   upgradeButtonTextDisabled: { color: COLORS.textTertiary },
 
   // Coins are the alternative, not a second headline act, so this is outlined
-  // where the plan button is filled. Two identical dark pills on one screen
-  // would leave nothing saying which one the screen wants pressed.
+  // where the plan button is filled. Two identical dark pills would leave
+  // nothing saying which one the screen wants pressed.
   secondaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
