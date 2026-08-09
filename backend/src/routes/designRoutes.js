@@ -104,28 +104,91 @@ async function generateWithRunPod(payload) {
   throw new Error(`RunPod job did not finish within ${(RUNPOD_MAX_POLLS * RUNPOD_POLL_INTERVAL_MS) / 1000}s`);
 }
 
-/** Ask the Modal router, which picks between Gen-Klein and the ControlNet path. */
+// Modal's `result` endpoint, derived from the generate URL rather than
+// configured. Modal names an endpoint after its function, so the sibling is the
+// same host with the function segment swapped — one variable to set is one
+// variable to get wrong, and a half-configured pair is worse than none.
+const modalResultUrl = () => {
+  const override = (process.env.MODAL_RESULT_URL || "").trim().replace(/\/$/, "");
+  if (override) return override;
+  const url = (process.env.MODAL_ENDPOINT_URL || "").trim().replace(/\/$/, "");
+  const sibling = url.replace(/-(?:interiorai-)?generate(\.modal\.run)$/i, "-result$1");
+  return sibling === url ? "" : sibling;
+};
+
+const MODAL_POLL_INTERVAL_MS = 2_000;
+// 5 minutes. The old budget was a 180s socket timeout on a blocking request,
+// which is where the double-billing came from: a cold FLUX.2 [klein] container
+// plus inference can pass three minutes, so the backend gave up on a job that
+// was still running and paid RunPod to do the same work again.
+const MODAL_MAX_POLLS = 150;
+
+/**
+ * Ask the Modal router, which picks between Gen-Klein and the ControlNet path.
+ *
+ * Submit-and-poll, for the same reason the walkthrough exporter works that way:
+ * Modal answers any web request still running after 150 seconds with a redirect,
+ * so a blocking call cannot be relied on to return the image. The endpoint now
+ * hands back a call id and this waits on it — the job is never abandoned, and
+ * RunPod is only asked when Modal has genuinely failed rather than merely taken
+ * a while.
+ *
+ * A deploy where the app is newer than the service still works: an older Modal
+ * that answers with the image inline is used as-is.
+ */
 async function generateWithModal(payload) {
   if (!process.env.MODAL_ENDPOINT_URL) throw new Error("MODAL_ENDPOINT_URL is not set");
 
-  const modalResp = await axios.post(process.env.MODAL_ENDPOINT_URL, payload, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.MODAL_API_KEY}`,
-    },
-    timeout: 180_000, // 3 min — covers worst-case cold start + inference
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.MODAL_API_KEY}`,
+  };
+
+  const submitted = await axios.post(process.env.MODAL_ENDPOINT_URL, payload, {
+    headers,
+    timeout: 120_000,
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
   });
 
-  console.log(
-    "Modal job completed:",
-    "prompt=", modalResp.data?.prompt?.slice(0, 80),
-    "has_window=", modalResp.data?.has_window,
-  );
+  // An older deployment answers the whole job inline.
+  if (submitted.data?.generatedImage) {
+    console.log("Modal job completed inline (pre-spawn deployment)");
+    return submitted.data;
+  }
 
-  if (!modalResp.data?.generatedImage) throw new Error("Modal did not return a generated image");
-  return modalResp.data;
+  const callId = submitted.data?.callId;
+  if (!callId) throw new Error("Modal did not accept this design");
+
+  const resultUrl = modalResultUrl();
+  if (!resultUrl) {
+    throw new Error("MODAL_RESULT_URL could not be derived from MODAL_ENDPOINT_URL");
+  }
+  console.log("Modal job submitted:", callId);
+
+  for (let attempt = 1; attempt <= MODAL_MAX_POLLS; attempt += 1) {
+    await sleep(MODAL_POLL_INTERVAL_MS);
+
+    const statusResp = await axios.get(
+      `${resultUrl}?callId=${encodeURIComponent(callId)}`,
+      { headers, timeout: 60_000, maxContentLength: Infinity },
+    );
+    if (statusResp.data?.status !== "completed") continue;
+
+    // The engine reduces its own failures to a sentence, so an error arrives
+    // here as a normal body rather than as a status code.
+    if (statusResp.data?.error) throw new Error(`Modal engine failed: ${statusResp.data.error}`);
+    if (!statusResp.data?.generatedImage) throw new Error("Modal did not return a generated image");
+
+    console.log(
+      "Modal job completed:",
+      "prompt=", statusResp.data?.prompt?.slice(0, 80),
+      "has_window=", statusResp.data?.has_window,
+    );
+    return statusResp.data;
+  }
+
+  throw new Error(`Modal job did not finish within ${(MODAL_MAX_POLLS * MODAL_POLL_INTERVAL_MS) / 1000}s`);
 }
 
 router.post("/", isAuthenticated, async (req, res) => {

@@ -883,7 +883,7 @@ def _require_token(authorization: str):
 
 
 def _dispatch(body: dict):
-    """Route a request to the one engine that can serve it.
+    """Spawn the one engine that can serve this request, and return its handle.
 
     Guided floor plans need ControlNet conditioning, so they go to SD 1.5;
     everything else goes to Gen-Klein.
@@ -893,6 +893,15 @@ def _dispatch(body: dict):
     cold starts and two GPU bills — and answer with an engine the prompt was
     not written for, which is a different picture, not a degraded one. Failure
     is reported instead; the backend falls back to RunPod.
+
+    `.spawn` rather than `.remote` because Modal answers any web request still
+    running after 150 seconds with a 303 to a result URL. A cold FLUX.2 [klein]
+    container plus inference routinely passes that, so the redirect was the
+    normal case — the backend saw a request that never returned an image, gave
+    up on it, and asked RunPod for the same design while this GPU was still
+    working on it. Every slow generation was therefore billed twice, on two
+    providers, and the user waited for the second one. Handing back a call id
+    and letting the backend poll means the work is never abandoned.
     """
     image_b64 = body.get("image")
     if not image_b64:
@@ -915,7 +924,7 @@ def _dispatch(body: dict):
 
     try:
         if is_guided:
-            return InteriorAI().run.remote(
+            return InteriorAI().run.spawn(
                 image=image_b64,
                 room_type=room_type,
                 design_style=design_style,
@@ -928,7 +937,7 @@ def _dispatch(body: dict):
                 color_palette=color_palette,
             )
 
-        return GenKlein().run.remote(
+        return GenKlein().run.spawn(
             image=image_b64,
             room_type=room_type,
             design_style=design_style,
@@ -947,12 +956,18 @@ def _dispatch(body: dict):
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@app.function(image=router_image, secrets=[api_key_secret], timeout=900)
+# The endpoints are short-lived on purpose: they submit or check, they never sit
+# holding a connection open while a GPU works. `timeout=900` used to be the
+# window the whole generation had to finish inside, which is exactly the design
+# that made Modal's 150-second redirect a problem.
+
+
+@app.function(image=router_image, secrets=[api_key_secret], timeout=60)
 @modal.fastapi_endpoint(method="POST", docs=True)
 def generate(payload: dict, authorization: str = Header(default="") if Header else ""):
-    """Preferred entry point for the Livinai backend."""
+    """Start a generation. Returns the call id to poll `result` with."""
     _require_token(authorization)
-    return _dispatch(payload or {})
+    return {"callId": _dispatch(payload or {}).object_id}
 
 
 # Modal builds an endpoint's URL from the app and function name, so this
@@ -964,12 +979,33 @@ def generate(payload: dict, authorization: str = Header(default="") if Header el
 # Backends still configured with that URL therefore keep working — and now get
 # the same cheap CPU routing as `generate`, one GPU container per request. The
 # name is the only reason this is not simply an alias of `generate`.
-@app.function(image=router_image, secrets=[api_key_secret], timeout=900)
+@app.function(image=router_image, secrets=[api_key_secret], timeout=60)
 @modal.fastapi_endpoint(method="POST", docs=True)
 def interiorai_generate(payload: dict, authorization: str = Header(default="") if Header else ""):
     """Legacy entry point kept so already-deployed backends keep working."""
     _require_token(authorization)
-    return _dispatch(payload or {})
+    return {"callId": _dispatch(payload or {}).object_id}
+
+
+@app.function(image=router_image, secrets=[api_key_secret], timeout=60)
+@modal.fastapi_endpoint(method="GET")
+def result(callId: str = "", authorization: str = Header(default="") if Header else ""):
+    """Report on a spawned generation: pending, or the finished image."""
+    _require_token(authorization)
+    if not callId:
+        raise HTTPException(status_code=400, detail="Missing callId.")
+
+    call = modal.FunctionCall.from_id(callId)
+    try:
+        # timeout=0 asks "is it done yet" without waiting.
+        return {"status": "completed", **call.get(timeout=0)}
+    except TimeoutError:
+        return {"status": "pending"}
+    except Exception as error:
+        # An engine raising rather than returning is a bug in the engine, but it
+        # still has to reach the backend as a sentence rather than as a hang.
+        print(f"[router] engine call {callId} failed: {error}")
+        return {"status": "completed", "error": str(error)}
 
 
 def _estimate_plan_scale(rooms, doors, fallback=40.0):

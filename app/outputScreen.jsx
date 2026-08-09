@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   Image,
@@ -29,22 +30,35 @@ export default function OutputScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [sliderValue, setSliderValue] = useState(1);
+  // Whether the *generated* file has actually arrived. A design is generated on
+  // the server and returned as a Cloudinary URL, so this screen opens before the
+  // picture exists on the device — and it opened showing the "before" photo at
+  // full width under a slider already pushed to "after", which reads as the AI
+  // having handed back the original room unchanged.
+  const [generatedReady, setGeneratedReady] = useState(false);
 
   const screenWidth = Dimensions.get('window').width - 32;
 
   useEffect(() => {
+    // Reset per image, not per mount: opening a second design from the
+    // collection reuses this component, and without this the new one inherited
+    // the previous one's height and "already loaded" state — a stale frame at
+    // the wrong aspect ratio until the new file decoded.
+    setGeneratedReady(false);
+    setSliderValue(1);
     const uri = generatedImage || image;
-    if (uri) {
-      Image.getSize(
-        uri,
-        (width, height) => {
-          const ratio = height / width;
-          setImageHeight(screenWidth * ratio);
-        },
-        (error) => console.error("Failed to get image size", error)
-      );
-    }
-  }, [generatedImage, image]);
+    if (!uri) return;
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (!width || !height) return;
+        setImageHeight(screenWidth * (height / width));
+      },
+      // A size that cannot be read is not worth a console error on a screen the
+      // user is looking at; the 4:3 fallback below keeps the layout sane.
+      () => setImageHeight(screenWidth * 0.75),
+    );
+  }, [generatedImage, image, screenWidth]);
 
   const handleShare = async () => {
     if (!generatedImage) return;
@@ -156,11 +170,38 @@ export default function OutputScreen() {
             }}
           >
             <Image
+              key={generatedImage}
               source={{ uri: generatedImage }}
-              style={{ width: '100%', height: '100%' }}
+              style={{ width: screenWidth, height: '100%' }}
               resizeMode="cover"
+              onLoad={() => setGeneratedReady(true)}
+              onError={() => setGeneratedReady(true)}
             />
           </View>
+
+          {/* Held over the compare view until the design is really on screen,
+              so the wait is legible as a wait. The inner image is also pinned to
+              the full screen width rather than 100% of its clipping window —
+              otherwise every slider position rescaled the "after" picture, and
+              the two halves of a comparison never lined up. */}
+          {!generatedReady && (
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 12,
+                backgroundColor: 'rgba(244,241,233,0.92)',
+              }}
+            >
+              <ActivityIndicator size="large" color={COLORS.primaryDark} />
+              <Text style={[styles.sliderLabel, { marginTop: 10 }]}>Loading your design…</Text>
+            </View>
+          )}
         </View>
 
         {/* Slider */}
@@ -170,6 +211,7 @@ export default function OutputScreen() {
             maximumValue={1}
             value={sliderValue}
             onValueChange={setSliderValue}
+            disabled={!generatedReady}
             minimumTrackTintColor={COLORS.primaryDark}
             maximumTrackTintColor="#d0d0d0"
             thumbTintColor={COLORS.primaryDark}

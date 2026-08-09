@@ -46,7 +46,7 @@ import PlanCanvas, {
 } from "../../components/walkthrough/PlanCanvas";
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
-import { paletteForRequest } from "../../lib/colorPalettes";
+import { paletteForRequest, paletteForTone } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
@@ -1151,7 +1151,21 @@ export default function WalkthroughScreen() {
   }, [openings.length, pushToCloud, refreshLibrary, rooms.length]);
 
   const updateRoom = useCallback((index, key, value) => {
-    setRoomConfigs((current) => current.map((room, i) => (i === index ? { ...room, [key]: value } : room)));
+    setRoomConfigs((current) => current.map((room, i) => {
+      if (i !== index) return room;
+      const next = { ...room, [key]: value };
+      // Choosing "Kitchen" names the room Kitchen, unless the person has named it
+      // themselves. Every card opened holding "Room 3" — a label that says only
+      // where it is in the list — and typing the room's purpose a second time
+      // into the field directly under the chip row is work the app can do.
+      if (key === "roomType") {
+        const untouched = !room.name
+          || room.name === room.roomType
+          || room.name === `Room ${index + 1}`;
+        if (untouched) next.name = value;
+      }
+      return next;
+    }));
     if (key === "roomType") setFurnitureEdits({});
   }, []);
 
@@ -1849,35 +1863,22 @@ export default function WalkthroughScreen() {
                     </View>
                   )}
 
+                  {/* Purpose first, then the name, then the size.
+                      The card used to open with a name field the person had
+                      nothing to base an answer on yet, with the delete button
+                      sitting immediately beside it — a destructive control one
+                      thumb-width from the field they were typing in. Choosing
+                      what a room is *for* is the decision the renderer needs and
+                      the one that makes the name obvious, so it leads; delete
+                      moved out of the typing hand's way into the card's header
+                      row, beside the room's number. */}
                   {roomConfigs.map((room, index) => (
                     <View key={`config-${index}`} style={styles.card}>
-                      {/* Which room this card is, independent of what it has
-                          been named. A card whose name field is still empty was
-                          otherwise unidentifiable in a list of five. */}
-                      <Text style={styles.roomIndexLabel}>
-                        {`Room ${index + 1} of ${roomConfigs.length}`}
-                      </Text>
-                      <View style={styles.cardHead}>
+                      <View style={styles.roomCardHead}>
                         <View style={[styles.roomSwatch, { backgroundColor: ROOM_TINTS[index % ROOM_TINTS.length].stroke }]} />
-                        {/* Naming the room is the whole job of this step, and the
-                            field was styled as plain text — nothing said it could
-                            be typed into. It now reads as a field, with the
-                            pencil that the header title already uses to mean
-                            "editable". */}
-                        <View style={styles.roomNameField}>
-                          <TextInput
-                            style={styles.roomName}
-                            value={room.name}
-                            accessibilityLabel={`Name of room ${index + 1}`}
-                            onChangeText={(value) => updateRoom(index, "name", value)}
-                            placeholder={`Room ${index + 1}`}
-                            placeholderTextColor={COLORS.placeholderText}
-                            maxLength={40}
-                          />
-                          <Ionicons name="create-outline" size={14} color={COLORS.textTertiary} />
-                        </View>
-                        {/* The area used to be printed here as well as on the
-                            size row two lines below it. */}
+                        <Text style={styles.roomIndexLabel}>
+                          {`Room ${index + 1} of ${roomConfigs.length}`}
+                        </Text>
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={`Delete ${room.name || `room ${index + 1}`}`}
@@ -1889,6 +1890,23 @@ export default function WalkthroughScreen() {
                           <Ionicons name="trash-outline" size={17} color={COLORS.danger} />
                         </Pressable>
                       </View>
+
+                      <ChipRow label="What is this room for?" options={ROOM_TYPES} value={room.roomType} onChange={(v) => updateRoom(index, "roomType", v)} />
+
+                      <Text style={[styles.fieldLabel, { marginTop: SPACING.base }]}>Name</Text>
+                      <View style={styles.roomNameField}>
+                        <TextInput
+                          style={styles.roomName}
+                          value={room.name}
+                          accessibilityLabel={`Name of room ${index + 1}`}
+                          onChangeText={(value) => updateRoom(index, "name", value)}
+                          placeholder={room.roomType || `Room ${index + 1}`}
+                          placeholderTextColor={COLORS.placeholderText}
+                          maxLength={40}
+                        />
+                        <Ionicons name="create-outline" size={14} color={COLORS.textTertiary} />
+                      </View>
+
                       <RoomSizeRow
                         index={index}
                         label="Exact size"
@@ -1899,10 +1917,6 @@ export default function WalkthroughScreen() {
                         onFocus={() => setSelectedRoom(index)}
                         onResize={resizeRoom}
                       />
-                      {/* Name, size, purpose. The style chip that used to sit
-                          under this asked the same twelve-option question once
-                          per room; it is now asked once, on the Style step. */}
-                      <ChipRow label="Room type" options={ROOM_TYPES} value={room.roomType} onChange={(v) => updateRoom(index, "roomType", v)} />
                     </View>
                   ))}
                 </>
@@ -1928,6 +1942,11 @@ export default function WalkthroughScreen() {
                       <ChipRow label="Design style" options={WALKTHROUGH_STYLES} value={settings.style} onChange={(v) => updateSetting("style", v)} />
                       <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
                       <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
+                      {/* The three colours the mood actually resolves to. The
+                          chip row named a mood and showed none of it, so the one
+                          choice on this step that is entirely about colour was
+                          the only one with nothing to look at. */}
+                      <PalettePreview tone={settings.colorMood} />
                     </View>
 
                     <View style={styles.card}>
@@ -2256,11 +2275,7 @@ function WalkthroughStage({
         </View>
       )}
 
-      {showingAi && (
-        <View style={styles.aiLayer}>
-          <Image source={{ uri: currentRender.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        </View>
-      )}
+      {showingAi && <AiRenderLayer render={currentRender} />}
 
       {rendering && (
         <View style={styles.renderOverlay}>
@@ -2301,45 +2316,25 @@ function WalkthroughStage({
       >
         {/* ── Top cluster ────────────────────────────────────────────────── */}
         <View style={styles.overlayTop} pointerEvents="box-none">
-          <View style={styles.viewControls} pointerEvents="box-none">
-            {/* The Explore step has no footer, so it is the one step with no
-                Back beside its Continue. A back chevron in the top-left corner
-                is the one icon that needs no label — and the control it used to
-                be confused with, the light toggle, now carries one. */}
+          {/* Navigation on one row, then the view controls on their own.
+              Back, the view switcher and the light toggle were three unrelated
+              jobs sharing one line, so the switcher — the control most used on
+              this step — was squeezed between them into whatever width they
+              left. Back now sits in the top-left corner where a back control
+              belongs, the light toggle takes the opposite corner, and the
+              switcher gets the full width of the row below. */}
+          <View style={styles.viewerNav} pointerEvents="box-none">
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Back to Style"
-              android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
-              style={({ pressed }) => [styles.roundButton, pressed && styles.pressedSurface]}
+              android_ripple={{ color: "rgba(30,36,31,0.16)" }}
+              style={({ pressed }) => [styles.viewerBack, pressed && styles.pressedSurface]}
               onPress={onBackToDesign}
             >
-              <Ionicons name="chevron-back" size={20} color={COLORS.textPrimary} />
+              <Ionicons name="chevron-back" size={18} color={COLORS.textPrimary} />
+              <Text style={styles.viewerBackText}>Style</Text>
             </Pressable>
-            <View style={styles.segmented} accessibilityRole="tablist">
-              {VIEW_MODES.map((item) => {
-                const active = viewMode === item.key;
-                return (
-                  <Pressable
-                    key={item.key}
-                    accessibilityRole="tab"
-                    accessibilityLabel={`${item.label} view`}
-                    accessibilityState={{ selected: active }}
-                    android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
-                    style={({ pressed }) => [
-                      styles.segment,
-                      active && styles.segmentActive,
-                      pressed && !active && styles.segmentPressed,
-                    ]}
-                    onPress={() => onChangeMode(item.key)}
-                  >
-                    <Ionicons name={item.icon} size={16} color={active ? COLORS.white : COLORS.textSecondary} />
-                    <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+
             {/* The time of day, named.
                 This was a bare icon in a circle, and a circle holding a moon is
                 unreadable: it means "you are in night" or "press for night"
@@ -2370,6 +2365,34 @@ function WalkthroughStage({
                 {night ? "Night" : "Day"}
               </Text>
             </Pressable>
+          </View>
+
+          <View style={styles.viewControls} pointerEvents="box-none">
+            <View style={styles.segmented} accessibilityRole="tablist">
+              {VIEW_MODES.map((item) => {
+                const active = viewMode === item.key;
+                return (
+                  <Pressable
+                    key={item.key}
+                    accessibilityRole="tab"
+                    accessibilityLabel={`${item.label} view`}
+                    accessibilityState={{ selected: active }}
+                    android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
+                    style={({ pressed }) => [
+                      styles.segment,
+                      active && styles.segmentActive,
+                      pressed && !active && styles.segmentPressed,
+                    ]}
+                    onPress={() => onChangeMode(item.key)}
+                  >
+                    <Ionicons name={item.icon} size={16} color={active ? COLORS.white : COLORS.textSecondary} />
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           {showRooms && (
@@ -2490,88 +2513,6 @@ function WalkthroughStage({
             </View>
           )}
 
-          {panel === "ai" && !showingAi && (
-            <View style={styles.panelCard}>
-              <View style={styles.panelHead}>
-                <View style={[styles.panelIcon, styles.panelIconAccent]}>
-                  <Ionicons name="sparkles" size={18} color={COLORS.accentStrong} />
-                </View>
-                <View style={styles.panelHeadCopy}>
-                  <Text style={styles.panelEyebrow}>Photoreal</Text>
-                  <Text style={styles.panelTitle}>AI render</Text>
-                </View>
-                <Pressable
-                  accessibilityLabel="Close"
-                  style={styles.panelClose}
-                  onPress={() => onSetPanel(null)}
-                  hitSlop={LAYOUT.hitSlop}
-                >
-                  <Ionicons name="close" size={18} color={COLORS.textSecondary} />
-                </Pressable>
-              </View>
-
-              {viewMode !== "plan" && (
-                <>
-                  <Text style={styles.fieldLabel}>Camera</Text>
-                  <View style={styles.toggleGroup}>
-                    <Pressable
-                      accessibilityState={{ selected: cameraSource === "designer" }}
-                      style={[styles.toggleOption, cameraSource === "designer" && styles.toggleOptionActive]}
-                      onPress={() => onSetCameraSource("designer")}
-                    >
-                      <Text style={[styles.toggleText, cameraSource === "designer" && styles.toggleTextActive]}>
-                        Designer
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityState={{ selected: cameraSource === "current" }}
-                      style={[styles.toggleOption, cameraSource === "current" && styles.toggleOptionActive]}
-                      onPress={() => onSetCameraSource("current")}
-                    >
-                      <Text style={[styles.toggleText, cameraSource === "current" && styles.toggleTextActive]}>
-                        My view
-                      </Text>
-                    </Pressable>
-                  </View>
-                </>
-              )}
-
-              {/* One line, and only the line that answers "what will I get?".
-                  This used to report how many of the furniture pieces the camera
-                  had framed and how many doors and windows were preserved —
-                  numbers that describe the renderer's bookkeeping, not the
-                  picture the user is about to be handed. */}
-              <Text style={styles.panelNote}>
-                {viewMode === "plan"
-                  ? "The plan is rendered from above with the roof open."
-                  : cameraSource === "designer"
-                    ? "The camera moves to the corner that shows the most of this room."
-                    : "Rendered from exactly the view you are looking at."}
-              </Text>
-
-              <View style={styles.panelActions}>
-                {!!currentRender && (
-                  <Pressable style={styles.panelSecondary} onPress={() => onSetOutputMode("ai")}>
-                    <Ionicons name="image-outline" size={17} color={COLORS.primaryDark} />
-                    <Text style={styles.panelSecondaryText}>Last result</Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  style={[styles.panelPrimary, rendering && styles.panelPrimaryBusy]}
-                  disabled={rendering}
-                  onPress={onRender}
-                >
-                  {rendering
-                    ? <ActivityIndicator size="small" color={COLORS.white} />
-                    : <Ionicons name="sparkles" size={17} color={COLORS.white} />}
-                  <Text style={styles.panelPrimaryText}>
-                    {rendering ? "Generating…" : viewMode === "plan" ? "Render bird view" : "Render this view"}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-
           {showStick && <MoveStick onChange={drive} />}
 
           {!showingAi && (
@@ -2626,7 +2567,211 @@ function WalkthroughStage({
         </View>
       </View>
       )}
+
+      {/* The render brief is a sheet, not a card floating over the room.
+          It used to be a panel wedged into the bottom overlay between the
+          movement stick and the dock, so the two decisions it asks for competed
+          with the walking controls, and its "close" was an 18pt × in the corner
+          of a translucent stack. A sheet dims what is behind it, can be
+          dismissed by tapping away, and gives its primary action the full width
+          of the screen — which is what a paid, one-tap-costs-a-credit action
+          should look like. */}
+      <RenderSheet
+        visible={panel === "ai" && !showingAi}
+        viewMode={viewMode}
+        cameraSource={cameraSource}
+        hasRender={!!currentRender}
+        rendering={rendering}
+        onClose={() => onSetPanel(null)}
+        onSetCameraSource={onSetCameraSource}
+        onShowLast={() => {
+          onSetPanel(null);
+          onSetOutputMode("ai");
+        }}
+        onRender={onRender}
+      />
     </View>
+  );
+}
+
+/**
+ * The finished render, over the 3D view.
+ *
+ * Two bugs lived in the one line this replaces. The layer was a near-black slab
+ * with an `<Image>` on it, so between the render finishing and the file arriving
+ * from Cloudinary the user was shown a black screen — the render appearing to
+ * have produced nothing. And because the element was reused across renders,
+ * React kept the decoded bitmap of the *previous* one until the new file
+ * decoded, so generating a second view showed the first one again for a moment
+ * and it was impossible to tell a stale frame from a finished one.
+ *
+ * Keying on the URL forces a fresh element per render, so nothing stale can be
+ * shown; the load is tracked, so the wait says it is a wait; and the backdrop is
+ * the app's own sunken surface rather than black.
+ */
+function AiRenderLayer({ render }) {
+  const [state, setState] = useState("loading");
+
+  // A new render is a new wait, even though this component did not unmount.
+  useEffect(() => setState("loading"), [render.image]);
+
+  return (
+    <View style={styles.aiLayer}>
+      <Image
+        key={render.image}
+        source={{ uri: render.image }}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+        onLoad={() => setState("ready")}
+        onError={() => setState("error")}
+      />
+      {state !== "ready" && (
+        <View style={styles.aiLayerState}>
+          {state === "loading" ? (
+            <>
+              <ActivityIndicator size="large" color={COLORS.primaryDark} />
+              <Text style={styles.aiLayerStateText}>Loading your render…</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="cloud-offline-outline" size={26} color={COLORS.textTertiary} />
+              <Text style={styles.aiLayerStateText}>
+                This render is saved to your collection, but it could not be loaded here.
+              </Text>
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * "Render with AI" — the one action in the walkthrough that spends a credit.
+ *
+ * Two questions and one button. The camera choice is a segmented control with
+ * both options visible and a sentence underneath saying what the chosen one
+ * does, rather than a note the reader has to map back onto a toggle.
+ */
+function RenderSheet({
+  visible,
+  viewMode,
+  cameraSource,
+  hasRender,
+  rendering,
+  onClose,
+  onSetCameraSource,
+  onShowLast,
+  onRender,
+}) {
+  const bird = viewMode === "plan";
+  return (
+    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={() => {}}>
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHead}>
+            <View style={[styles.sheetIcon, styles.sheetIconAccent]}>
+              <Ionicons name="sparkles" size={18} color={COLORS.accentStrong} />
+            </View>
+            <View style={styles.sheetHeadCopy}>
+              <Text style={styles.sheetTitle}>Render with AI</Text>
+              <Text style={styles.sheetSubtitle}>
+                {bird ? "The whole floor, from above" : "This room, photorealistic"}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              hitSlop={LAYOUT.hitSlop}
+              android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+              style={({ pressed }) => [styles.sheetCloseIcon, pressed && styles.pressedSurface]}
+              onPress={onClose}
+            >
+              <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+            </Pressable>
+          </View>
+
+          {!bird && (
+            <View style={styles.sheetField}>
+              <Text style={styles.fieldLabel}>Camera</Text>
+              <View style={styles.toggleGroup} accessibilityRole="tablist">
+                {[
+                  { key: "designer", label: "Designer" },
+                  { key: "current", label: "My view" },
+                ].map((option) => {
+                  const active = cameraSource === option.key;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                      android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                      style={({ pressed }) => [
+                        styles.toggleOption,
+                        active && styles.toggleOptionActive,
+                        pressed && !active && styles.pressedSurface,
+                      ]}
+                      onPress={() => onSetCameraSource(option.key)}
+                    >
+                      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* One line, and only the line that answers "what will I get?". This
+              used to report how many furniture pieces the camera had framed and
+              how many doors and windows were preserved — the renderer's
+              bookkeeping, not the picture about to be handed over. */}
+          <View style={styles.sheetNoteRow}>
+            <Ionicons name="information-circle-outline" size={15} color={COLORS.textTertiary} />
+            <Text style={styles.sheetNoteText}>
+              {bird
+                ? "Rendered from above with the roof open."
+                : cameraSource === "designer"
+                  ? "The camera moves to the corner that shows the most of this room."
+                  : "Rendered from exactly the view you are looking at."}
+            </Text>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ busy: rendering, disabled: rendering }}
+            android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+            style={({ pressed }) => [
+              styles.sheetPrimary,
+              rendering && styles.sheetPrimaryBusy,
+              pressed && !rendering && styles.pressedSurface,
+            ]}
+            disabled={rendering}
+            onPress={onRender}
+          >
+            {rendering
+              ? <ActivityIndicator size="small" color={COLORS.white} />
+              : <Ionicons name="sparkles" size={18} color={COLORS.white} />}
+            <Text style={styles.sheetPrimaryText}>
+              {rendering ? "Generating…" : bird ? "Render the floor" : "Render this room"}
+            </Text>
+          </Pressable>
+
+          {hasRender && (
+            <Pressable
+              accessibilityRole="button"
+              android_ripple={{ color: "rgba(51,96,74,0.12)" }}
+              style={({ pressed }) => [styles.sheetSecondary, pressed && styles.pressedSurface]}
+              onPress={onShowLast}
+            >
+              <Ionicons name="image-outline" size={17} color={COLORS.primaryDark} />
+              <Text style={styles.sheetSecondaryText}>Show the last render</Text>
+            </Pressable>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -3538,7 +3683,7 @@ function PlanActionSheet({ project, onClose, onRename, onDelete }) {
   return (
     <Modal transparent visible={!!project} animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose}>
-        <Pressable style={styles.actionSheet} onPress={() => {}}>
+        <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.sheetHandle} />
           <Text style={styles.actionSheetTitle} numberOfLines={1}>{project?.title || "This plan"}</Text>
 
@@ -3885,6 +4030,31 @@ function ChipRow({ label, options, value, onChange, formatOption = (option) => o
 }
 
 /**
+ * The 60/30/10 scheme behind the chosen colour mood.
+ *
+ * Same derivation the Interior path shows on its tone picker, so a mood means
+ * the same three colours wherever it is chosen.
+ */
+function PalettePreview({ tone }) {
+  const palette = useMemo(() => paletteForTone(tone), [tone]);
+  if (!palette) return null;
+  const swatches = [palette.dominant, palette.secondary, palette.accent];
+  return (
+    <View style={styles.palettePreview} accessibilityLabel={
+      `${tone}: ${swatches.map((swatch) => `${swatch.share} per cent ${swatch.name}`).join(", ")}`
+    }>
+      {swatches.map((swatch) => (
+        <View key={swatch.role} style={styles.paletteSwatchCell}>
+          <View style={[styles.paletteSwatch, { backgroundColor: swatch.hex }]} />
+          <Text style={styles.paletteShare}>{swatch.share}%</Text>
+          <Text style={styles.paletteName} numberOfLines={1}>{swatch.name}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
  * A step that cannot be done yet.
  *
  * It used to be an icon and a sentence telling the person to go back — an
@@ -3917,27 +4087,68 @@ function SnapshotModal({ snapshot, kind, busy, onClose, onShare, onSaveGallery, 
   const isRender = kind === "ai";
   return (
     <Modal transparent visible={!!snapshot} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.sheetBackdrop}>
-        <View style={styles.sheet}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>{isRender ? "Your AI render" : "Save this view"}</Text>
-          {snapshot ? (
-            <View style={styles.sheetPreview}>
-              <Image source={{ uri: snapshot }} style={styles.sheetImage} resizeMode="cover" />
+
+          <View style={styles.sheetHead}>
+            <View style={[styles.sheetIcon, isRender && styles.sheetIconAccent]}>
+              <Ionicons
+                name={isRender ? "sparkles" : "camera-outline"}
+                size={18}
+                color={isRender ? COLORS.accentStrong : COLORS.primaryDark}
+              />
             </View>
-          ) : null}
-          {isRender && <Text style={styles.sheetNote}>Already saved to your collection.</Text>}
+            <View style={styles.sheetHeadCopy}>
+              <Text style={styles.sheetTitle}>{isRender ? "Your AI render" : "Save this view"}</Text>
+              {isRender && <Text style={styles.sheetSubtitle}>Already in your collection</Text>}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              hitSlop={LAYOUT.hitSlop}
+              android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+              style={({ pressed }) => [styles.sheetCloseIcon, pressed && styles.pressedSurface]}
+              onPress={onClose}
+            >
+              <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+            </Pressable>
+          </View>
+
+          {/* The preview is the point of the sheet, so it waits for the file
+              rather than showing an empty grey box that looks like a failure. */}
+          {!!snapshot && <SheetPreview uri={snapshot} />}
+
           <View style={styles.sheetActions}>
             {!isRender && <SheetAction icon="albums-outline" label="Collection" onPress={onSaveCollection} loading={busy === "save"} />}
             <SheetAction icon="download-outline" label="Gallery" onPress={onSaveGallery} />
             <SheetAction icon="share-social-outline" label="Share" onPress={onShare} />
           </View>
-          <Pressable style={styles.sheetClose} onPress={onClose}>
-            <Text style={styles.sheetCloseText}>Close</Text>
-          </Pressable>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
+  );
+}
+
+/** The captured frame or finished render, with its own loading state. */
+function SheetPreview({ uri }) {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => setLoaded(false), [uri]);
+  return (
+    <View style={styles.sheetPreview}>
+      <Image
+        key={uri}
+        source={{ uri }}
+        style={styles.sheetImage}
+        resizeMode="cover"
+        onLoad={() => setLoaded(true)}
+      />
+      {!loaded && (
+        <View style={styles.sheetPreviewState}>
+          <ActivityIndicator color={COLORS.primaryDark} />
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -4101,11 +4312,6 @@ const styles = StyleSheet.create({
   },
 
   // ── "More" sheet for one plan ────────────────────────────────────────────
-  actionSheet: {
-    backgroundColor: COLORS.surface,
-    borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
-    paddingHorizontal: SPACING.lg, paddingTop: SPACING.base, paddingBottom: SPACING.xl,
-  },
   actionSheetTitle: {
     ...TYPE.caption, color: COLORS.textTertiary,
     textAlign: "center", marginBottom: SPACING.md,
@@ -4113,7 +4319,8 @@ const styles = StyleSheet.create({
   actionSheetRow: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
     height: ms(56), paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceAlt,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
     marginBottom: SPACING.sm,
   },
   actionSheetRowText: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
@@ -4255,8 +4462,25 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
   },
   cardSectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
-  roomIndexLabel: { ...TYPE.overline, color: COLORS.textTertiary, marginBottom: SPACING.sm },
-  cardHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.xs },
+
+  palettePreview: {
+    flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md,
+    padding: SPACING.md, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surfaceAlt, borderWidth: 1, borderColor: COLORS.border,
+  },
+  paletteSwatchCell: { flex: 1, minWidth: 0, alignItems: "center", gap: 4 },
+  paletteSwatch: {
+    width: "100%", height: ms(34), borderRadius: RADIUS.xs,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
+  },
+  paletteShare: { ...TYPE.caption, fontSize: 11, color: COLORS.textPrimary },
+  paletteName: { ...TYPE.caption, fontSize: 10, color: COLORS.textTertiary },
+  roomIndexLabel: { flex: 1, minWidth: 0, ...TYPE.overline, color: COLORS.textTertiary },
+  roomCardHead: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    marginBottom: SPACING.md, paddingBottom: SPACING.md,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+  },
   roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
   roomNameField: {
     flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
@@ -4558,6 +4782,14 @@ const styles = StyleSheet.create({
   // One row, one height. Back, the view switcher and the light toggle were 48,
   // 48 and 40 tall with three different shadow weights, so a row of three
   // related controls read as three unrelated ones.
+  viewerNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  viewerBack: {
+    flexDirection: "row", alignItems: "center", gap: 2,
+    height: ms(46), paddingLeft: SPACING.sm, paddingRight: SPACING.base,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
+  },
+  viewerBackText: { ...TYPE.caption, color: COLORS.textPrimary },
   viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   lightToggle: {
     flexDirection: "row", alignItems: "center", gap: SPACING.xs + 2,
@@ -4586,12 +4818,6 @@ const styles = StyleSheet.create({
   segmentPressed: { backgroundColor: COLORS.surfaceSunken },
   segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.white },
-  roundButton: {
-    width: ms(46), height: ms(46), borderRadius: RADIUS.pill,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
-  },
 
   // Negative margins let the strip bleed to the screen edges so a long room
   // list scrolls off the side instead of stopping inside the gutter. The
@@ -4629,7 +4855,6 @@ const styles = StyleSheet.create({
     width: ms(42), height: ms(42), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
-  panelIconAccent: { backgroundColor: COLORS.accentTint },
   panelHeadCopy: { flex: 1, minWidth: 0 },
   panelEyebrow: { ...TYPE.overline, color: COLORS.textTertiary },
   panelTitle: { ...TYPE.h3, color: COLORS.textPrimary, textTransform: "capitalize" },
@@ -4639,7 +4864,6 @@ const styles = StyleSheet.create({
   },
   panelMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: -SPACING.sm },
   panelBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: -SPACING.sm },
-  panelNote: { ...TYPE.small, color: COLORS.textTertiary },
 
   editorRow: { flexDirection: "row", gap: SPACING.md },
   editorGroup: { gap: SPACING.xs },
@@ -4666,24 +4890,17 @@ const styles = StyleSheet.create({
   toggleText: { ...TYPE.caption, color: COLORS.textSecondary },
   toggleTextActive: { color: COLORS.white },
 
-  panelActions: { flexDirection: "row", gap: SPACING.sm },
-  // Both panel actions flex, so when the second one appears the pair splits the
-  // row evenly instead of one of them being sized by its own label.
-  panelSecondary: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.xs,
-    height: ms(48), paddingHorizontal: SPACING.base,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint,
-  },
-  panelSecondaryText: { ...TYPE.caption, color: COLORS.primaryDark },
-  panelPrimary: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(48), borderRadius: RADIUS.pill, backgroundColor: COLORS.accent,
-  },
-  panelPrimaryBusy: { opacity: 0.75 },
-  panelPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
-
   // ── AI result ────────────────────────────────────────────────────────────
-  aiLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.surfaceInverse },
+  // The app's sunken surface, not black. A near-black slab under an image that
+  // has not arrived yet reads as a render that produced nothing.
+  aiLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.surfaceAlt },
+  aiLayerState: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center", justifyContent: "center",
+    gap: SPACING.md, paddingHorizontal: SPACING.xxl,
+    backgroundColor: COLORS.surfaceAlt,
+  },
+  aiLayerStateText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center" },
   aiResultBar: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
     padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.overlay,
@@ -4745,28 +4962,77 @@ const styles = StyleSheet.create({
   },
   dockIconBusy: { backgroundColor: COLORS.surfaceSunken },
 
-  // ── Snapshot sheet ───────────────────────────────────────────────────────
+  // ── Sheets ───────────────────────────────────────────────────────────────
+  // One shape for everything that slides up in this flow — the render brief, the
+  // snapshot actions, a plan's rename/delete. They used to be three different
+  // objects with three different paddings, three title sizes and three ideas of
+  // what a close control looks like.
   sheetBackdrop: { flex: 1, backgroundColor: COLORS.scrim, justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.background,
     borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
-    padding: SPACING.xl, paddingBottom: SPACING.xxl,
+    paddingHorizontal: SPACING.lg, paddingTop: SPACING.base, paddingBottom: SPACING.xxl,
   },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.base },
-  sheetTitle: { ...TYPE.h2, color: COLORS.textPrimary, marginBottom: SPACING.base },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.lg },
+  sheetHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.lg },
+  sheetIcon: {
+    width: ms(44), height: ms(44), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+  },
+  sheetIconAccent: { backgroundColor: COLORS.accentTint },
+  sheetHeadCopy: { flex: 1, minWidth: 0 },
+  sheetTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  sheetSubtitle: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
+  sheetCloseIcon: {
+    width: ms(36), height: ms(36), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  },
+  sheetField: { marginBottom: SPACING.base },
+  sheetNoteRow: {
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
+    marginBottom: SPACING.lg, paddingHorizontal: SPACING.xs,
+  },
+  sheetNoteText: { flex: 1, ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
+  // Full width, 52pt, and the only filled thing on the sheet: this is the tap
+  // that spends a design credit.
+  sheetPrimary: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(52), borderRadius: RADIUS.md, backgroundColor: COLORS.accent, ...SHADOW.sm,
+  },
+  sheetPrimaryBusy: { backgroundColor: COLORS.disabled },
+  sheetPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  sheetSecondary: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(48), marginTop: SPACING.sm,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
+  },
+  sheetSecondaryText: { ...TYPE.caption, color: COLORS.primaryDark },
   sheetPreview: { borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surfaceSunken },
+  sheetPreviewState: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
   sheetImage: { width: "100%", height: ms(190) },
-  sheetNote: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: SPACING.sm },
-  sheetActions: { flexDirection: "row", gap: SPACING.md, marginTop: SPACING.lg },
-  sheetAction: { flex: 1, alignItems: "center", gap: 6, paddingVertical: SPACING.base, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint },
+  sheetActions: { flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.lg },
+  sheetAction: {
+    flex: 1, alignItems: "center", gap: 6, paddingVertical: SPACING.md,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
+  },
   sheetActionText: { ...TYPE.caption, color: COLORS.primaryDark },
-  sheetClose: { alignItems: "center", paddingVertical: SPACING.base, marginTop: SPACING.sm },
+  sheetClose: { alignItems: "center", justifyContent: "center", height: ms(48), marginTop: SPACING.md },
   sheetCloseText: { ...TYPE.bodyStrong, color: COLORS.textSecondary },
 
-  noticeBackdrop: { flex: 1, backgroundColor: COLORS.scrim, alignItems: "center", justifyContent: "center", padding: SPACING.xl },
-  noticeCard: { width: "100%", maxWidth: LAYOUT.maxContentWidth, backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.xl, ...SHADOW.lg },
-  noticeText: { ...TYPE.body, color: COLORS.textPrimary, textAlign: "center" },
-  noticeButton: { marginTop: SPACING.lg, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
+  // The one-line message. It was a white card with body text and a pill button —
+  // a fourth dialog shape in a flow that already had three. It is the confirm
+  // dialog with one button.
+  noticeBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: SPACING.xl },
+  noticeCard: {
+    width: "86%", maxWidth: LAYOUT.maxContentWidth,
+    backgroundColor: COLORS.background, borderRadius: RADIUS.xl,
+    padding: SPACING.lg, ...SHADOW.lg,
+  },
+  noticeText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center", lineHeight: 20 },
+  noticeButton: {
+    marginTop: SPACING.lg, height: ms(44), alignItems: "center", justifyContent: "center",
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+  },
   noticeButtonText: { ...TYPE.bodyStrong, color: COLORS.white, textAlign: "center" },
 
   // Equal cells under the canvas — same grid logic as the tool palette.

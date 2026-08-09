@@ -44,16 +44,33 @@ Apache-2.0 and not gated.
 cd modal && modal deploy app.py
 ```
 
-This publishes three URLs:
+This publishes four URLs:
 
 ```
 POST  https://<workspace>--livinai-interior-generate.modal.run             <- new, preferred
+GET   https://<workspace>--livinai-interior-result.modal.run               <- new, polled
 GET   https://<workspace>--livinai-interior-health.modal.run               <- new
 POST  https://<workspace>--livinai-interior-interiorai-generate.modal.run  <- legacy, still works
 ```
 
 Every one of these runs on a CPU container. The two `generate` endpoints route;
 they never hold a GPU while an engine works.
+
+**`generate` no longer returns the image.** It spawns the engine and answers with
+a `callId`; the backend polls `result` until the job completes, exactly as it
+polls RunPod. This is the fix for the double bill: Modal answers any web request
+still running after 150 seconds with a 303 redirect, and a cold FLUX.2 [klein]
+container plus inference routinely passes that — so the backend's blocking call
+timed out on a job that was still running, gave up, and paid RunPod to generate
+the same design a second time. That is what put 23 GPU calls behind 9 router
+calls in the dashboard.
+
+`result` is derived from `MODAL_ENDPOINT_URL` by name, so there is nothing extra
+to configure; set `MODAL_RESULT_URL` only if you are pointing the backend at
+something that is not a Modal deployment.
+
+Deploy order does not matter. A backend that receives an image inline (an older
+Modal) uses it as-is, and a `callId` from a newer one is polled.
 
 ### 1c. Point the backend at the new router
 
@@ -91,6 +108,11 @@ failed, which meant a single request starting two GPU containers — two cold
 starts, two GPU bills — to answer with an engine the prompt was not written for.
 A failure here is reported to the backend instead, and the backend falls back to
 RunPod (§4).
+
+If you want to check that a request really costs one GPU call, compare the call
+counts on the dashboard: `generate` + `interiorai_generate` should be about
+`GenKlein.run` + `InteriorAI.run`, and `result` should be much larger than both
+(it is the poll, and it is CPU).
 
 ---
 
