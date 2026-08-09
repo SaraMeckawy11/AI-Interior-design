@@ -279,7 +279,7 @@ export default function Upgrade() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: COLORS.background, paddingTop: insets.top + 12 }}>
+      <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
         <View style={styles.container}>{backButton}</View>
         <View style={styles.centered}>
           <ActivityIndicator color={COLORS.primaryDark} size="large" />
@@ -289,7 +289,7 @@ export default function Upgrade() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.background, paddingTop: insets.top + 12 }}>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {backButton}
 
@@ -302,20 +302,15 @@ export default function Upgrade() {
 
         {isSubscribed ? (
           <View style={styles.activeCard}>
-            <Ionicons name="checkmark-circle" size={24} color={COLORS.primaryDark} />
-            <View style={styles.activeCopy}>
-              <Text style={styles.activeTitle}>Pro is active on this account</Text>
-              <Text style={styles.activeText}>
-                Designs, walkthroughs and an ad-free app, all unlimited.
-              </Text>
-            </View>
+            <Ionicons name="checkmark-circle" size={18} color={COLORS.primaryDark} />
+            <Text style={styles.activeText}>Pro is active on this account.</Text>
           </View>
         ) : null}
 
         {/* ── Coins ──────────────────────────────────────────────────────── */}
-        <View style={styles.coinContainer}>
+        <View style={styles.coinCard}>
           <View style={styles.coinRow}>
-            <Ionicons name="ellipse" size={20} color={COLORS.primaryDark} />
+            <Ionicons name="ellipse" size={16} color={COLORS.primaryDark} />
             <Text style={styles.coinValue}>{coins} Coins</Text>
           </View>
           <Text style={styles.coinSubtitle}>
@@ -324,27 +319,25 @@ export default function Upgrade() {
 
           <View style={styles.coinPrices}>
             <View style={styles.coinPriceRow}>
-              <Ionicons name="color-palette-outline" size={16} color={COLORS.textSecondary} />
+              <Ionicons name="color-palette-outline" size={14} color={COLORS.textTertiary} />
               <Text style={styles.coinPriceLabel}>Interior or exterior design</Text>
               <Text style={styles.coinPriceValue}>{coinLabel(COIN_COST.design)}</Text>
             </View>
             <View style={styles.coinPriceRow}>
-              <Ionicons name="cube-outline" size={16} color={COLORS.textSecondary} />
+              <Ionicons name="cube-outline" size={14} color={COLORS.textTertiary} />
               <Text style={styles.coinPriceLabel}>3D walkthrough render</Text>
               <Text style={styles.coinPriceValue}>{coinLabel(COIN_COST.walkthrough)}</Text>
             </View>
           </View>
 
+          {/* Quiet, because it is the free option. A filled pill here competed
+              with the two buttons that actually take money. */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Watch an ad to earn ${coinLabel(AD_COIN_REWARD)}`}
             accessibilityState={{ busy: adStatus === 'showing', disabled: adStatus === 'showing' }}
-            android_ripple={{ color: 'rgba(255,255,255,0.24)' }}
-            style={({ pressed }) => [
-              styles.watchAdButton,
-              adStatus === 'showing' && styles.watchAdButtonBusy,
-              pressed && styles.pressed,
-            ]}
+            android_ripple={{ color: 'rgba(30,36,31,0.08)' }}
+            style={({ pressed }) => [styles.watchAdButton, pressed && styles.pressed]}
             // Only while an ad is on screen. Gating on "not idle" left this
             // disabled and spinning from the moment the screen opened, because
             // the hook reports `loading` for the whole background warm-up.
@@ -355,7 +348,7 @@ export default function Upgrade() {
               <ActivityIndicator size="small" color={COLORS.textTertiary} />
             ) : (
               <>
-                <Ionicons name="play-circle-outline" size={18} color={COLORS.white} />
+                <Ionicons name="play-circle-outline" size={15} color={COLORS.textPrimary} />
                 <Text style={styles.watchAdButtonText}>Watch Ad</Text>
               </>
             )}
@@ -371,7 +364,7 @@ export default function Upgrade() {
           {['Ad-free experience', 'Unlimited design renders', 'Unlimited 3D walkthroughs'].map(
             (feature) => (
               <View key={feature} style={styles.featureItem}>
-                <Ionicons name="checkmark-circle-outline" size={20} color={COLORS.primaryDark} />
+                <Ionicons name="checkmark" size={15} color={COLORS.primaryDark} />
                 <Text style={styles.featureText}>{feature}</Text>
               </View>
             ),
@@ -379,8 +372,8 @@ export default function Upgrade() {
         </View>
 
         {/* ── Plans ──────────────────────────────────────────────────────── */}
-        <Text style={styles.planLabel}>
-          {isSubscribed ? 'Your plan options' : 'Choose a plan:'}
+        <Text style={styles.sectionLabel}>
+          {isSubscribed ? 'Your plan options' : 'Choose a plan'}
         </Text>
 
         <View style={styles.planOptions}>
@@ -391,14 +384,16 @@ export default function Upgrade() {
             const body = (
               <>
                 {/* Reserved on both cards, filled on one, so the titles line
-                    up. This badge used to hang outside the card at
-                    top:-8/right:-8, where Android clipped it. */}
-                <View style={[styles.bestValueBadge, plan.badge && styles.bestValueBadgeOn]}>
+                    up — and the same band the coin packs use below, rather
+                    than a differently sized pill doing the same job. It used to
+                    hang outside the card at top:-8/right:-8, where Android
+                    clips it. */}
+                <View style={[styles.badge, plan.badge && styles.badgeOn]}>
                   {plan.badge ? (
-                    <Text style={styles.bestValueText} numberOfLines={1}>{plan.badge}</Text>
+                    <Text style={styles.badgeText} numberOfLines={1}>{plan.badge}</Text>
                   ) : null}
                 </View>
-                <View style={styles.planBody}>
+                <View style={styles.cardBody}>
                   {isSubscribed ? null : (
                     <View style={[styles.radio, selected && styles.radioOn]}>
                       {selected ? <View style={styles.radioDot} /> : null}
@@ -410,9 +405,9 @@ export default function Upgrade() {
                   {/* The saving from the price table. "Save 80%" used to be
                       printed here beside two prices that never supported it. */}
                   {plan.id === 'yearly' ? (
-                    <Text style={styles.planSavings}>Save {YEARLY_SAVING_PERCENT}%</Text>
+                    <Text style={styles.savings}>Save {YEARLY_SAVING_PERCENT}%</Text>
                   ) : (
-                    <View style={styles.planSavingsPlaceholder} />
+                    <View style={styles.savingsPlaceholder} />
                   )}
                 </View>
               </>
@@ -453,32 +448,25 @@ export default function Upgrade() {
           accessibilityState={{ busy: busy === 'plan', disabled: !!busy }}
           android_ripple={busy ? undefined : { color: 'rgba(255,255,255,0.20)' }}
           style={({ pressed }) => [
-            styles.upgradeButton,
-            !!busy && styles.upgradeButtonDisabled,
+            styles.primaryButton,
+            !!busy && styles.primaryButtonDisabled,
             pressed && !busy && styles.pressed,
           ]}
           disabled={!!busy}
           onPress={isSubscribed ? () => router.push('/profile/manageSubscription') : handleUpgrade}
         >
           {busy === 'plan' ? (
-            <ActivityIndicator color={COLORS.textTertiary} />
+            <ActivityIndicator size="small" color={COLORS.textTertiary} />
           ) : (
-            <>
-              <Ionicons
-                name={isSubscribed ? 'settings-outline' : 'sparkles'}
-                size={18}
-                color={busy ? COLORS.textTertiary : COLORS.white}
-              />
-              <Text style={[styles.upgradeButtonText, !!busy && styles.upgradeButtonTextDisabled]}>
-                {isSubscribed ? 'Manage Subscription' : 'Upgrade Now'}
-              </Text>
-            </>
+            <Text style={[styles.primaryButtonText, !!busy && styles.primaryButtonTextDisabled]}>
+              {isSubscribed ? 'Manage subscription' : 'Upgrade now'}
+            </Text>
           )}
         </Pressable>
 
         {/* ── Or buy coins outright ──────────────────────────────────────── */}
         <View style={styles.sectionGap}>
-          <Text style={styles.planLabel}>Or buy coins:</Text>
+          <Text style={styles.sectionLabel}>Or buy coins</Text>
         </View>
 
         <View style={styles.packRow}>
@@ -493,25 +481,25 @@ export default function Upgrade() {
                 accessibilityLabel={`${pack.coins} coins for ${priceFor(pack, pack.storePackage)}`}
                 android_ripple={{ color: 'rgba(30,36,31,0.06)' }}
                 style={({ pressed }) => [
-                  styles.pack,
-                  selected && styles.packSelected,
+                  styles.planCard,
+                  selected && styles.planCardSelected,
                   pressed && styles.pressed,
                 ]}
                 onPress={() => setSelectedPack(pack.id)}
               >
-                <View style={[styles.packBadge, pack.badge && styles.packBadgeOn]}>
+                <View style={[styles.badge, pack.badge && styles.badgeOn]}>
                   {pack.badge ? (
-                    <Text style={styles.packBadgeText} numberOfLines={1}>{pack.badge}</Text>
+                    <Text style={styles.badgeText} numberOfLines={1}>{pack.badge}</Text>
                   ) : null}
                 </View>
-                <View style={styles.packBody}>
+                <View style={styles.cardBody}>
                   <Text style={styles.packCoins}>{pack.coins}</Text>
                   <Text style={styles.packUnit}>coins</Text>
                   <Text style={styles.packPrice}>{priceFor(pack, pack.storePackage)}</Text>
                   {saving > 0 ? (
-                    <Text style={styles.packSaving}>Save {saving}%</Text>
+                    <Text style={styles.savings}>Save {saving}%</Text>
                   ) : (
-                    <View style={styles.packSavingPlaceholder} />
+                    <View style={styles.savingsPlaceholder} />
                   )}
                 </View>
               </Pressable>
@@ -523,15 +511,15 @@ export default function Upgrade() {
           accessibilityRole="button"
           accessibilityLabel="Buy the selected coin pack"
           accessibilityState={{ busy: busy === 'pack', disabled: !!busy }}
-          android_ripple={busy ? undefined : { color: 'rgba(51,96,74,0.12)' }}
-          style={({ pressed }) => [styles.buyCoinsButton, pressed && !busy && styles.pressed]}
+          android_ripple={busy ? undefined : { color: 'rgba(30,36,31,0.08)' }}
+          style={({ pressed }) => [styles.secondaryButton, pressed && !busy && styles.pressed]}
           disabled={!!busy}
           onPress={buyCoins}
         >
           {busy === 'pack' ? (
-            <ActivityIndicator color={COLORS.primaryDark} />
+            <ActivityIndicator size="small" color={COLORS.textPrimary} />
           ) : (
-            <Text style={styles.buyCoinsButtonText}>Buy {activePack?.coins} coins</Text>
+            <Text style={styles.secondaryButtonText}>Buy {activePack?.coins} coins</Text>
           )}
         </Pressable>
 

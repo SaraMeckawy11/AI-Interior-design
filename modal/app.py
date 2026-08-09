@@ -929,7 +929,17 @@ def _dispatch(body: dict):
     color_palette = body.get("color_palette") if isinstance(body.get("color_palette"), dict) else None
     custom_prompt = body.get("custom_prompt") or ""
 
-    is_guided = mode.lower() == "guided" and bool(rooms)
+    # Interior and exterior take one engine and only one: Gen-Klein, on the L40S.
+    #
+    # The guided branch below is for a traced floor plan, which needs ControlNet
+    # conditioning that Gen-Klein cannot do. It used to be reachable by any
+    # request that happened to carry `rooms` alongside `mode: "guided"`, so an
+    # interior or exterior design was one stray field away from being served by
+    # the SD 1.5 engine on a different GPU — a different picture, from a prompt
+    # that was not written for it. The two photo paths are now named explicitly
+    # and can never land there.
+    photo_mode = mode.lower() in ("interior", "exterior")
+    is_guided = (not photo_mode) and mode.lower() == "guided" and bool(rooms)
 
     try:
         if is_guided:
