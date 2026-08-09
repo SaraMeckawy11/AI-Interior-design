@@ -695,9 +695,12 @@ def build_sofa(P, w=2.2, d=0.95):
         ms.append(_bx(cw - 0.06, 0.16, 0.42, _shade(fab, 1.03),
                       cx=sx * (cw / 2 + 0.02), cy=-(d / 2 - 0.19),
                       z=lift + 0.40))                              # back cushions
-        ms.append(_bx(0.42, 0.15, 0.38, P["cushion"],
-                      cx=sx * (cw / 2), cy=-(d / 2 - 0.34),
-                      z=lift + 0.44))                              # throw pillows
+    # No throw pillows. They were upright 0.15 m slabs standing at z=0.56 with
+    # no lean and no rounding, set 0.15 m in front of a back cushion that spans
+    # 0.52-0.94 — so they intersected it, and what showed was a flat rectangle
+    # half-buried in the sofa. A cushion that reads as a cushion needs to lean
+    # and to be rounded; a box at right angles to everything around it is worse
+    # than no cushion at all, and the sofa is fully dressed without one.
     return ms, w, d
 
 
@@ -710,7 +713,8 @@ def build_armchair(P, w=0.92, d=0.85):
         _bx(0.16, d, 0.52, _shade(fab, 0.97), cx=-(w / 2 - 0.08), z=lift),
         _bx(0.16, d, 0.52, _shade(fab, 0.97), cx=(w / 2 - 0.08), z=lift),
         _bx(w - 0.36, d - 0.34, 0.15, _shade(fab, 1.07), cy=0.06, z=lift + 0.34),
-        _bx(0.38, 0.14, 0.34, P["cushion"], cy=-(d / 2 - 0.26), z=lift + 0.42),
+        # The armchair's throw pillow is gone for the same reason as the sofa's:
+        # a flat upright slab clipping through the backrest behind it.
     ]
     for sx in (-1, 1):
         for sy in (-1, 1):
@@ -2572,14 +2576,57 @@ class RoomFurnisher:
         self.placed = []          # blocking footprints (shapely)
         self.editable_objects = []
         self._editable_mesh_assets = {}
-        self.door_zones = []      # keep-clear zones in front of doors
+        # Keep-clear zones in front of doors.
+        #
+        # This used to be a 0.95 m circle centred on the doorway, which models
+        # the swing of the door and nothing else. A dining table set 1.2 m into
+        # the room clears that circle completely and still stands squarely in
+        # the path of anyone coming through — which is exactly what a table does
+        # in a living room whose door opens onto the dining end.
+        #
+        # What a doorway actually needs is the corridor in front of it: as wide
+        # as the opening, running into the room far enough to walk clear of it
+        # before turning. The circle stays for the swing; the corridor is added
+        # on top and is what stops furniture landing in the entry path.
+        self.door_zones = []
         for e in edges:
-            p1, p2 = np.array(e["p1"]), np.array(e["p2"])
+            p1, p2 = np.array(e["p1"], dtype=float), np.array(e["p2"], dtype=float)
             for typ, t0, t1 in e.get("openings", []):
                 if typ not in ("door", "door_hole"):
                     continue
-                c = p1 + (p2 - p1) * ((t0 + t1) / 2)
+                a = p1 + (p2 - p1) * t0
+                b = p1 + (p2 - p1) * t1
+                c = (a + b) / 2.0
                 self.door_zones.append(Point(c[0], c[1]).buffer(0.95))
+
+                span = b - a
+                width = float(np.hypot(span[0], span[1]))
+                if width < 1e-6:
+                    continue
+                tangent = span / width
+                normal = np.array([-tangent[1], tangent[0]])
+                # Whichever way points into this room. A door is shared by two
+                # rooms and each one keeps its own side clear.
+                if not self.poly.contains(Point(*(c + normal * 0.35))):
+                    normal = -normal
+                    if not self.poly.contains(Point(*(c + normal * 0.35))):
+                        continue
+
+                # Scaled to the room. A fixed 1.4 m corridor is right in a
+                # living room and eats a box room alive, and a keep-clear zone
+                # that leaves nowhere to put anything just makes the fallback
+                # passes drop it again.
+                reach = float(min(1.40, max(0.70, math.sqrt(self.poly.area) * 0.40)))
+                half = max(width, MIN_DOOR_W) / 2.0 + 0.15
+                corners = [
+                    c + tangent * half,
+                    c + tangent * half + normal * reach,
+                    c - tangent * half + normal * reach,
+                    c - tangent * half,
+                ]
+                corridor = Polygon([(p[0], p[1]) for p in corners])
+                if corridor.is_valid and not corridor.is_empty:
+                    self.door_zones.append(corridor)
 
     @property
     def layered(self):

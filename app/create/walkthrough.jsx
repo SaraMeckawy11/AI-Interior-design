@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Animated,
+  BackHandler,
   Easing,
   Image,
   Modal,
@@ -251,10 +252,11 @@ export default function WalkthroughScreen() {
   // ── Viewer state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("walk");
   const [night, setNight] = useState(false);
-  // Walls between the camera and the room are hidden, and the camera may stand
-  // where they were. This is how a room is framed from further back than its own
-  // walls allow — which is most of the good shots.
-  const [xray, setXray] = useState(false);
+  // Which walls the user has taken out, and what there is to choose from. Both
+  // belong to the render brief: taking a wall out is how a room is framed from
+  // further back than its own walls allow, which is most of the good shots.
+  const [hiddenWalls, setHiddenWalls] = useState([]);
+  const [wallOptions, setWallOptions] = useState([]);
   const [inspected, setInspected] = useState(null);
   const [sceneInfo, setSceneInfo] = useState(null);
   const [panel, setPanel] = useState(null); // null | 'ai'
@@ -282,6 +284,18 @@ export default function WalkthroughScreen() {
   // The style step asks seven questions. Four of them decide how a home reads;
   // the rest are refinements, so they stay folded away until asked for.
   const [styleExpanded, setStyleExpanded] = useState(false);
+
+  // ── Leaving ──────────────────────────────────────────────────────────────
+  /**
+   * Going out is a one-way door, and it is only opened once.
+   *
+   * `leaving` is a ref rather than state because the guard has to hold on the
+   * very next tap, before React has re-rendered anything. `closing` is state
+   * because it has to change what is on screen: the live WebGL viewer is torn
+   * down one commit *before* the navigator pops, rather than during the pop.
+   */
+  const leaving = useRef(false);
+  const [closing, setClosing] = useState(false);
 
   // The sheet is the measured drawing surface; the canvas is only the window
   // onto it. Keeping the sheet device-independent is what makes a room's area
@@ -1147,10 +1161,18 @@ export default function WalkthroughScreen() {
     setView("editor");
   }, [resetEditor]);
 
-  /** Leave the editor, pushing the plan to the account on the way out. */
-  const exitToLibrary = useCallback(async () => {
-    if (rooms.length || openings.length) await pushToCloud();
-    else await refreshLibrary();
+  /**
+   * Leave the editor, pushing the plan to the account on the way out.
+   *
+   * The push is started, not waited for. Uploading a traced photo and the whole
+   * geometry can take the better part of a minute on a weak connection, and the
+   * screen used to sit there unchanged for all of it — so the button read as
+   * broken and got pressed again. The device copy is already written by autosave
+   * before either call is made, so nothing is at risk in leaving early.
+   */
+  const exitToLibrary = useCallback(() => {
+    if (rooms.length || openings.length) pushToCloud().catch(() => {});
+    else refreshLibrary().catch(() => {});
     setView("library");
   }, [openings.length, pushToCloud, refreshLibrary, rooms.length]);
 
@@ -1210,10 +1232,17 @@ export default function WalkthroughScreen() {
     viewerRef.current?.setNight(next);
   };
 
-  const toggleXray = () => {
-    const next = !xray;
-    setXray(next);
-    viewerRef.current?.setXray(next);
+  const toggleWall = (id) => {
+    const next = hiddenWalls.includes(id)
+      ? hiddenWalls.filter((value) => value !== id)
+      : [...hiddenWalls, id];
+    setHiddenWalls(next);
+    viewerRef.current?.setHiddenWalls(next);
+  };
+
+  const restoreWalls = () => {
+    setHiddenWalls([]);
+    viewerRef.current?.setHiddenWalls([]);
   };
 
   /**
@@ -1407,10 +1436,10 @@ export default function WalkthroughScreen() {
    * The footer's Back: one step up the flow, and off the first step back to the
    * list of plans. This is the movement *within* the walkthrough.
    */
-  const goBack = () => {
+  const goBack = useCallback(() => {
     if (stage === 0) return exitToLibrary();
     setStage((current) => current - 1);
-  };
+  }, [exitToLibrary, stage]);
 
   /**
    * The header's Back: out of the walkthrough entirely, to the Create screen the
@@ -1421,16 +1450,72 @@ export default function WalkthroughScreen() {
    * the way out — and leaving took up to five taps from the last step. A back
    * arrow in a screen header is expected to leave the screen; stepping is the
    * job of the control that sits next to Continue.
+   *
+   * It used to await the whole cloud push and then call `router.back()`. Three
+   * things went wrong with that on the way to Create, and all three are fixed
+   * here rather than in one place:
+   *
+   *  - Nothing happened for as long as the upload took, so the arrow got pressed
+   *    again — and the hardware back key got used — while the first press was
+   *    still in flight. Every one of those queued another `goBack()` against a
+   *    stack that had already popped. `leaving` makes the second press a no-op.
+   *  - `router.back()` was called unconditionally. Opened from a notification or
+   *    a deep link there is nothing under this screen to go back *to*, and the
+   *    navigator has no action to handle. `canGoBack()` decides, and the fallback
+   *    goes to Create by name.
+   *  - The last step holds a live WebGL context in a WebView. Tearing that down
+   *    inside the pop transition is what takes the Android renderer with it, so
+   *    `closing` unmounts the viewer first and the pop happens on the next commit.
    */
-  const leaveWalkthrough = useCallback(async () => {
-    if (rooms.length || openings.length) await pushToCloud();
-    router.back();
-  }, [openings.length, pushToCloud, rooms.length, router]);
+  const leaveWalkthrough = useCallback(() => {
+    if (leaving.current) return;
+    leaving.current = true;
+    // Fire and forget: the device already has this plan from autosave.
+    if (view === "editor" && (rooms.length || openings.length)) pushToCloud().catch(() => {});
+    setClosing(true);
+  }, [openings.length, pushToCloud, rooms.length, view]);
+
+  // The pop, one commit after the 3D view has left the tree.
+  useEffect(() => {
+    if (!closing) return undefined;
+    const timer = setTimeout(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace("/create");
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [closing, router]);
+
+  /**
+   * Android's back key means the same thing as the button under the thumb.
+   *
+   * Without this it popped the navigator directly, which is how a plan could be
+   * left behind unsaved and how a second press raced the header's own exit.
+   */
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (closing) return true;
+      if (view === "editor") goBack();
+      else leaveWalkthrough();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closing, goBack, leaveWalkthrough, view]);
 
   const current = STAGES[stage];
   const activeTool = TOOLS.find((item) => item.key === tool);
 
   // ── Render ───────────────────────────────────────────────────────────────
+  /**
+   * On the way out the screen is emptied first.
+   *
+   * One frame of the page's own background, under a screen that is already
+   * sliding away, is invisible. What it buys is that the WebView, its GL context
+   * and every listener attached to them are released while this screen is still
+   * mounted and still owns them — instead of during the navigator's transition,
+   * where the teardown has nowhere safe to happen.
+   */
+  if (closing) return <View style={styles.screen} />;
+
   return (
     <View style={styles.screen}>
       {view === "library" ? (
@@ -1439,7 +1524,7 @@ export default function WalkthroughScreen() {
           loading={libraryLoading}
           synced={cloudSynced}
           signedIn={!!token}
-          onBack={() => router.back()}
+          onBack={leaveWalkthrough}
           onRefresh={refreshLibrary}
           onStart={startNewProject}
           onOpen={openSavedProject}
@@ -1588,7 +1673,8 @@ export default function WalkthroughScreen() {
               exactSceneDetail={exactSceneDetail}
               viewMode={viewMode}
               night={night}
-              xray={xray}
+              hiddenWalls={hiddenWalls}
+              wallOptions={wallOptions}
               selectedRoom={selectedRoom}
               inspected={inspected}
               sceneInfo={sceneInfo}
@@ -1613,7 +1699,9 @@ export default function WalkthroughScreen() {
               onBackToDesign={goBack}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
-              onToggleXray={toggleXray}
+              onToggleWall={toggleWall}
+              onRestoreWalls={restoreWalls}
+              onWalls={setWallOptions}
               onFocusRoom={focusRoom}
               onCapture={() => requestCapture("photo")}
               onRender={() => requestCapture("ai")}
@@ -2053,7 +2141,14 @@ export default function WalkthroughScreen() {
           {/* ── Footer ─────────────────────────────────────────────────────
               Two buttons of equal width and equal height. Back used to be sized
               by its own label next to a flexing Continue, which made the pair
-              look like a mistake rather than a choice. */}
+              look like a mistake rather than a choice.
+
+              Both now say where they go rather than only which direction they
+              point: "Back" and "Continue" on a four-step flow are the two labels
+              a person has to translate into steps in their head every time, and
+              the step they name is already on screen a few hundred pixels away
+              in the header. The arrows stay, because direction is read faster
+              from a shape than from a word. */}
           {stage < STAGES.length - 1 && (
             <SafeAreaView edges={["bottom"]} style={styles.footer}>
               {/* A greyed-out Continue with no explanation left the only unmet
@@ -2061,7 +2156,7 @@ export default function WalkthroughScreen() {
                   sits directly above the button it is about. */}
               {!canContinue && (
                 <View style={styles.footerHint} accessibilityLiveRegion="polite">
-                  <Ionicons name="information-circle-outline" size={15} color={COLORS.textSecondary} />
+                  <Ionicons name="information-circle-outline" size={15} color={COLORS.warning} />
                   <Text style={styles.footerHintText} numberOfLines={2}>
                     Draw at least one room to continue.
                   </Text>
@@ -2070,17 +2165,26 @@ export default function WalkthroughScreen() {
               <View style={styles.footerRow}>
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel={stage === 0 ? "Back to your plans" : `Back to ${STAGES[stage - 1].label}`}
                   android_ripple={{ color: "rgba(30,36,31,0.10)" }}
                   style={({ pressed }) => [styles.footerButton, styles.footerGhost, pressed && styles.pressedSurface]}
                   onPress={goBack}
                 >
-                  <Ionicons name="arrow-back" size={16} color={COLORS.textPrimary} />
-                  <Text style={styles.footerGhostText}>Back</Text>
+                  <Ionicons name="arrow-back" size={17} color={COLORS.textPrimary} />
+                  <Text style={styles.footerGhostText} numberOfLines={1}>
+                    {stage === 0 ? "Plans" : STAGES[stage - 1].label}
+                  </Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityLabel={
+                    stage === STAGES.length - 2
+                      ? "Walk through your home"
+                      : `Continue to ${STAGES[stage + 1].label}`
+                  }
                   accessibilityState={{ disabled: !canContinue }}
-                  android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+                  accessibilityHint={canContinue ? undefined : "Draw at least one room first"}
+                  android_ripple={canContinue ? { color: "rgba(255,255,255,0.20)" } : undefined}
                   style={({ pressed }) => [
                     styles.footerButton,
                     styles.footerPrimary,
@@ -2090,10 +2194,17 @@ export default function WalkthroughScreen() {
                   disabled={!canContinue}
                   onPress={goNext}
                 >
-                  <Text style={styles.footerPrimaryText} numberOfLines={1}>
-                    {stage === STAGES.length - 2 ? "Walk through" : "Continue"}
+                  <Text
+                    style={[styles.footerPrimaryText, !canContinue && styles.footerPrimaryTextDisabled]}
+                    numberOfLines={1}
+                  >
+                    {stage === STAGES.length - 2 ? "Walk through" : STAGES[stage + 1].label}
                   </Text>
-                  <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
+                  <Ionicons
+                    name="arrow-forward"
+                    size={17}
+                    color={canContinue ? COLORS.white : COLORS.textTertiary}
+                  />
                 </Pressable>
               </View>
             </SafeAreaView>
@@ -2213,7 +2324,8 @@ function WalkthroughStage({
   exactSceneDetail,
   viewMode,
   night,
-  xray,
+  hiddenWalls,
+  wallOptions,
   selectedRoom,
   inspected,
   sceneInfo,
@@ -2234,7 +2346,9 @@ function WalkthroughStage({
   onBackToDesign,
   onChangeMode,
   onToggleNight,
-  onToggleXray,
+  onToggleWall,
+  onRestoreWalls,
+  onWalls,
   onFocusRoom,
   onCapture,
   onRender,
@@ -2279,7 +2393,7 @@ function WalkthroughStage({
           mode={viewMode}
           roomIndex={selectedRoom}
           night={night}
-          xray={xray}
+          onWalls={onWalls}
           onReady={onReady}
           onSceneUpdate={onSceneUpdate}
           onSelect={onSelect}
@@ -2545,43 +2659,27 @@ function WalkthroughStage({
 
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              {/* Take the walls out of the way.
-                  A room can only be photographed from inside its own walls,
-                  which on a small room means standing in the middle of it and
-                  seeing almost nothing. With this on, any wall between the
-                  camera and the room disappears and the camera may stand where
-                  it was — so a shot can be framed from as far back as it needs.
-                  It lives in the dock, next to the two other things you do to a
-                  view, rather than in the top row, which is for choosing which
-                  view you are in. */}
-              {viewMode === "walk" ? (
+              {/* Removing a wall belongs to the render brief, not to the dock.
+                  It is something you do *in order to* take a picture, and the
+                  dock is where the picture is taken — a toggle here meant
+                  choosing the framing in one place and using it in another.
+                  The chip reports work the person did not start and cannot see
+                  finish, so it is announced rather than only drawn. */}
+              {hiddenWalls.length > 0 ? (
                 <Pressable
-                  accessibilityRole="switch"
-                  accessibilityLabel={xray ? "Walls hidden. Show walls" : "Hide the walls in the way"}
-                  accessibilityState={{ checked: xray }}
-                  android_ripple={{ color: "rgba(30,36,31,0.16)" }}
-                  style={({ pressed }) => [
-                    styles.wallToggle,
-                    xray && styles.wallToggleOn,
-                    pressed && styles.pressedSurface,
-                  ]}
-                  onPress={onToggleXray}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${hiddenWalls.length} ${hiddenWalls.length === 1 ? "wall" : "walls"} removed. Put them back`}
+                  android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+                  style={({ pressed }) => [styles.wallNotice, pressed && styles.pressedSurface]}
+                  onPress={onRestoreWalls}
                 >
-                  <Ionicons
-                    name={xray ? "eye-outline" : "square-outline"}
-                    size={17}
-                    color={xray ? COLORS.white : COLORS.textPrimary}
-                  />
-                  <Text
-                    style={[styles.wallToggleText, xray && styles.wallToggleTextOn]}
-                    numberOfLines={1}
-                  >
-                    {xray ? "Walls off" : "Walls"}
+                  <Ionicons name="eye-off-outline" size={16} color={COLORS.white} />
+                  <Text style={styles.wallNoticeText} numberOfLines={1}>
+                    {hiddenWalls.length === 1 ? "1 wall off" : `${hiddenWalls.length} walls off`}
                   </Text>
+                  <Text style={styles.wallNoticeUndo}>Undo</Text>
                 </Pressable>
               ) : (
-                /* The chip reports work the person did not start and cannot see
-                   finish, so it is announced rather than only drawn. */
                 <View
                   style={styles.statusChip}
                   accessibilityRole="text"
@@ -2646,6 +2744,10 @@ function WalkthroughStage({
         cameraSource={cameraSource}
         hasRender={!!currentRender}
         rendering={rendering}
+        wallOptions={wallOptions}
+        hiddenWalls={hiddenWalls}
+        onToggleWall={onToggleWall}
+        onListWalls={() => viewerRef.current?.listWalls()}
         onClose={() => onSetPanel(null)}
         onSetCameraSource={onSetCameraSource}
         onShowLast={() => {
@@ -2717,18 +2819,33 @@ function AiRenderLayer({ render }) {
  * both options visible and a sentence underneath saying what the chosen one
  * does, rather than a note the reader has to map back onto a toggle.
  */
+const WALL_SIDES = { front: "In front", behind: "Behind you", left: "On your left", right: "On your right" };
+
 function RenderSheet({
   visible,
   viewMode,
   cameraSource,
   hasRender,
   rendering,
+  wallOptions,
+  hiddenWalls,
+  onToggleWall,
+  onListWalls,
   onClose,
   onSetCameraSource,
   onShowLast,
   onRender,
 }) {
   const bird = viewMode === "plan";
+
+  // Ask the scene which walls are around this room the moment the sheet opens,
+  // and only then. The names are relative to where the camera is standing, and
+  // the camera does not move while the sheet is up — so a wall cannot be called
+  // "on your left" in a list the user is part-way through reading.
+  useEffect(() => {
+    if (visible && !bird) onListWalls?.();
+  }, [bird, onListWalls, visible]);
+
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose}>
@@ -2780,6 +2897,51 @@ function RenderSheet({
                       onPress={() => onSetCameraSource(option.key)}
                     >
                       <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Take a wall out to get further back.
+              A room can only be photographed from inside its own walls, which
+              in a small room means standing in the middle of it and seeing
+              almost nothing. Removing one lets the camera stand where it was.
+              Which one is the user's call: the app tried choosing for them, by
+              hiding whatever the view passed through, and that meant the room
+              rebuilt itself every time they turned. */}
+          {!bird && !!wallOptions.length && (
+            <View style={styles.sheetField}>
+              <Text style={styles.fieldLabel}>Walls</Text>
+              <View style={styles.wallRow}>
+                {wallOptions.map((wall) => {
+                  const off = hiddenWalls.includes(wall.id);
+                  return (
+                    <Pressable
+                      key={wall.id}
+                      accessibilityRole="switch"
+                      accessibilityLabel={`Wall ${WALL_SIDES[wall.side] || wall.side}`}
+                      accessibilityState={{ checked: off }}
+                      android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                      style={({ pressed }) => [
+                        styles.wallChip,
+                        off && styles.wallChipOff,
+                        pressed && styles.pressedSurface,
+                      ]}
+                      onPress={() => onToggleWall(wall.id)}
+                    >
+                      <Ionicons
+                        name={off ? "eye-off-outline" : "square-outline"}
+                        size={14}
+                        color={off ? COLORS.white : COLORS.textSecondary}
+                      />
+                      <Text
+                        style={[styles.wallChipText, off && styles.wallChipTextOff]}
+                        numberOfLines={1}
+                      >
+                        {WALL_SIDES[wall.side] || wall.side}
+                      </Text>
                     </Pressable>
                   );
                 })}
@@ -3636,11 +3798,14 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Start a new 3D plan"
+            accessibilityHint="Opens an empty grid to draw your home on"
             android_ripple={{ color: "rgba(255,255,255,0.20)" }}
             style={({ pressed }) => [styles.libraryPrimary, pressed && styles.pressedSurface]}
             onPress={onStart}
           >
-            <Ionicons name="add" size={20} color={COLORS.white} />
+            <View style={styles.libraryPrimaryIcon}>
+              <Ionicons name="add" size={16} color={COLORS.white} />
+            </View>
             <Text style={styles.libraryPrimaryText}>New plan</Text>
           </Pressable>
         </SafeAreaView>
@@ -4294,15 +4459,46 @@ const styles = StyleSheet.create({
     width: 3, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.45)",
   },
   libraryBody: { padding: SPACING.base, paddingBottom: SPACING.xl, gap: SPACING.md },
+  // Same docked-bar treatment as the editor's step footer, so the one primary
+  // action sits on the same layer wherever you are in the walkthrough.
   libraryFooter: {
-    paddingHorizontal: SPACING.base, paddingTop: SPACING.sm + 2, paddingBottom: SPACING.sm + 2,
-    backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border,
+    paddingHorizontal: SPACING.base, paddingTop: SPACING.md, paddingBottom: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#16211D",
+        shadowOffset: { width: 0, height: -6 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+      },
+      android: { elevation: 16 },
+      default: {},
+    }),
   },
+  /**
+   * The one thing this screen is for.
+   *
+   * It was a 46pt bar with its label set in `TYPE.caption` — the 11.5pt medium
+   * used elsewhere for pill text and metadata. So the single most important
+   * control on the screen was typographically a caption, and shorter than the
+   * rows it sat under. It is now the height and weight of a primary action, and
+   * it carries the brand shadow, which is the app's one signal for "this is the
+   * button".
+   */
   libraryPrimary: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.xs + 2,
-    height: ms(46), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(54), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
+    ...SHADOW.brand,
   },
-  libraryPrimaryText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.white },
+  // The plus reads as part of the label rather than as a second control, so it
+  // gets a soft inset disc rather than sitting loose against the fill.
+  libraryPrimaryIcon: {
+    width: ms(24), height: ms(24), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  libraryPrimaryText: { ...TYPE.bodyStrong, fontSize: 15, color: COLORS.white },
 
   syncNote: {
     flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
@@ -4713,22 +4909,61 @@ const styles = StyleSheet.create({
   curveApplyText: { ...TYPE.caption, color: COLORS.white },
 
   // ── Footer ───────────────────────────────────────────────────────────────
+  // A docked action bar, so it has to read as a layer above the step rather than
+  // as the last row of it: the surface lifts off the page with a shadow thrown
+  // upwards, and the hairline is there for the case where the shadow cannot be
+  // seen (Android's `elevation` casts downwards only).
   footer: {
     paddingHorizontal: SPACING.base,
-    paddingTop: SPACING.sm + 2, paddingBottom: SPACING.sm + 2,
-    backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border,
+    paddingTop: SPACING.md, paddingBottom: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#16211D",
+        shadowOffset: { width: 0, height: -6 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+      },
+      android: { elevation: 16 },
+      default: {},
+    }),
   },
-  footerRow: { flexDirection: "row", gap: SPACING.sm },
+  footerRow: { flexDirection: "row", gap: SPACING.md },
+  // The hint is about the disabled button directly under it, so it is tied to it
+  // with the same tint the button uses rather than left as loose grey text.
   footerHint: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.xs, paddingBottom: SPACING.sm,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    marginBottom: SPACING.md,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.warningSoft,
   },
-  footerHintText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 16 },
-  footerGhost: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.borderStrong },
-  footerGhostText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.textPrimary },
-  footerPrimary: { backgroundColor: COLORS.primaryDark, ...SHADOW.sm },
-  footerPrimaryDisabled: { backgroundColor: COLORS.disabled, ...SHADOW.none },
-  footerPrimaryText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.white },
+  footerHintText: { flex: 1, ...TYPE.caption, color: COLORS.warning, lineHeight: 16 },
+
+  /**
+   * Secondary, not outlined.
+   *
+   * An outlined button beside a filled one at equal width is the pairing that
+   * reads as a mistake: two different button *languages* on one row, arguing
+   * about which is the real one. A tonal fill keeps the two in the same family
+   * and still puts the whole of the row's weight on Continue, which is the
+   * hierarchy the step actually has.
+   */
+  footerGhost: { backgroundColor: COLORS.surfaceSunken },
+  footerGhostText: { ...TYPE.bodyStrong, fontSize: 15, color: COLORS.textPrimary },
+  footerPrimary: { backgroundColor: COLORS.primaryDark, ...SHADOW.brand },
+  /**
+   * Disabled, and still readable.
+   *
+   * This was white on `COLORS.disabled` — a pale warm grey — which is about
+   * 1.6:1. A disabled control is exempt from WCAG contrast, but a label nobody
+   * can read is not a design decision, and this is the one button in the flow
+   * people meet while they are still working out what the step wants from them.
+   */
+  footerPrimaryDisabled: { backgroundColor: COLORS.surfaceSunken, ...SHADOW.none },
+  footerPrimaryText: { ...TYPE.bodyStrong, fontSize: 15, color: COLORS.white },
+  footerPrimaryTextDisabled: { color: COLORS.textTertiary },
 
   // ── Viewer ───────────────────────────────────────────────────────────────
   // One overlay column, pinned to the safe area, holding a top and a bottom
@@ -5014,17 +5249,28 @@ const styles = StyleSheet.create({
   },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
   statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
-  // Takes the status chip's slot while walking, because while walking the thing
-  // worth a whole control is framing the shot, not the piece count.
-  wallToggle: {
+  // Takes the status chip's slot, but only while a wall is actually missing —
+  // so the one state a person could otherwise forget they were in says so, and
+  // carries its own way out.
+  wallNotice: {
     flex: 1, minWidth: 0, height: ms(48),
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.md, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface, ...SHADOW.md,
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.brand800, ...SHADOW.md,
   },
-  wallToggleOn: { backgroundColor: COLORS.brand800 },
-  wallToggleText: { ...TYPE.caption, color: COLORS.textPrimary },
-  wallToggleTextOn: { color: COLORS.white },
+  wallNoticeText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.white },
+  wallNoticeUndo: { ...TYPE.caption, color: "rgba(255,255,255,0.82)" },
+
+  wallRow: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
+  wallChip: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.xs + 2,
+    minHeight: ms(42), paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  wallChipOff: { backgroundColor: COLORS.brand800, borderColor: COLORS.brand800 },
+  wallChipText: { ...TYPE.caption, color: COLORS.textSecondary },
+  wallChipTextOff: { color: COLORS.white },
   dockPrimary: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
     height: ms(48), paddingHorizontal: SPACING.lg,
@@ -5124,11 +5370,12 @@ const styles = StyleSheet.create({
   actionDisabled: { opacity: 0.45 },
   actionLabel: { ...TYPE.caption, fontSize: 10 },
 
-  // 50pt, and the primary carries the row's only elevation, so which of the two
+  // 54pt — comfortably over the 48dp minimum for a control this consequential,
+  // and the primary carries the row's only elevation, so which of the two
   // equal-width buttons is the way forward reads before either label does.
   footerButton: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: SPACING.xs + 2, height: ms(50), borderRadius: RADIUS.md,
+    gap: SPACING.sm, height: ms(54), borderRadius: RADIUS.md,
   },
 
   // ── Confirm dialog, matching the Collection screen's delete dialog ────────
