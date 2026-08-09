@@ -6,11 +6,12 @@ import {
   Modal, 
   TouchableWithoutFeedback 
 } from 'react-native';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import styles from '../../assets/styles/create/colorTone.styles';
 import { Ionicons } from '@expo/vector-icons';
 import ColorPicker from 'react-native-wheel-color-picker';
 import namer from 'color-namer';
+import { buildPalette } from '../../lib/colorPalettes';
 
 const baseColorTones = [
   { name: 'Ivory', color: '#FFFFF0' },
@@ -49,6 +50,26 @@ const baseColorTones = [
 
 const topTones = ['Neutral', 'Taupe', 'Sage', 'Sky'];
 
+/**
+ * The three circles that stand for one tone.
+ *
+ * A single swatch answered "what colour?" and left "and then what?" to the
+ * model, even though the brief the app sends is a 60/30/10 scheme: a dominant
+ * field, a harmonising secondary and one controlled accent. The circles are
+ * drawn at the sizes of their shares and overlapped in that order, so the ratio
+ * is legible from the shape before a single word is read.
+ */
+function PaletteTrio({ palette, selected }) {
+  if (!palette) return null;
+  return (
+    <View style={[styles.trio, selected && styles.trioSelected]}>
+      <View style={[styles.trioDominant, { backgroundColor: palette.dominant.hex }]} />
+      <View style={[styles.trioSecondary, { backgroundColor: palette.secondary.hex }]} />
+      <View style={[styles.trioAccent, { backgroundColor: palette.accent.hex }]} />
+    </View>
+  );
+}
+
 export default function ColorToneSelector({ colorTone, setColorTone }) {
   const [showAll, setShowAll] = useState(false);
   const [customTones, setCustomTones] = useState([]);
@@ -62,6 +83,18 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
 
   const MAX_CUSTOM_TONES = 4;
   const allTones = [...baseColorTones, ...customTones];
+
+  // Derived once per tone rather than on every render of every swatch: the grid
+  // draws up to 36 of these and each one costs an RGB → HSL → RGB round trip.
+  const palettes = useMemo(() => {
+    const map = {};
+    allTones.forEach((tone) => { map[tone.name] = buildPalette(tone.color); });
+    return map;
+    // `allTones` is rebuilt every render, so key off what actually changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customTones]);
+
+  const selectedPalette = palettes[colorTone] || null;
 
   const getVisibleTones = () => {
     const top = baseColorTones.filter((t) => topTones.includes(t.name));
@@ -126,20 +159,22 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
         {getVisibleTones().map((tone) => {
           const isCustom = customTones.includes(tone);
           const isSelected = colorTone === tone.name;
+          const palette = palettes[tone.name] || buildPalette(tone.color);
           return (
             <TouchableOpacity
               key={tone.name}
               style={styles.iconButton}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: isSelected, checked: isSelected }}
+              accessibilityLabel={
+                palette
+                  ? `${tone.name}: 60% ${palette.dominant.name}, 30% ${palette.secondary.name}, 10% ${palette.accent.name}`
+                  : tone.name
+              }
               onPress={() => setColorTone(tone.name)}
               onLongPress={() => isCustom && handleDeleteTone(tone.name)}
             >
-              <View
-                style={[
-                  styles.colorSwatch,
-                  { backgroundColor: tone.color },
-                  isSelected && styles.colorToneSelected,
-                ]}
-              />
+              <PaletteTrio palette={palette} selected={isSelected} />
               <Text
                 style={[
                   styles.iconLabel,
@@ -164,6 +199,24 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* The scheme in words, for the tone that is actually selected. The circles
+          carry the ratio; this carries which colour plays which part, and it is
+          the only place the 10% accent — the one colour a person is most likely
+          to be surprised by in the result — is ever named. */}
+      {!!selectedPalette && (
+        <View style={styles.paletteLegend}>
+          {[selectedPalette.dominant, selectedPalette.secondary, selectedPalette.accent].map((entry) => (
+            <View key={entry.role} style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: entry.hex }]} />
+              <Text style={styles.legendText} numberOfLines={1}>
+                <Text style={styles.legendShare}>{entry.share}% </Text>
+                {entry.name}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Color Picker Modal */}
       <Modal
@@ -267,7 +320,7 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
               <View style={styles.errorModalContainer}>
                 <Text style={styles.modalTitle}>Delete Custom Tone</Text>
                 <Text style={styles.modalMessage}>
-                  Are you sure you want to delete "{deleteModal.toneName}"?
+                  Are you sure you want to delete &ldquo;{deleteModal.toneName}&rdquo;?
                 </Text>
 
                 <View style={styles.modalButtonRow}>

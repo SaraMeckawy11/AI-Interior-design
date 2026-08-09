@@ -42,6 +42,7 @@ import { useAuthStore } from "../../authStore";
 import RoomTypeSelector from "../../components/create/RoomTypeSelector";
 import COLORS from "../../constants/colors";
 import { apiUrl } from "../../configs/api";
+import { paletteForRequest } from "../../lib/colorPalettes";
 
 const { width, height } = Dimensions.get("window");
 const scale = (size) => (width / 375) * size;
@@ -1184,9 +1185,10 @@ export default function PlanEditor() {
   // Ultra-compact furniture hints (2 items each). Total prompt with 6 rooms
   // stays around 55-65 CLIP tokens -- safely under the 77-token truncation
   // limit so critical words like "furnished" aren't cut off.
-  // Signature furniture per room type — chosen to match what the Python
-  // `room_furniture_shapes` function draws into the segmentation mask, so
-  // prompt + mask reinforce each other. Kept compact so the full prompt stays
+  // Signature furniture per room type — chosen to match the per-room anchor
+  // colours the Python mask rasteriser paints into the segmentation mask
+  // (`ROOM_ANCHOR_COLORS`), so prompt + mask reinforce each other rather than
+  // pulling apart. Kept compact so the full prompt stays
   // under CLIP's 77-token limit even with 4-5 rooms.
   const ROOM_FURNITURE = {
     "living room":  "sofa coffee table",
@@ -1339,6 +1341,7 @@ export default function PlanEditor() {
         roomType: mode === "quick" ? roomType : "Floor Plan",
         designStyle: DEFAULT_DESIGN_STYLE,
         colorTone: DEFAULT_COLOR_TONE,
+        colorPalette: paletteForRequest(DEFAULT_COLOR_TONE),
         customPrompt,
         image: imageDataUrl,
         // Guided-mode spatial info — the backend can use this to build a

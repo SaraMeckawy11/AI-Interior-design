@@ -33,6 +33,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import CreateBannerAd from "../../components/create/CreateBannerAd";
 import { useFocusEffect } from 'expo-router';
 import { apiUrl } from '../../configs/api';
+import { paletteForRequest } from '../../lib/colorPalettes';
 
 const INTERIOR_EXCLUDED_ROOM_TYPES = ['Full Apartment'];
 
@@ -318,6 +319,12 @@ export default function Interior() {
         roomType,
         designStyle,
         colorTone,
+        // The whole 60/30/10 scheme, not just the 60. The tone alone left the
+        // secondary and the accent for the model to invent, so the same choice
+        // produced a different room every run and the swatch the user tapped
+        // described only part of the result. These are the three colours the
+        // selector actually shows them.
+        colorPalette: paletteForRequest(colorTone),
         customPrompt: prompt,
         // Gen-Klein fields. `preserveGeometry` is what keeps the model from
         // moving walls, windows and the camera; the rest feed the 60/30/10

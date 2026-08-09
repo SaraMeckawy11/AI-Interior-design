@@ -86,6 +86,81 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
+  // ── 60/30/10 trio ────────────────────────────────────────────────────────
+  // Three circles at the sizes of their shares, overlapped so they read as one
+  // scheme rather than three unrelated colours. The negative margins are what
+  // let a 34pt, a 22pt and a 15pt circle sit in the width of a single swatch.
+  trio: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: moderateScale(40),
+    paddingHorizontal: moderateScale(4),
+    borderRadius: moderateScale(22),
+    borderWidth: 2,
+    borderColor: "transparent",
+    marginBottom: 4,
+  },
+  trioSelected: {
+    borderColor: COLORS.primaryDark,
+    backgroundColor: COLORS.primaryTint,
+  },
+  trioDominant: {
+    width: moderateScale(30),
+    height: moderateScale(30),
+    borderRadius: moderateScale(15),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    zIndex: 3,
+  },
+  trioSecondary: {
+    width: moderateScale(21),
+    height: moderateScale(21),
+    borderRadius: moderateScale(11),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginLeft: -moderateScale(7),
+    zIndex: 2,
+  },
+  trioAccent: {
+    width: moderateScale(14),
+    height: moderateScale(14),
+    borderRadius: moderateScale(7),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginLeft: -moderateScale(5),
+    zIndex: 1,
+  },
+
+  paletteLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: moderateScale(12),
+    marginTop: verticalScale(2),
+    marginBottom: verticalScale(4),
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: moderateScale(5),
+  },
+  legendDot: {
+    width: moderateScale(10),
+    height: moderateScale(10),
+    borderRadius: moderateScale(5),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  legendText: {
+    fontSize: moderateScale(11),
+    color: COLORS.textSecondary,
+  },
+  legendShare: {
+    color: COLORS.primaryDark,
+    fontWeight: "600",
+  },
+
   addSwatch: {
     width: moderateScale(35),
     height: moderateScale(35),

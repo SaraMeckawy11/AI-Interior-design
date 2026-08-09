@@ -127,7 +127,12 @@ export default function Collection() {
   // ===============================
   const renderItem = ({ item, index }) => {
     const fullPrompt = (item.customPrompt || "").trim();
-    const isPrompt = fullPrompt || item.roomType === "Prompt Only";
+    // Only a design that *is* a prompt leads with one. Any custom prompt at all
+    // used to trigger this branch, so a guided floor plan or a 3D walkthrough —
+    // both of which build a prompt to brief the engine — showed a wall of
+    // generated text where every other card shows the room, the style, the tone
+    // and the date. That text describes the request, not the design.
+    const isPrompt = item.roomType === "Prompt Only";
     const shortPrompt = fullPrompt.length > 80 ? fullPrompt.slice(0, 80) + "..." : fullPrompt;
 
     // USE totalDesigns → fallback → designs.length

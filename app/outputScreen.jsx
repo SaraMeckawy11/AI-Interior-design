@@ -182,11 +182,15 @@ export default function OutputScreen() {
         <View style={styles.detailsContainer}>
           <View style={styles.bookDetails}>
 
-            {/* CASE 1 — Prompt-based design */}
-            {customPrompt ? (
+            {/* CASE 1 — Prompt-based design: the description *is* the brief.
+                This used to catch any design carrying a custom prompt, so a
+                guided plan or a 3D walkthrough render printed a paragraph of
+                generated instructions where the room, style, tone and date
+                belong. */}
+            {roomType === 'Prompt Only' ? (
               <>
                 <Text style={styles.caption}>
-                  {customPrompt}
+                  {customPrompt || 'No description provided'}
                 </Text>
 
                 {createdAt && (
@@ -216,6 +220,11 @@ export default function OutputScreen() {
                   </Text>
                 )}
 
+                {/* `customPrompt` is deliberately not printed here. On this
+                    branch it is rarely the user's own words: the guided floor
+                    plan and the 3D walkthrough both build one to brief the
+                    engine, and that text describes the request, not the design.
+                    Room, style, tone and date are what identify a design. */}
                 {createdAt && (
                   <Text style={styles.date}>
                     Created on {formatPublishDate(createdAt)}

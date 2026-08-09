@@ -26,6 +26,7 @@ import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ExtTypeSelector from '../../components/create/extTypeSelector';
 import COLORS from '../../constants/colors';
 import { apiUrl } from '../../configs/api';
+import { paletteForRequest } from '../../lib/colorPalettes';
 
 const { width, height } = Dimensions.get("window");
 
@@ -292,6 +293,7 @@ export default function Exterior() {
         roomType,
         designStyle,
         colorTone,
+        colorPalette: paletteForRequest(colorTone),
         customPrompt: prompt,
         // Gen-Klein fields — see the matching block in interior.jsx.
         mode: "exterior",

@@ -45,6 +45,7 @@ import PlanCanvas, {
 } from "../../components/walkthrough/PlanCanvas";
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
+import { paletteForRequest } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
@@ -110,22 +111,29 @@ const STAGES = [
 const CANVAS_RATIO = PLAN_HEIGHT_METERS / PLAN_WIDTH_METERS;
 
 /**
- * The drawing tools, ordered the way a plan is built: the two ways to make a
- * room, the three things that go in its walls, then the two ways to correct what
- * is already there.
+ * The drawing tools.
  *
- * They fill a fixed 4-column grid, so the order below is also the reading order
- * on screen. This replaced a horizontal scroll strip, where the Edit tool sat off
- * the right edge and was therefore never found.
+ * They are split into two labelled groups rather than poured into one
+ * undifferentiated grid of eight: the four that shape the plan, and the three
+ * that go into a wall. A person looking for "how do I add a window" was
+ * previously scanning eight equal cells with no structure to narrow the search.
+ *
+ * Pan leads the first group because it is the tool the canvas starts in —
+ * looking around a plan is safe, and no tap can accidentally draw a room.
  */
 const TOOLS = [
+  { key: "pan", icon: "hand-left-outline", label: "Pan" },
   { key: "rect", icon: "square-outline", label: "Box" },
   { key: "room", icon: "shapes-outline", label: "Outline" },
+  { key: "select", icon: "move-outline", label: "Edit" },
   { key: "door", icon: "log-in-outline", label: "Door" },
   { key: "window", icon: "browsers-outline", label: "Window" },
   { key: "balcony", icon: "sunny-outline", label: "Balcony" },
-  { key: "select", icon: "move-outline", label: "Edit" },
-  { key: "pan", icon: "hand-left-outline", label: "Pan" },
+];
+
+const TOOL_GROUPS = [
+  { label: "Shape the plan", keys: ["pan", "rect", "room", "select"] },
+  { label: "Put in a wall", keys: ["door", "window", "balcony"] },
 ];
 
 const TOOL_HINTS = {
@@ -182,7 +190,9 @@ export default function WalkthroughScreen() {
 
   // ── Plan state ───────────────────────────────────────────────────────────
   const [stage, setStage] = useState(0);
-  const [tool, setTool] = useState("rect");
+  // Pan, not Box. Opening the canvas already armed to draw meant the first
+  // exploratory drag on a traced photo left a room behind it.
+  const [tool, setTool] = useState("pan");
   const [canvasFocus, setCanvasFocus] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [roomEdgeType, setRoomEdgeType] = useState("straight");
@@ -258,7 +268,9 @@ export default function WalkthroughScreen() {
   // identical on every phone and keeps furniture in proportion to the room.
   const sheetWidth = SHEET_WIDTH;
   const sheetHeight = Math.round(sheetWidth * canvasAspect);
-  const canvasWidth = Math.round(canvasFocus ? LAYOUT.screenWidth : LAYOUT.screenWidth - SPACING.base * 2);
+  // Minus the two hairlines of the card the canvas now sits in, so the drawing
+  // surface is not clipped by its own frame.
+  const canvasWidth = Math.round(canvasFocus ? LAYOUT.screenWidth : LAYOUT.screenWidth - SPACING.base * 2 - 2);
   const canvasHeight = Math.round(
     canvasFocus
       ? Math.max(320, LAYOUT.screenHeight * 0.66)
@@ -451,10 +463,14 @@ export default function WalkthroughScreen() {
     openingCount: openings.length,
     areaMeters: Number(totalArea.toFixed(2)),
     planImage,
-    thumbnail: Object.values(aiRenders).find((render) => render?.image)?.image || planImage || null,
+    // The plan's own picture, and nothing else. Generating an AI render used to
+    // overwrite this, so a plan a person had traced from a photo silently
+    // adopted a rendered room as its cover — a picture they never chose, on a
+    // card they use to recognise their own work.
+    thumbnail: planImage || null,
     updatedAt: new Date().toISOString(),
     data: planData(),
-  }), [aiRenders, openings.length, planData, planImage, projectId, projectTitle, remoteId, rooms.length, totalArea]);
+  }), [openings.length, planData, planImage, projectId, projectTitle, remoteId, rooms.length, totalArea]);
 
   const refreshLibrary = useCallback(async () => {
     setLibraryLoading(true);
@@ -818,7 +834,7 @@ export default function WalkthroughScreen() {
   /** Wipe the editor back to an empty sheet. Shared by every "start new" path. */
   const resetEditor = useCallback(() => {
     setStage(0);
-    setTool("rect");
+    setTool("pan");
     setRooms([]);
     setOpenings([]);
     setDraft([]);
@@ -1060,33 +1076,24 @@ export default function WalkthroughScreen() {
     }
   };
 
-  const buildRenderPrompt = (frame) => {
-    const room = roomConfigs[selectedRoom] || {};
-    if (viewMode === "plan") {
-      return (
-        "Photorealistic static 3D architectural bird-view render. Preserve the exact camera, measured plan, " +
-        "walls, openings, furniture and design. Show an open roof. Do not add any ceiling fixtures: no pendants, " +
-        "chandeliers, flush mounts, recessed lights, downlights or overhead lamps."
-      );
-    }
-    if (!frame) {
-      return (
-        `Preserve the exact room geometry, doors, windows, existing 3D furniture layout and camera. ` +
-        `Do not add, remove, resize or move walls, openings or furniture. Create a photorealistic ` +
-        `${room.roomType || "interior"} by improving only materials and lighting.`
-      );
-    }
-    const pieces = (frame.furnitureLabels || []).join(", ").slice(0, 160);
-    return (
-      `Exact ${frame.viewpoint === "user" ? "user-selected" : "professional"} camera and room. ` +
-      `Keep ${frame.doorCount} doors + ${frame.windowCount} windows + ${frame.balconyCount || 0} balcony openings ` +
-      `at their exact sizes and positions. Keep ${pieces || `all ${frame.furnitureCount} existing 3D furniture pieces`} ` +
-      `at their exact positions and orientations. Never move walls, openings or furniture. ` +
-      `Photorealistic ${room.roomType || "interior"}; improve materials and lighting only.`
-    );
-  };
-
-  const runAiRender = async (image, frame) => {
+  /**
+   * Render the captured frame through the same brief the Interior path uses.
+   *
+   * This used to send a hand-built `customPrompt` that recited the contents of
+   * the whole flat — every door, window and balcony count, and a comma list of
+   * furniture labels — into a request whose image already showed all of it.
+   * Naming a hundred pieces of furniture does not preserve them; it competes
+   * with the picture, and the model spends its budget reconciling a wall of text
+   * with a view of one room. It also became the design's caption everywhere the
+   * collection shows `customPrompt`, so people were reading the renderer's
+   * bookkeeping back as a description of their own home.
+   *
+   * The room's geometry and its furniture are already in the frame, and
+   * `preserveGeometry` is what tells the engine to leave them alone. So the
+   * payload is exactly Interior's: what the room is, how it should look, and
+   * nothing the picture already says.
+   */
+  const runAiRender = async (image) => {
     const room = roomConfigs[selectedRoom] || {};
     try {
       const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs`, {
@@ -1098,13 +1105,14 @@ export default function WalkthroughScreen() {
           roomType: viewMode === "plan" ? "Floor Plan" : room.roomType || "Living Room",
           designStyle: room.style || "Modern",
           colorTone: settings.colorMood || "Warm neutral",
+          colorPalette: paletteForRequest(settings.colorMood),
           material: settings.floorFinish === "Auto by style" ? "Natural oak" : settings.floorFinish,
           lighting: night ? "Warm ambient evening light" : "Natural daylight",
           preserveGeometry: true,
-          // Very low creative freedom: the 3D scene is the ground truth and the
-          // model's only job is to resolve materials and light on top of it.
-          creativity: viewMode === "plan" ? 24 : 10,
-          customPrompt: buildRenderPrompt(frame),
+          creativity: 42,
+          // The one piece of text that is the user's own — the Notes field on
+          // the Style step — exactly as Interior sends its optional prompt.
+          customPrompt: (settings.notes || "").trim(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -1135,9 +1143,9 @@ export default function WalkthroughScreen() {
   };
 
   const handleSnapshot = useCallback(
-    (image, purpose, frame) => {
+    (image, purpose) => {
       if (purpose === "ai") {
-        runAiRender(image, frame);
+        runAiRender(image);
       } else {
         setSnapshotKind("capture");
         setSnapshot(image);
@@ -1222,10 +1230,29 @@ export default function WalkthroughScreen() {
     setStage((current) => Math.min(STAGES.length - 1, current + 1));
   };
 
+  /**
+   * The footer's Back: one step up the flow, and off the first step back to the
+   * list of plans. This is the movement *within* the walkthrough.
+   */
   const goBack = () => {
     if (stage === 0) return exitToLibrary();
     setStage((current) => current - 1);
   };
+
+  /**
+   * The header's Back: out of the walkthrough entirely, to the Create screen the
+   * person came in from.
+   *
+   * These were the same action, which meant the top-left chevron changed meaning
+   * four times as someone moved through the flow — sometimes a step, sometimes
+   * the way out — and leaving took up to five taps from the last step. A back
+   * arrow in a screen header is expected to leave the screen; stepping is the
+   * job of the control that sits next to Continue.
+   */
+  const leaveWalkthrough = useCallback(async () => {
+    if (rooms.length || openings.length) await pushToCloud();
+    router.back();
+  }, [openings.length, pushToCloud, rooms.length, router]);
 
   const current = STAGES[stage];
   const activeTool = TOOLS.find((item) => item.key === tool);
@@ -1252,13 +1279,13 @@ export default function WalkthroughScreen() {
           <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <SafeAreaView edges={["top"]} style={styles.header}>
               <View style={styles.headerRow}>
-                {/* One back button with one meaning: go back a step, and on the
-                    first step leave the editor. The Explore step has no footer,
-                    so without this it would have been a room with no door. */}
+                {/* Leaves the walkthrough. Moving between steps is the footer's
+                    job, so this arrow means the same thing on all four steps. */}
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={stage === 0 ? "Back to your 3D plans" : `Back to ${STAGES[stage - 1].label}`}
-                  onPress={goBack}
+                  accessibilityLabel="Leave the 3D walkthrough"
+                  accessibilityHint="Saves this plan and returns to Create"
+                  onPress={leaveWalkthrough}
                   hitSlop={LAYOUT.hitSlop}
                   android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
                   style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
@@ -1266,6 +1293,12 @@ export default function WalkthroughScreen() {
                   <Ionicons name="chevron-back" size={20} color={COLORS.white} />
                 </Pressable>
 
+                {/* The plan's name is what this screen is *about*, so it is the
+                    heading; which of its four steps is open is the position
+                    within it, so it is the eyebrow. These were the other way
+                    round, which put the one editable thing on the screen in
+                    10.5pt uppercase and gave the h2 to a sentence that changed
+                    under the reader every time they pressed Continue. */}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Plan name, ${projectTitle}`}
@@ -1273,7 +1306,9 @@ export default function WalkthroughScreen() {
                   style={({ pressed }) => [styles.headerCopy, pressed && styles.pressedSurface]}
                   onPress={() => setRenaming("current")}
                 >
-                  <Text style={styles.headerEyebrow} numberOfLines={1}>{current.title}</Text>
+                  <Text style={styles.headerEyebrow} numberOfLines={1}>
+                    {`Step ${stage + 1} of ${STAGES.length} · ${current.label}`}
+                  </Text>
                   <View style={styles.headerTitleRow}>
                     <Text style={styles.headerTitle} numberOfLines={1}>{projectTitle}</Text>
                     <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.7)" />
@@ -1316,10 +1351,10 @@ export default function WalkthroughScreen() {
               </View>
 
               {/* Numbered dots joined by a connector, which is how a stepper is
-                  normally read. Four full-width bars each with a label under it
-                  said very little at a glance — on the first step nothing was
-                  filled, so the whole row looked like an empty placeholder — and
-                  the labels repeated the title directly above them. */}
+                  normally read. The connectors stretch, so the four steps are
+                  spaced evenly across the header instead of huddling to the left
+                  beside a caption that repeated the label already in the eyebrow
+                  a line above it. */}
               <View style={styles.stepper} accessibilityRole="tablist">
                 {STAGES.map((item, index) => {
                   const done = index < stage;
@@ -1355,9 +1390,6 @@ export default function WalkthroughScreen() {
                     </React.Fragment>
                   );
                 })}
-                <Text style={styles.stepCaption} numberOfLines={1}>
-                  {current.label}
-                </Text>
               </View>
             </SafeAreaView>
           </LinearGradient>
@@ -1418,10 +1450,15 @@ export default function WalkthroughScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* The Draw step's instruction is the tool hint, which is specific
-                  and changes with the tool; a second generic sentence above it
-                  said less and cost a whole line. */}
-              {stage > 0 && <Text style={styles.stageCopy}>{current.copy}</Text>}
+              {/* Every step opens with what it is for. The title used to live in
+                  the header as a 10.5pt overline and the copy appeared on three
+                  of the four steps, so the one screen in the flow that asks the
+                  most of a person — Draw — began with no statement of the job at
+                  all, only a tool hint. */}
+              <View style={styles.stageHead} accessibilityRole="header">
+                <Text style={styles.stageTitle}>{current.title}</Text>
+                <Text style={styles.stageCopy}>{current.copy}</Text>
+              </View>
 
               {/* ── Step 1 · Draw ────────────────────────────────────── */}
               {stage === 0 && (
@@ -1448,13 +1485,6 @@ export default function WalkthroughScreen() {
                     onToggleSnap={() => setSnapToGrid((value) => !value)}
                   />
 
-                  <View style={styles.hintRow}>
-                    <Text style={styles.hintRowText}>
-                      <Text style={styles.hintRowTool}>{activeTool?.label} · </Text>
-                      {TOOL_HINTS[tool]}
-                    </Text>
-                  </View>
-
                   {tool === "room" && (
                     <CurveControls
                       edgeType={roomEdgeType}
@@ -1471,7 +1501,20 @@ export default function WalkthroughScreen() {
                     />
                   )}
 
-                  <View style={[styles.canvasFrame, canvasFocus && styles.canvasFrameFocused]}>
+                  {/* The instruction is now attached to the surface it is about.
+                      It used to float as loose grey text above the canvas, where
+                      it read as page furniture rather than as the answer to
+                      "what does this tool do", and the canvas itself had no
+                      frame at all — the grid simply began somewhere in the
+                      middle of the scroll. */}
+                  <View style={[styles.canvasCard, canvasFocus && styles.canvasCardFocused]}>
+                    <View style={styles.canvasHint} accessibilityLiveRegion="polite">
+                      <Ionicons name={activeTool?.icon || "grid-outline"} size={14} color={COLORS.primaryDark} />
+                      <Text style={styles.canvasHintText}>
+                        <Text style={styles.canvasHintTool}>{activeTool?.label} · </Text>
+                        {TOOL_HINTS[tool]}
+                      </Text>
+                    </View>
                     <PlanCanvas
                       width={canvasWidth}
                       height={canvasHeight}
@@ -1678,6 +1721,12 @@ export default function WalkthroughScreen() {
 
                   {roomConfigs.map((room, index) => (
                     <View key={`config-${index}`} style={styles.card}>
+                      {/* Which room this card is, independent of what it has
+                          been named. A card whose name field is still empty was
+                          otherwise unidentifiable in a list of five. */}
+                      <Text style={styles.roomIndexLabel}>
+                        {`Room ${index + 1} of ${roomConfigs.length}`}
+                      </Text>
                       <View style={styles.cardHead}>
                         <View style={[styles.roomSwatch, { backgroundColor: ROOM_TINTS[index % ROOM_TINTS.length].stroke }]} />
                         {/* Naming the room is the whole job of this step, and the
@@ -1737,9 +1786,18 @@ export default function WalkthroughScreen() {
                   />
                 ) : (
                   <>
+                    {/* Four questions in one undifferentiated card asked the
+                        reader to notice on their own that two of them are about
+                        taste and two are about materials. They are the same two
+                        pairs the whole flow is built on, so they are two cards. */}
                     <View style={styles.card}>
+                      <Text style={styles.cardSectionTitle}>Direction</Text>
                       <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
                       <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
+                    </View>
+
+                    <View style={styles.card}>
+                      <Text style={styles.cardSectionTitle}>Surfaces</Text>
                       <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
                       <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
                     </View>
@@ -2091,6 +2149,19 @@ function WalkthroughStage({
         {/* ── Top cluster ────────────────────────────────────────────────── */}
         <View style={styles.overlayTop} pointerEvents="box-none">
           <View style={styles.viewControls} pointerEvents="box-none">
+            {/* The Explore step has no footer, so it is the one step with no
+                Back beside its Continue. Without this the only way back to the
+                brief was the header — which now leaves the walkthrough — or the
+                stepper dots, which are 26pt targets in the top bar. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to Style"
+              android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
+              style={({ pressed }) => [styles.roundButton, pressed && styles.pressedSurface]}
+              onPress={onBackToDesign}
+            >
+              <Ionicons name="chevron-back" size={20} color={COLORS.textPrimary} />
+            </Pressable>
             <View style={styles.segmented} accessibilityRole="tablist">
               {VIEW_MODES.map((item) => {
                 const active = viewMode === item.key;
@@ -3300,58 +3371,70 @@ function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
 }
 
 /**
- * The drawing tools: one 4×2 grid, every cell the same size.
+ * The drawing tools, in two labelled groups.
  *
- * The previous palette had a header, three labelled groups and pill buttons
- * sized by their own text, so eight controls occupied five stacked rows of
- * mismatched widths. A fixed grid says the same thing in two rows, and equal
- * cells make it read as one control rather than eight competing ones. Grid
- * snapping lives here too — it changes what a tap does, so it belongs with the
- * tools, not with undo and delete.
+ * Eight equal cells in one undifferentiated grid gave a person looking for "how
+ * do I add a window" nothing to narrow the search with — every control had the
+ * same weight and the same shape, so the row had to be read end to end. Naming
+ * the two things the tools do splits that search in half before it starts.
+ *
+ * Snapping left the grid entirely. It is a mode, not a tool: it does not arm the
+ * canvas, it changes what every other tool does, and drawn as a ninth tile it
+ * competed with the one tool that was actually selected. A labelled switch says
+ * "on or off" without having to be interpreted.
  */
 function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap }) {
   return (
     <View style={styles.palette}>
-      {TOOLS.map((item) => {
-        const active = tool === item.key;
-        return (
-          <Pressable
-            key={item.key}
-            accessibilityRole="radio"
-            accessibilityLabel={item.label}
-            accessibilityState={{ selected: active, checked: active }}
-            style={({ pressed }) => [styles.toolCell, pressed && !active && styles.pressedSurface]}
-            onPress={() => onChange(item.key)}
-          >
-            <View style={[styles.tool, active && styles.toolActive]}>
-              <Ionicons name={item.icon} size={18} color={active ? COLORS.white : COLORS.textSecondary} />
-              <Text style={[styles.toolLabel, active && styles.toolLabelActive]} numberOfLines={1}>
-                {item.label}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
+      {TOOL_GROUPS.map((group, groupIndex) => (
+        <View key={group.label} style={groupIndex > 0 && styles.paletteGroupNext}>
+          <Text style={styles.paletteGroupLabel}>{group.label}</Text>
+          <View style={styles.paletteRow}>
+            {group.keys.map((key) => {
+              const item = TOOLS.find((entry) => entry.key === key);
+              if (!item) return null;
+              const active = tool === key;
+              return (
+                <Pressable
+                  key={key}
+                  accessibilityRole="radio"
+                  accessibilityLabel={item.label}
+                  accessibilityState={{ selected: active, checked: active }}
+                  style={({ pressed }) => [styles.toolCell, pressed && !active && styles.pressedSurface]}
+                  onPress={() => onChange(key)}
+                >
+                  <View style={[styles.tool, active && styles.toolActive]}>
+                    <Ionicons name={item.icon} size={19} color={active ? COLORS.white : COLORS.textSecondary} />
+                    <Text style={[styles.toolLabel, active && styles.toolLabelActive]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ))}
 
       <Pressable
         accessibilityRole="switch"
         accessibilityLabel="Snap to the grid"
         accessibilityState={{ checked: snapToGrid }}
-        style={({ pressed }) => [styles.toolCell, pressed && styles.pressedSurface]}
+        android_ripple={{ color: "rgba(30,36,31,0.08)" }}
+        style={({ pressed }) => [styles.snapRow, pressed && styles.pressedSurface]}
         onPress={onToggleSnap}
       >
-        <View style={[styles.tool, snapToGrid && styles.toolSnapActive]}>
-          <Ionicons
-            name={snapToGrid ? "magnet" : "magnet-outline"}
-            size={18}
-            color={snapToGrid ? COLORS.primaryDark : COLORS.textTertiary}
-          />
-          <Text
-            style={[styles.toolLabel, snapToGrid && styles.toolSnapActiveLabel]}
-            numberOfLines={1}
-          >
-            Snap
-          </Text>
+        <Ionicons
+          name={snapToGrid ? "magnet" : "magnet-outline"}
+          size={18}
+          color={snapToGrid ? COLORS.primaryDark : COLORS.textTertiary}
+        />
+        <View style={styles.snapCopy}>
+          <Text style={styles.snapTitle}>Snap to the grid</Text>
+          <Text style={styles.snapText} numberOfLines={1}>Corners land on the nearest grid line.</Text>
+        </View>
+        <View style={[styles.switchTrack, snapToGrid && styles.switchTrackOn]}>
+          <View style={[styles.switchKnob, snapToGrid && styles.switchKnobOn]} />
         </View>
       </Pressable>
     </View>
@@ -3632,11 +3715,10 @@ const styles = StyleSheet.create({
   // from the shape alone — a filled dot on its own only says "done".
   stepActive: { width: ms(31), height: ms(31) },
   stepPressed: { opacity: 0.7 },
-  stepConnector: { width: ms(18), height: 2, backgroundColor: "rgba(255,255,255,0.24)" },
+  stepConnector: { flex: 1, height: 2, backgroundColor: "rgba(255,255,255,0.24)" },
   stepConnectorDone: { backgroundColor: COLORS.white },
   stepNumber: { ...TYPE.caption, fontSize: 11, color: "rgba(255,255,255,0.72)" },
   stepNumberActive: { color: COLORS.brand800 },
-  stepCaption: { ...TYPE.caption, color: COLORS.white, marginLeft: SPACING.md, flexShrink: 1 },
 
   // ── Library ──────────────────────────────────────────────────────────────
   libraryScreen: { flex: 1, backgroundColor: COLORS.background },
@@ -3717,7 +3799,9 @@ const styles = StyleSheet.create({
   // One gutter for the whole flow, so the canvas, the controls under it and the
   // walkthrough overlay on the last step all line up with each other.
   body: { paddingHorizontal: SPACING.base, paddingTop: SPACING.base, paddingBottom: SPACING.xxxl },
-  stageCopy: { ...TYPE.small, color: COLORS.textSecondary, marginBottom: SPACING.md },
+  stageHead: { marginBottom: SPACING.base, gap: SPACING.xs },
+  stageTitle: { ...TYPE.h2, color: COLORS.textPrimary },
+  stageCopy: { ...TYPE.small, color: COLORS.textSecondary },
 
   sourceBar: {
     marginBottom: SPACING.sm, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm + 2,
@@ -3738,35 +3822,51 @@ const styles = StyleSheet.create({
   },
 
   palette: {
-    flexDirection: "row", flexWrap: "wrap",
-    marginBottom: SPACING.sm, padding: SPACING.xs,
+    marginBottom: SPACING.sm, padding: SPACING.md,
     borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border,
+    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
   },
-  // A quarter each, so two rows of four line up exactly and no label's length
-  // can change a button's size.
-  toolCell: { width: "25%", padding: 3 },
+  paletteGroupNext: { marginTop: SPACING.md },
+  paletteGroupLabel: { ...TYPE.overline, color: COLORS.textTertiary, marginBottom: SPACING.sm },
+  // Cells flex within their own group, so each row fills the card whether it
+  // holds three tools or four and no label's length can change a button's size.
+  paletteRow: { flexDirection: "row", marginHorizontal: -3 },
+  toolCell: { flex: 1, paddingHorizontal: 3 },
   tool: {
-    height: ms(52), alignItems: "center", justifyContent: "center", gap: 3,
+    height: ms(56), alignItems: "center", justifyContent: "center", gap: 4,
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
-  toolActive: { backgroundColor: COLORS.primaryDark },
-  // Snapping is a mode, not a tool, so it is tinted rather than filled — it must
-  // not compete with the one tool that is actually armed.
-  toolSnapActive: { backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft },
-  toolSnapActiveLabel: { color: COLORS.primaryDark },
+  toolActive: { backgroundColor: COLORS.primaryDark, ...SHADOW.xs },
   toolLabel: { ...TYPE.caption, fontSize: 10, color: COLORS.textSecondary },
   toolLabelActive: { color: COLORS.white },
 
-  hintRow: {
-    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
-    marginBottom: SPACING.md, paddingHorizontal: SPACING.xs,
+  snapRow: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    marginTop: SPACING.md, paddingTop: SPACING.md, minHeight: ms(44),
+    borderTopWidth: 1, borderTopColor: COLORS.border,
   },
-  hintRowText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 17 },
-  hintRowTool: { color: COLORS.primaryDark },
+  snapCopy: { flex: 1, minWidth: 0 },
+  snapTitle: { ...TYPE.caption, color: COLORS.textPrimary },
+  snapText: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary, marginTop: 1 },
 
-  canvasFrame: { alignSelf: "center" },
-  canvasFrameFocused: { marginHorizontal: -SPACING.base },
+  canvasCard: {
+    borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+  },
+  // Expanded, the drawing surface takes the full width of the phone, so the card
+  // gives up the side hairlines it would otherwise draw off-screen.
+  canvasCardFocused: {
+    marginHorizontal: -SPACING.base,
+    borderRadius: 0, borderLeftWidth: 0, borderRightWidth: 0,
+  },
+  canvasHint: {
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.primaryTint,
+    borderBottomWidth: 1, borderBottomColor: COLORS.primarySoft,
+  },
+  canvasHintText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 17 },
+  canvasHintTool: { color: COLORS.primaryDark },
 
   drawingBar: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
@@ -3820,6 +3920,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
   },
   cardSectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  roomIndexLabel: { ...TYPE.overline, color: COLORS.textTertiary, marginBottom: SPACING.sm },
   cardHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.xs },
   roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
   roomNameField: {
@@ -3996,11 +4097,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.xs, paddingBottom: SPACING.sm,
   },
   footerHintText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 16 },
-  footerGhost: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border },
-  footerGhostText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.textPrimary },
-  footerPrimary: { backgroundColor: COLORS.primaryDark },
-  footerPrimaryDisabled: { backgroundColor: COLORS.disabled },
-  footerPrimaryText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.white },
+  footerGhost: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.borderStrong },
+  footerGhostText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.textPrimary },
+  footerPrimary: { backgroundColor: COLORS.primaryDark, ...SHADOW.sm },
+  footerPrimaryDisabled: { backgroundColor: COLORS.disabled, ...SHADOW.none },
+  footerPrimaryText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.white },
 
   // ── Viewer ───────────────────────────────────────────────────────────────
   // One overlay column, pinned to the safe area, holding a top and a bottom
@@ -4330,9 +4431,11 @@ const styles = StyleSheet.create({
   },
   cardTitleMeta: { ...TYPE.caption, color: COLORS.textTertiary, flexShrink: 1 },
 
+  // 50pt, and the primary carries the row's only elevation, so which of the two
+  // equal-width buttons is the way forward reads before either label does.
   footerButton: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: SPACING.xs + 2, height: ms(44), borderRadius: RADIUS.md,
+    gap: SPACING.xs + 2, height: ms(50), borderRadius: RADIUS.md,
   },
 
   // ── Confirm dialog, matching the Collection screen's delete dialog ────────
