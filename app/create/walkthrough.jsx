@@ -1723,7 +1723,6 @@ export default function WalkthroughScreen() {
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
               onFocusRoom={focusRoom}
-              onCapture={() => requestCapture("photo")}
               onRender={() => requestCapture("ai")}
               onSetPanel={setPanel}
               onSetCameraSource={changeCameraSource}
@@ -2365,7 +2364,6 @@ function WalkthroughStage({
   onChangeMode,
   onToggleNight,
   onFocusRoom,
-  onCapture,
   onRender,
   onSetPanel,
   onSetCameraSource,
@@ -2374,7 +2372,7 @@ function WalkthroughStage({
 }) {
   const insets = useSafeAreaInsets();
   const showingAi = outputMode === "ai" && currentRender;
-  const sheetOpen = !!inspected || panel === "ai";
+  const sheetOpen = !!inspected || panel === "ai" || panel === "info";
   const showStick = viewMode === "walk" && !showingAi && !sheetOpen;
   const showRooms = roomConfigs.length > 1 && !showingAi;
   // Controls only make sense once there is a home to point them at. Showing a
@@ -2671,50 +2669,30 @@ function WalkthroughStage({
 
           {showStick && <MoveStick onChange={drive} />}
 
+          {/* Two buttons, one line. The dock used to carry a status strip, a
+              furniture-count chip, a "Photo" button and the render button —
+              four things over the room, three of which were read-only. The
+              state they reported now lives behind the info button, which spins
+              while the scene is still being prepared, so "not ready yet" is
+              still visible without a strip to say it. */}
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              <View style={styles.dockSummary} accessibilityLiveRegion="polite">
-                <View style={styles.dockSceneIcon}>
-                  {status.busy
-                    ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
-                    : <Ionicons name="cube" size={17} color={COLORS.primaryDark} />}
-                </View>
-                <View style={styles.dockSummaryCopy}>
-                  <Text style={styles.dockEyebrow}>{status.busy ? "Preparing scene" : "Ready to capture"}</Text>
-                  <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
-                </View>
-                {!status.busy && (
-                  <View style={styles.furnitureCount} accessibilityLabel={`${sceneInfo?.objects || 0} furniture pieces`}>
-                    <Ionicons name="bed-outline" size={15} color={COLORS.primaryDark} />
-                    <Text style={styles.furnitureCountValue}>{sceneInfo?.objects || 0}</Text>
-                    <Text style={styles.furnitureCountLabel}>pieces</Text>
-                  </View>
-                )}
-              </View>
-
               <View style={styles.dockActions} pointerEvents="box-none">
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Take a photo of this view"
-                  accessibilityState={{ busy: busy === "capture", disabled: busy === "capture" }}
+                  accessibilityLabel="Scene details"
+                  accessibilityState={{ expanded: panel === "info", busy: status.busy }}
+                  accessibilityLiveRegion="polite"
                   android_ripple={{ color: "rgba(30,36,31,0.14)" }}
-                  style={({ pressed }) => [
-                    styles.dockSecondary,
-                    busy === "capture" && styles.dockSecondaryBusy,
-                    pressed && styles.pressedSurface,
-                  ]}
-                  onPress={onCapture}
-                  disabled={busy === "capture"}
+                  style={({ pressed }) => [styles.dockSecondary, pressed && styles.pressedSurface]}
+                  onPress={() => onSetPanel(panel === "info" ? null : "info")}
                 >
-                  <View style={styles.dockActionIconSecondary}>
-                    {busy === "capture"
-                      ? <ActivityIndicator color={COLORS.primaryDark} size="small" />
-                      : <Ionicons name="camera-outline" size={19} color={COLORS.primaryDark} />}
-                  </View>
-                  <View style={styles.dockActionCopy}>
-                    <Text style={styles.dockSecondaryText} numberOfLines={1}>Photo</Text>
-                    <Text style={styles.dockActionHint} numberOfLines={1}>Save this view</Text>
-                  </View>
+                  {status.busy
+                    ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                    : <Ionicons name="information-circle-outline" size={19} color={COLORS.primaryDark} />}
+                  <Text style={styles.dockSecondaryText} numberOfLines={1}>
+                    {status.busy ? "Preparing" : "Scene"}
+                  </Text>
                 </Pressable>
 
                 <Pressable
@@ -2736,14 +2714,8 @@ function WalkthroughStage({
                     style={StyleSheet.absoluteFill}
                     pointerEvents="none"
                   />
-                  <View style={styles.dockActionIconPrimary}>
-                    <Ionicons name="sparkles" size={18} color={COLORS.white} />
-                  </View>
-                  <View style={styles.dockActionCopy}>
-                    <Text style={styles.dockPrimaryText} numberOfLines={1}>AI render</Text>
-                    <Text style={styles.dockPrimaryHint} numberOfLines={1}>Photorealistic</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.82)" />
+                  <Ionicons name="sparkles" size={18} color={COLORS.white} />
+                  <Text style={styles.dockPrimaryText} numberOfLines={1}>AI render</Text>
                 </Pressable>
               </View>
             </View>
@@ -2774,7 +2746,80 @@ function WalkthroughStage({
         }}
         onRender={onRender}
       />
+
+      <SceneSheet
+        visible={panel === "info" && !showingAi}
+        status={status}
+        sceneInfo={sceneInfo}
+        room={roomConfigs[selectedRoom]}
+        viewMode={viewMode}
+        onClose={() => onSetPanel(null)}
+      />
     </View>
+  );
+}
+
+/**
+ * What the dock's status strip used to say, on request.
+ *
+ * It was three read-only elements permanently over the room — an eyebrow, a
+ * truncating status line and a furniture-count chip — competing with the two
+ * controls that actually do something. None of it changes more than twice in a
+ * session, so it belongs behind a tap.
+ */
+function SceneSheet({ visible, status, sceneInfo, room, viewMode, onClose }) {
+  const rows = [
+    { icon: "cube-outline", label: "Scene", value: status.label },
+    { icon: "bed-outline", label: "Furniture", value: `${sceneInfo?.objects || 0} pieces` },
+    { icon: "home-outline", label: "Room", value: room?.name || room?.roomType || "Interior" },
+    {
+      icon: viewMode === "plan" ? "map-outline" : "walk-outline",
+      label: "View",
+      value: viewMode === "plan" ? "Floor plan, from above" : "Walking through the room",
+    },
+  ];
+
+  return (
+    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={() => {}}>
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHead}>
+            <View style={styles.sheetIcon}>
+              {status.busy
+                ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                : <Ionicons name="information-circle-outline" size={18} color={COLORS.primaryDark} />}
+            </View>
+            <View style={styles.sheetHeadCopy}>
+              <Text style={styles.sheetTitle}>Scene details</Text>
+              <Text style={styles.sheetSubtitle}>
+                {status.busy ? "Still preparing this view" : "Ready to render"}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              hitSlop={LAYOUT.hitSlop}
+              style={({ pressed }) => [styles.sheetCloseIcon, pressed && styles.pressedSurface]}
+              onPress={onClose}
+            >
+              <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+            </Pressable>
+          </View>
+
+          <View style={styles.sceneRows}>
+            {rows.map((row) => (
+              <View key={row.label} style={styles.sceneRow}>
+                <Ionicons name={row.icon} size={16} color={COLORS.textSecondary} />
+                <Text style={styles.sceneRowLabel}>{row.label}</Text>
+                <Text style={styles.sceneRowValue} numberOfLines={1}>{row.value}</Text>
+              </View>
+            ))}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -5208,49 +5253,30 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.78)",
     ...SHADOW.lg,
   },
-  dockSummary: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  dockSceneIcon: {
-    width: ms(38), height: ms(38), borderRadius: RADIUS.md,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
-  },
-  dockSummaryCopy: { flex: 1, minWidth: 0 },
-  dockEyebrow: { ...TYPE.overline, fontSize: 9, color: COLORS.textTertiary },
-  statusText: { ...TYPE.caption, color: COLORS.textPrimary, marginTop: 1 },
-  furnitureCount: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    height: ms(36), paddingHorizontal: SPACING.sm + 2,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint,
-    borderWidth: 1, borderColor: COLORS.brand100,
-  },
-  furnitureCountValue: { ...TYPE.bodyStrong, fontSize: 13, color: COLORS.primaryDark },
-  furnitureCountLabel: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textSecondary },
+  // Two buttons, centred labels, one line each. The icon chips, the second
+  // "hint" line under each label and the status strip above them are gone: at
+  // 58pt tall with two stacked texts they were a panel, not a control bar.
   dockActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  dockActionCopy: { flex: 1, minWidth: 0 },
-  dockActionIconSecondary: {
-    width: ms(36), height: ms(36), borderRadius: RADIUS.sm,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
-  },
-  dockActionIconPrimary: {
-    width: ms(36), height: ms(36), borderRadius: RADIUS.sm,
-    alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.18)",
-  },
-  dockActionHint: { ...TYPE.caption, fontSize: 9.5, color: COLORS.textTertiary, marginTop: 1 },
-  dockPrimaryHint: { ...TYPE.caption, fontSize: 9.5, color: "rgba(255,255,255,0.74)", marginTop: 1 },
   dockPrimary: {
-    flex: 1.3, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    height: ms(58), paddingHorizontal: SPACING.md, overflow: "hidden",
+    flex: 1.4, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: SPACING.sm, height: ms(50), paddingHorizontal: SPACING.md, overflow: "hidden",
     borderRadius: RADIUS.lg, backgroundColor: COLORS.accent, ...SHADOW.sm,
   },
   dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
-  dockPrimaryText: { ...TYPE.bodyStrong, fontSize: 14, color: COLORS.white },
+  dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
   dockSecondary: {
-    flex: 1, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    height: ms(58), paddingHorizontal: SPACING.sm,
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: SPACING.sm, height: ms(50), paddingHorizontal: SPACING.md,
     borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  dockSecondaryBusy: { backgroundColor: COLORS.surfaceSunken },
-  dockSecondaryText: { ...TYPE.bodyStrong, fontSize: 13, color: COLORS.textPrimary },
+  dockSecondaryText: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+
+  // ── Scene sheet ──────────────────────────────────────────────────────────
+  sceneRows: { gap: SPACING.base, marginTop: SPACING.sm },
+  sceneRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  sceneRowLabel: { ...TYPE.small, color: COLORS.textSecondary, width: ms(86) },
+  sceneRowValue: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary, textAlign: "right" },
 
   // ── Sheets ───────────────────────────────────────────────────────────────
   // One shape for everything that slides up in this flow — the render brief, the
