@@ -138,6 +138,29 @@ export function variantForWidth(kind, meters) {
   ).label;
 }
 
+/**
+ * The widest this opening can be, in metres: the straight run of wall it sits
+ * on, less the hairline return `snapOpeningToNearestWall` keeps at each end.
+ *
+ * The editor needs this to say what the limit *is*. Widening used to stop
+ * silently at the wall — the number in the field simply refused to grow past
+ * some value the user could not see, which reads as a bug in the control rather
+ * than as a fact about the wall.
+ */
+export function maxOpeningMeters(opening, rooms, pixelsPerMeter) {
+  if (!opening?.points?.[0] || !rooms?.length) return null;
+  const [start, end] = opening.points;
+  const midpoint = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+  const margin = Math.max(2, pixelsPerMeter * 0.05);
+  let best = null;
+  wallsOf(rooms).forEach((wall) => {
+    const hit = projectOnSegment(midpoint, wall.start, wall.end);
+    if (!best || hit.distance < best.distance) best = { distance: hit.distance, length: wall.length };
+  });
+  if (!best) return null;
+  return Math.max(OPENING_MIN_METERS, (best.length - margin * 2) / pixelsPerMeter);
+}
+
 export function openingWidthMeters(opening, pixelsPerMeter) {
   if (!opening?.points?.[0] || !opening?.points?.[1]) return 0;
   return Math.hypot(
@@ -216,25 +239,86 @@ function projectOnSegment(point, start, end) {
   return { point: nearest, t, distance: Math.hypot(point[0] - nearest[0], point[1] - nearest[1]) };
 }
 
+/** Two directions count as the same wall below this much deviation. */
+const COLLINEAR_EPSILON = Math.cos((3 * Math.PI) / 180);
+
+/**
+ * The *walls* of a plan, as opposed to the edges of its polygons.
+ *
+ * A polygon edge is not a wall. Tracing a plan, tapping corners with the Outline
+ * tool, or dragging a handle that inserts a vertex all leave a straight run of
+ * wall split into two or three collinear edges — and an opening was snapped to a
+ * single edge, so its length was capped by whichever fragment it landed on. A
+ * 5 m wall that happened to carry a spare vertex in the middle would not take an
+ * opening wider than 2.5 m, with nothing on screen to explain why, because the
+ * two halves look exactly like one wall.
+ *
+ * Merging consecutive edges that continue in the same direction gives openings
+ * the whole straight run to sit on, which is the freedom the plan already looks
+ * like it offers. Corners still stop them: an opening that bends around one is
+ * not an opening, it is a missing corner.
+ */
+export function wallsOf(rooms = []) {
+  const walls = [];
+  rooms.forEach((room) => {
+    if (!Array.isArray(room) || room.length < 2) return;
+    const edges = room.map((start, index) => {
+      const end = room[(index + 1) % room.length];
+      const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+      return { start, end, length };
+    }).filter((edge) => edge.length > 0.001);
+    if (!edges.length) return;
+
+    // Start from a real corner so the walk cannot begin in the middle of a run
+    // and leave that run split at the seam where it wrapped around.
+    const sameDirection = (a, b) => {
+      const ax = (a.end[0] - a.start[0]) / a.length;
+      const ay = (a.end[1] - a.start[1]) / a.length;
+      const bx = (b.end[0] - b.start[0]) / b.length;
+      const by = (b.end[1] - b.start[1]) / b.length;
+      return ax * bx + ay * by >= COLLINEAR_EPSILON;
+    };
+    let origin = 0;
+    for (let i = 0; i < edges.length; i += 1) {
+      const previous = edges[(i - 1 + edges.length) % edges.length];
+      if (!sameDirection(previous, edges[i])) { origin = i; break; }
+    }
+
+    let run = null;
+    for (let step = 0; step < edges.length; step += 1) {
+      const edge = edges[(origin + step) % edges.length];
+      if (run && sameDirection({ start: run.start, end: run.end, length: run.length }, edge)) {
+        run.end = edge.end;
+        run.length = Math.hypot(run.end[0] - run.start[0], run.end[1] - run.start[1]);
+      } else {
+        if (run) walls.push(run);
+        run = { start: edge.start, end: edge.end, length: edge.length };
+      }
+    }
+    if (run) walls.push(run);
+  });
+  return walls;
+}
+
 /**
  * Place an opening of `widthPx` centred on the wall nearest to `tap`, clamped
  * so it always leaves a buildable return at each end of the wall.
  */
 export function openingOnNearestWall(tap, rooms, widthPx, maxDistance) {
   let best = null;
-  rooms.forEach((room) => {
-    room.forEach((start, index) => {
-      const end = room[(index + 1) % room.length];
-      const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
-      if (length < widthPx * 0.9) return;
-      const hit = projectOnSegment(tap, start, end);
-      if (!best || hit.distance < best.distance) best = { ...hit, start, end, length };
-    });
+  // Walls that cannot hold the opening are ranked behind ones that can, but they
+  // are not discarded. Skipping them outright meant a wide opening could not be
+  // dragged at all once no single wall was long enough for it — the drag simply
+  // did nothing, with no way to tell that from a dropped gesture.
+  wallsOf(rooms).forEach((wall) => {
+    const hit = projectOnSegment(tap, wall.start, wall.end);
+    const score = hit.distance + (wall.length < widthPx * 0.9 ? maxDistance : 0);
+    if (!best || score < best.score) best = { ...hit, ...wall, score };
   });
   if (!best || best.distance > maxDistance) return null;
   const direction = [(best.end[0] - best.start[0]) / best.length, (best.end[1] - best.start[1]) / best.length];
   const margin = Math.min(widthPx * 0.35, best.length * 0.12);
-  const half = Math.min(widthPx, best.length - margin * 2) / 2;
+  const half = Math.max(0.5, Math.min(widthPx, best.length - margin * 2) / 2);
   const centre = Math.max(margin + half, Math.min(best.length - margin - half, best.t * best.length));
   return [
     [best.start[0] + direction[0] * (centre - half), best.start[1] + direction[1] * (centre - half)],
@@ -244,9 +328,14 @@ export function openingOnNearestWall(tap, rooms, widthPx, maxDistance) {
 
 /**
  * Project a user-drawn opening onto one wall while preserving its requested
- * length. This is the mobile equivalent of the web studio's opening editor:
- * a short stroke becomes the minimum valid opening, while a long stroke can
- * create a double door, wide opening, window wall, or balcony slider.
+ * length.
+ *
+ * The length the user asked for is honoured up to the length of the wall it sits
+ * on, less a hairline return at each end — so a door, a double door, a
+ * pass-through and an opening that takes almost the whole wall are all the same
+ * gesture at different sizes, and none of them is a preset. The only cap is the
+ * wall, and thanks to `wallsOf` that means the whole straight run rather than
+ * whichever polygon edge happened to be under the stroke.
  */
 export function snapOpeningToNearestWall(opening, rooms, kind, pixelsPerMeter) {
   if (!opening?.[0] || !opening?.[1] || !rooms?.length) return null;
@@ -258,28 +347,31 @@ export function snapOpeningToNearestWall(opening, rooms, kind, pixelsPerMeter) {
   const margin = Math.max(2, pixelsPerMeter * 0.05);
   let best = null;
 
-  rooms.forEach((room) => room.forEach((edgeStart, index) => {
-    const edgeEnd = room[(index + 1) % room.length];
-    const edge = [edgeEnd[0] - edgeStart[0], edgeEnd[1] - edgeStart[1]];
-    const length = Math.hypot(edge[0], edge[1]);
+  wallsOf(rooms).forEach((wall) => {
+    const { start: wallStart, length } = wall;
     if (length < margin * 2 + 1) return;
-    const direction = [edge[0] / length, edge[1] / length];
+    const direction = [(wall.end[0] - wallStart[0]) / length, (wall.end[1] - wallStart[1]) / length];
     const midpointT = Math.max(0, Math.min(
       length,
-      (midpoint[0] - edgeStart[0]) * direction[0] + (midpoint[1] - edgeStart[1]) * direction[1],
+      (midpoint[0] - wallStart[0]) * direction[0] + (midpoint[1] - wallStart[1]) * direction[1],
     ));
-    const nearest = [edgeStart[0] + direction[0] * midpointT, edgeStart[1] + direction[1] * midpointT];
+    const nearest = [wallStart[0] + direction[0] * midpointT, wallStart[1] + direction[1] * midpointT];
     const distance = Math.hypot(midpoint[0] - nearest[0], midpoint[1] - nearest[1]);
     const alignment = Math.abs((drawn[0] * direction[0] + drawn[1] * direction[1]) / drawnLength);
     const score = distance + (1 - alignment) * pixelsPerMeter * 0.45;
-    if (!best || score < best.score) best = { edgeStart, direction, length, midpointT, score };
-  }));
+    if (!best || score < best.score) best = { wallStart, direction, length, midpointT, score, distance };
+  });
 
-  if (!best || best.score > pixelsPerMeter * 1.25) return null;
-  const projectedStart = (start[0] - best.edgeStart[0]) * best.direction[0]
-    + (start[1] - best.edgeStart[1]) * best.direction[1];
-  const projectedEnd = (end[0] - best.edgeStart[0]) * best.direction[0]
-    + (end[1] - best.edgeStart[1]) * best.direction[1];
+  // Judged on where the stroke *is*, not on how neatly it was drawn. The old
+  // test compared the alignment-weighted score against the threshold, so a
+  // deliberate stroke drawn a little off the wall's angle — which is every
+  // stroke drawn with a thumb — scored past the limit and the opening was
+  // dropped with nothing to say it had been.
+  if (!best || best.distance > pixelsPerMeter * 1.25) return null;
+  const projectedStart = (start[0] - best.wallStart[0]) * best.direction[0]
+    + (start[1] - best.wallStart[1]) * best.direction[1];
+  const projectedEnd = (end[0] - best.wallStart[0]) * best.direction[0]
+    + (end[1] - best.wallStart[1]) * best.direction[1];
   const requestedLength = Math.max(
     Math.abs(projectedEnd - projectedStart),
     spec.minimumMeters * pixelsPerMeter,
@@ -292,8 +384,8 @@ export function snapOpeningToNearestWall(opening, rooms, kind, pixelsPerMeter) {
   const from = centre - openingLength / 2;
   const to = centre + openingLength / 2;
   return [
-    [best.edgeStart[0] + best.direction[0] * from, best.edgeStart[1] + best.direction[1] * from],
-    [best.edgeStart[0] + best.direction[0] * to, best.edgeStart[1] + best.direction[1] * to],
+    [best.wallStart[0] + best.direction[0] * from, best.wallStart[1] + best.direction[1] * from],
+    [best.wallStart[0] + best.direction[0] * to, best.wallStart[1] + best.direction[1] * to],
   ];
 }
 
@@ -320,7 +412,6 @@ export default function PlanCanvas({
   onCloseRoom,
   onAddRoom,
   onAddOpening,
-  onRemoveOpening,
   onSelectRoom,
   onMoveRoom,
   onMoveVertex,
@@ -492,13 +583,12 @@ export default function PlanCanvas({
     }
     const spec = OPENING_SPECS[tool];
     if (!spec) return;
-    const existing = openings.findIndex(
-      (opening) => projectOnSegment(raw, opening.points[0], opening.points[1]).distance < touchSlop,
-    );
-    if (existing >= 0) {
-      onRemoveOpening?.(existing);
-      return;
-    }
+    // A placement tool places. Tapping within a finger's width of an existing
+    // opening used to *delete* it instead, which meant that putting a door near
+    // the corner of a room — where the door on the wall running away from you is
+    // only a few pixels off — silently removed that door and added nothing. The
+    // Edit tool selects an opening and offers Delete, which is undoable and says
+    // what it is about to remove.
     const placed = openingOnNearestWall(raw, rooms, spec.meters * pixelsPerMeter, touchSlop * 2.4);
     if (placed) onAddOpening?.({ kind: tool, points: placed, ...openingDefaults(tool) });
   };

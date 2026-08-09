@@ -35,6 +35,7 @@ import PlanCanvas, {
   ROOM_TINTS,
   SHEET_WIDTH,
   buildCurveGeometry,
+  maxOpeningMeters,
   openingOnNearestWall,
   openingDefaults,
   openingWidthMeters,
@@ -235,6 +236,10 @@ export default function WalkthroughScreen() {
   const [syncState, setSyncState] = useState("idle"); // 'idle' | 'saving' | 'saved'
   const [renaming, setRenaming] = useState(null); // null | 'current' | project
   const [pendingDelete, setPendingDelete] = useState(null);
+  // The plan whose "more" sheet is open. Rename and delete used to be two
+  // buttons on every row of the library, so a six-plan list showed six ways to
+  // delete an evening's work next to six ways to open it.
+  const [planActions, setPlanActions] = useState(null);
   // Two destructive actions that used to fire on one tap. Clearing the plan is
   // undoable, but Undo lives in the Draw step's action row and says nothing
   // about what it would bring back; deleting a room happens on the Rooms step,
@@ -317,6 +322,22 @@ export default function WalkthroughScreen() {
     [pixelsPerMeter, rooms],
   );
 
+  /**
+   * The room list as the exporter wants it: every room carrying the home's one
+   * style.
+   *
+   * The exporter's contract is still per-room — it furnishes each space against
+   * its own config — so the single choice is stamped onto all of them here
+   * rather than being pushed into every room's stored config on every change.
+   * That also means a plan saved when the style was still asked per room reopens
+   * under whichever style the home now has, instead of keeping five answers to a
+   * question that is no longer asked.
+   */
+  const sceneRoomConfigs = useMemo(
+    () => roomConfigs.map((room) => ({ ...room, style: settings.style || "Modern" })),
+    [roomConfigs, settings.style],
+  );
+
   const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
   const currentRender = aiRenders[aiKey];
 
@@ -345,7 +366,7 @@ export default function WalkthroughScreen() {
       windows: layout.windows.map((opening) => opening.slice(0, 2)),
       balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
       pixelsPerMeter: layout.pixelsPerMeter,
-      configs: roomConfigs.map((room) => [room.name, room.roomType, room.style, room.kitchenType || ""]),
+      configs: sceneRoomConfigs.map((room) => [room.name, room.roomType, room.style, room.kitchenType || ""]),
       // The design fields the exporter reads. `freeExplore` is not among them:
       // it decides whether the camera may walk through a wall, which is a
       // property of the viewer, not of the home.
@@ -360,7 +381,7 @@ export default function WalkthroughScreen() {
         settings.decorSet,
       ],
     }),
-    [layout, roomConfigs, settings],
+    [layout, sceneRoomConfigs, settings],
   );
 
   /**
@@ -426,7 +447,7 @@ export default function WalkthroughScreen() {
             windows: layout.windows.map((opening) => opening.slice(0, 2)),
             balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
             pixelsPerMeter: layout.pixelsPerMeter,
-            roomConfigs,
+            roomConfigs: sceneRoomConfigs,
             settings: { ...settings, useCatalog: true },
             width: 960,
             height: 600,
@@ -477,7 +498,7 @@ export default function WalkthroughScreen() {
     })();
 
     return () => controller.abort();
-  }, [exactSceneRetry, layout, roomConfigs, sceneSignature, settings, stage, token, view]);
+  }, [exactSceneRetry, layout, sceneRoomConfigs, sceneSignature, settings, stage, token, view]);
 
   /**
    * Try again, and mean it.
@@ -520,7 +541,18 @@ export default function WalkthroughScreen() {
       ...opening,
       points: opening.points.map(toPixels),
     })));
-    setSettings({ ...DEFAULT_WALKTHROUGH_SETTINGS, ...(saved.settings || {}), useCatalog: true });
+    // Plans saved while the style was still asked per room have no home style at
+    // all, so the first room's answer becomes the home's. Taking the default
+    // instead would silently re-decorate a plan someone had already finished.
+    const savedSettings = saved.settings || {};
+    setSettings({
+      ...DEFAULT_WALKTHROUGH_SETTINGS,
+      ...savedSettings,
+      style: savedSettings.style
+        || (saved.roomConfigs || []).find((room) => room?.style)?.style
+        || DEFAULT_WALKTHROUGH_SETTINGS.style,
+      useCatalog: true,
+    });
     setFurnitureEdits(saved.furnitureEdits || {});
     setSelectedRoom(Number(saved.selectedRoom) || 0);
     setStage(Math.max(0, Math.min(STAGES.length - 1, Number(saved.stage) || 0)));
@@ -636,10 +668,11 @@ export default function WalkthroughScreen() {
   }, [syncState]);
 
   // ── Plan editing ─────────────────────────────────────────────────────────
+  // No `style` here. A room is a name, a purpose and a measured shape; how it is
+  // decorated is a property of the home, and lives in `settings.style`.
   const configFor = (index) => ({
     name: `Room ${index + 1}`,
     roomType: ROOM_TYPES[index % ROOM_TYPES.length],
-    style: "Modern",
   });
 
   const currentPlanSnapshot = useCallback(
@@ -1119,11 +1152,15 @@ export default function WalkthroughScreen() {
 
   const updateRoom = useCallback((index, key, value) => {
     setRoomConfigs((current) => current.map((room, i) => (i === index ? { ...room, [key]: value } : room)));
-    if (key === "roomType" || key === "style") setFurnitureEdits({});
+    if (key === "roomType") setFurnitureEdits({});
   }, []);
 
   const updateSetting = useCallback((key, value) => {
     setSettings((current) => ({ ...current, [key]: value }));
+    // Furniture edits are keyed by the piece's index in the exported scene, and
+    // a different style furnishes a room with different pieces in a different
+    // order. Keeping them would move whatever happened to land at index 7.
+    if (key === "style") setFurnitureEdits({});
   }, []);
 
   const updateFurnitureEdit = useCallback((id, transform) => {
@@ -1202,7 +1239,7 @@ export default function WalkthroughScreen() {
           image,
           mode: "interior",
           roomType: viewMode === "plan" ? "Floor Plan" : room.roomType || "Living Room",
-          designStyle: room.style || "Modern",
+          designStyle: settings.style || "Modern",
           colorTone: settings.colorMood || "Warm neutral",
           colorPalette: paletteForRequest(settings.colorMood),
           material: settings.floorFinish === "Auto by style" ? "Natural oak" : settings.floorFinish,
@@ -1307,7 +1344,7 @@ export default function WalkthroughScreen() {
         body: JSON.stringify({
           image: snapshot,
           roomType: roomConfigs[selectedRoom]?.roomType || "3D Walkthrough",
-          designStyle: roomConfigs[selectedRoom]?.style || "Modern",
+          designStyle: settings.style || "Modern",
           colorTone: settings.colorMood,
           notes: settings.notes,
         }),
@@ -1369,8 +1406,7 @@ export default function WalkthroughScreen() {
           onRefresh={refreshLibrary}
           onStart={startNewProject}
           onOpen={openSavedProject}
-          onRename={setRenaming}
-          onDelete={setPendingDelete}
+          onMore={setPlanActions}
         />
       ) : (
         <>
@@ -1397,7 +1433,12 @@ export default function WalkthroughScreen() {
                     within it, so it is the eyebrow. These were the other way
                     round, which put the one editable thing on the screen in
                     10.5pt uppercase and gave the h2 to a sentence that changed
-                    under the reader every time they pressed Continue. */}
+                    under the reader every time they pressed Continue.
+                    Where you are, then what you are working on. The step used
+                    to be set in the same 10.5pt uppercase the library uses for
+                    a section kicker, which made a value that changes four times
+                    read as a fixed label; it is a chip now, because that is what
+                    a chip is for. */}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Plan name, ${projectTitle}`}
@@ -1405,12 +1446,14 @@ export default function WalkthroughScreen() {
                   style={({ pressed }) => [styles.headerCopy, pressed && styles.pressedSurface]}
                   onPress={() => setRenaming("current")}
                 >
-                  <Text style={styles.headerEyebrow} numberOfLines={1}>
-                    {`Step ${stage + 1} of ${STAGES.length} · ${current.label}`}
-                  </Text>
+                  <View style={styles.headerStepChip}>
+                    <Text style={styles.headerStepChipText} numberOfLines={1}>
+                      {`Step ${stage + 1} of ${STAGES.length} · ${current.label}`}
+                    </Text>
+                  </View>
                   <View style={styles.headerTitleRow}>
                     <Text style={styles.headerTitle} numberOfLines={1}>{projectTitle}</Text>
-                    <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.7)" />
+                    <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.72)" />
                   </View>
                 </Pressable>
 
@@ -1498,7 +1541,7 @@ export default function WalkthroughScreen() {
             <WalkthroughStage
               viewerRef={viewerRef}
               layout={layout}
-              roomConfigs={roomConfigs}
+              roomConfigs={sceneRoomConfigs}
               settings={settings}
               furnitureEdits={furnitureEdits}
               exactScene={exactScene}
@@ -1636,7 +1679,6 @@ export default function WalkthroughScreen() {
                       onCloseRoom={closeRoom}
                       onAddRoom={commitRoom}
                       onAddOpening={addOpening}
-                      onRemoveOpening={removeOpening}
                       onSelectRoom={setSelectedRoom}
                       onMoveRoom={moveRoom}
                       onMoveVertex={moveVertex}
@@ -1739,6 +1781,7 @@ export default function WalkthroughScreen() {
                       />
                       <OpeningWidthControl
                         widthMeters={openingWidthMeters(openings[selection.index], pixelsPerMeter)}
+                        maxMeters={maxOpeningMeters(openings[selection.index], rooms, pixelsPerMeter)}
                         onChange={(meters) => editOpening(selection.index, { meters })}
                       />
                     </View>
@@ -1856,8 +1899,10 @@ export default function WalkthroughScreen() {
                         onFocus={() => setSelectedRoom(index)}
                         onResize={resizeRoom}
                       />
+                      {/* Name, size, purpose. The style chip that used to sit
+                          under this asked the same twelve-option question once
+                          per room; it is now asked once, on the Style step. */}
                       <ChipRow label="Room type" options={ROOM_TYPES} value={room.roomType} onChange={(v) => updateRoom(index, "roomType", v)} />
-                      <ChipRow label="Style" options={WALKTHROUGH_STYLES} value={room.style} onChange={(v) => updateRoom(index, "style", v)} />
                     </View>
                   ))}
                 </>
@@ -1879,6 +1924,8 @@ export default function WalkthroughScreen() {
                         pairs the whole flow is built on, so they are two cards. */}
                     <View style={styles.card}>
                       <Text style={styles.cardSectionTitle}>Direction</Text>
+                      {/* One style for the whole home, asked once. */}
+                      <ChipRow label="Design style" options={WALKTHROUGH_STYLES} value={settings.style} onChange={(v) => updateSetting("style", v)} />
                       <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
                       <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
                     </View>
@@ -2011,6 +2058,19 @@ export default function WalkthroughScreen() {
       )}
 
       {/* ── Dialogs shared by both views ────────────────────────────────── */}
+      <PlanActionSheet
+        project={planActions}
+        onClose={() => setPlanActions(null)}
+        onRename={() => {
+          setRenaming(planActions);
+          setPlanActions(null);
+        }}
+        onDelete={() => {
+          setPendingDelete(planActions);
+          setPlanActions(null);
+        }}
+      />
+
       <RenameSheet
         target={renaming}
         currentTitle={projectTitle}
@@ -2243,19 +2303,17 @@ function WalkthroughStage({
         <View style={styles.overlayTop} pointerEvents="box-none">
           <View style={styles.viewControls} pointerEvents="box-none">
             {/* The Explore step has no footer, so it is the one step with no
-                Back beside its Continue. It is labelled rather than left as a
-                bare chevron: a lone arrow next to a lone sun, both round and
-                both white, gave two unrelated actions the same shape and left
-                neither of them saying what it did. */}
+                Back beside its Continue. A back chevron in the top-left corner
+                is the one icon that needs no label — and the control it used to
+                be confused with, the light toggle, now carries one. */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Back to Style"
-              android_ripple={{ color: "rgba(30,36,31,0.16)" }}
-              style={({ pressed }) => [styles.viewerBack, pressed && styles.pressedSurface]}
+              android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
+              style={({ pressed }) => [styles.roundButton, pressed && styles.pressedSurface]}
               onPress={onBackToDesign}
             >
-              <Ionicons name="chevron-back" size={17} color={COLORS.textPrimary} />
-              <Text style={styles.viewerBackText}>Style</Text>
+              <Ionicons name="chevron-back" size={20} color={COLORS.textPrimary} />
             </Pressable>
             <View style={styles.segmented} accessibilityRole="tablist">
               {VIEW_MODES.map((item) => {
@@ -2282,28 +2340,35 @@ function WalkthroughStage({
                 );
               })}
             </View>
-            {/* Day and evening, drawn as the two states of one control rather
-                than as a button that changes icon. The filled state is what
-                says which one you are in — a white circle holding a moon reads
-                as "press for night" and a dark circle holding a moon reads as
-                "you are in night", and only the second is true. */}
+            {/* The time of day, named.
+                This was a bare icon in a circle, and a circle holding a moon is
+                unreadable: it means "you are in night" or "press for night"
+                depending on which you assume, and there was nothing on screen to
+                settle it. Worse, the "on" fill was the brand's sage green, so
+                the one control in the app whose whole subject is light and dark
+                signalled evening with a mid-green disc.
+                It now says which one you are in, and looks like it: white paper
+                and a warm sun by day, near-black and a moon at night. */}
             <Pressable
               accessibilityRole="switch"
               accessibilityLabel={night ? "Evening light. Switch to daylight" : "Daylight. Switch to evening light"}
               accessibilityState={{ checked: night }}
-              android_ripple={{ color: night ? "rgba(255,255,255,0.20)" : "rgba(30,36,31,0.16)", borderless: true }}
+              android_ripple={{ color: night ? "rgba(255,255,255,0.20)" : "rgba(30,36,31,0.16)" }}
               style={({ pressed }) => [
-                styles.roundButton,
-                night && styles.roundButtonActive,
+                styles.lightToggle,
+                night && styles.lightToggleNight,
                 pressed && styles.pressedSurface,
               ]}
               onPress={onToggleNight}
             >
               <Ionicons
                 name={night ? "moon" : "sunny"}
-                size={18}
-                color={night ? COLORS.white : COLORS.warning}
+                size={16}
+                color={night ? COLORS.white : COLORS.accent}
               />
+              <Text style={[styles.lightToggleText, night && styles.lightToggleTextNight]}>
+                {night ? "Night" : "Day"}
+              </Text>
             </Pressable>
           </View>
 
@@ -2987,28 +3052,40 @@ function RoomSizeRow({ index, label, room, pixelsPerMeter, active, compact, onFo
 /**
  * Free width for the selected opening, in metres.
  *
- * The presets below it are shortcuts, not a cage: the steppers and the typed
- * value can set anything from a 0.3 m slot to a full-wall opening. The value is
- * clamped to the host wall by the snapper, so an over-long entry lands on the
- * widest span that wall can actually give.
+ * There is no preset cage here: the steppers and the typed value set anything
+ * from a 0.3 m slot to an opening that takes almost the whole wall, and the type
+ * chip above only decides the section — a head height and a sill — not a width.
+ *
+ * The one real limit is the wall, and it is now stated. Widening simply stopped
+ * at some number the user could not see, which reads as a broken stepper rather
+ * than as a fact about the plan; the cap is shown next to the label and the +
+ * button disables when it is reached.
  */
-function OpeningWidthControl({ widthMeters, onChange }) {
+function OpeningWidthControl({ widthMeters, maxMeters, onChange }) {
   const [draft, setDraft] = useState(null);
   const shown = draft ?? widthMeters.toFixed(2);
+  const ceiling = Number.isFinite(maxMeters) ? maxMeters : Infinity;
+  const atMax = widthMeters >= ceiling - 0.005;
+  const clamp = (value) => Math.min(ceiling, Math.max(OPENING_MIN_METERS, value));
   const step = (delta) => {
     setDraft(null);
-    onChange(Math.max(OPENING_MIN_METERS, Math.round((widthMeters + delta) * 100) / 100));
+    onChange(clamp(Math.round((widthMeters + delta) * 100) / 100));
   };
   const commit = () => {
     if (draft === null) return;
     const value = Number.parseFloat(draft);
     setDraft(null);
     if (!Number.isFinite(value) || Math.abs(value - widthMeters) < 0.005) return;
-    onChange(Math.max(OPENING_MIN_METERS, value));
+    onChange(clamp(value));
   };
   return (
     <View style={styles.openingWidth}>
-      <Text style={styles.fieldLabel}>Width</Text>
+      <View style={styles.openingWidthHead}>
+        <Text style={styles.fieldLabel}>Width</Text>
+        {Number.isFinite(maxMeters) && (
+          <Text style={styles.openingWidthMax}>{`this wall takes ${maxMeters.toFixed(2)} m`}</Text>
+        )}
+      </View>
       <View style={styles.openingWidthRow}>
         <Pressable
           accessibilityRole="button"
@@ -3041,8 +3118,14 @@ function OpeningWidthControl({ widthMeters, onChange }) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Widen this opening by 10 centimetres"
+          accessibilityState={{ disabled: atMax }}
           android_ripple={{ color: "rgba(30,36,31,0.12)" }}
-          style={({ pressed }) => [styles.openingWidthStep, pressed && styles.pressedSurface]}
+          style={({ pressed }) => [
+            styles.openingWidthStep,
+            atMax && styles.openingWidthStepDisabled,
+            pressed && styles.pressedSurface,
+          ]}
+          disabled={atMax}
           onPress={() => step(0.1)}
         >
           <Ionicons name="add" size={16} color={COLORS.textPrimary} />
@@ -3209,28 +3292,32 @@ function CurveStepper({ label, value, min, max, step, suffix, onChange }) {
  * and the answer given on the first screen could be silently changed on the
  * second.
  */
-function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, onStart, onOpen, onRename, onDelete }) {
+function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, onStart, onOpen, onMore }) {
   return (
     <View style={styles.libraryScreen}>
       <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         <SafeAreaView edges={["top"]} style={styles.libraryHeader}>
           <View style={styles.headerRow}>
-            <Pressable accessibilityLabel="Back" onPress={onBack} hitSlop={LAYOUT.hitSlop} style={styles.headerButton}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              onPress={onBack}
+              hitSlop={LAYOUT.hitSlop}
+              android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+              style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
+            >
               <Ionicons name="chevron-back" size={20} color={COLORS.white} />
             </Pressable>
             <View style={styles.headerCopy}>
               <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
-              <Text style={styles.headerTitle}>Your plans</Text>
-              {/* How many, so the list has a size before it has been scrolled. */}
-              {!!projects.length && (
-                <Text style={styles.headerMeta}>
-                  {projects.length === 1 ? "1 plan" : `${projects.length} plans`}
-                </Text>
-              )}
+              <Text style={styles.headerTitle} numberOfLines={1}>Your plans</Text>
             </View>
             <Pressable
+              accessibilityRole="button"
               accessibilityLabel="Refresh your saved plans"
-              style={styles.headerButton}
+              accessibilityState={{ busy: loading, disabled: loading }}
+              android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+              style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
               onPress={onRefresh}
               disabled={loading}
             >
@@ -3239,6 +3326,29 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
                 : <Ionicons name="refresh-outline" size={18} color={COLORS.white} />}
             </Pressable>
           </View>
+
+          {/* The size of the list, and where it lives, on one line at the foot
+              of the bar. The count used to be a third line inside the title
+              block — which pushed the title off its own optical centre — and
+              where plans are stored was a separate grey note pinned under the
+              last card, so the two facts about the list as a whole sat at
+              opposite ends of the screen. */}
+          {!!projects.length && (
+            <View style={styles.libraryHeaderMeta}>
+              <Text style={styles.headerMeta}>
+                {projects.length === 1 ? "1 plan" : `${projects.length} plans`}
+              </Text>
+              <View style={styles.libraryHeaderDot} />
+              <Ionicons
+                name={synced ? "cloud-done-outline" : signedIn ? "cloud-offline-outline" : "phone-portrait-outline"}
+                size={13}
+                color="rgba(255,255,255,0.7)"
+              />
+              <Text style={styles.headerMeta} numberOfLines={1}>
+                {synced ? "Saved to your account" : signedIn ? "Saved on this device" : "On this device only"}
+              </Text>
+            </View>
+          )}
         </SafeAreaView>
       </LinearGradient>
 
@@ -3251,7 +3361,7 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
           // spinner on an empty screen. The list stops changing height when the
           // plans arrive, and the wait reads as "loading a list", not "broken".
           <View style={styles.librarySkeleton} accessibilityLabel="Loading your plans">
-            {[0, 1, 2].map((row) => (
+            {[0, 1].map((row) => (
               <View key={row} style={styles.skeletonCard}>
                 <View style={styles.skeletonThumb} />
                 <View style={styles.skeletonCopy}>
@@ -3267,8 +3377,7 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
               key={project.id}
               project={project}
               onOpen={() => onOpen(project)}
-              onRename={() => onRename(project)}
-              onDelete={() => onDelete(project)}
+              onMore={() => onMore(project)}
             />
           ))
         ) : (
@@ -3295,21 +3404,14 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
           </View>
         )}
 
-        {/* One line about where plans live, and only once there is a plan to
-            worry about losing. */}
-        {!!projects.length && (
+        {/* Only worth a card of its own when there is something to act on. The
+            header carries the storage state for the two cases where nothing is
+            wrong; this is the one where signing in would actually help. */}
+        {!!projects.length && !signedIn && (
           <View style={styles.syncNote}>
-            <Ionicons
-              name={synced ? "cloud-done-outline" : signedIn ? "cloud-offline-outline" : "phone-portrait-outline"}
-              size={13}
-              color={synced ? COLORS.success : COLORS.textTertiary}
-            />
+            <Ionicons name="phone-portrait-outline" size={15} color={COLORS.warning} />
             <Text style={styles.syncNoteText}>
-              {synced
-                ? "Saved to your account."
-                : signedIn
-                  ? "Saved on this device — your account copy updates on the next save."
-                  : "Saved on this device. Sign in to keep your plans on your account."}
+              These plans live on this phone only. Sign in to keep them on your account.
             </Text>
           </View>
         )}
@@ -3358,17 +3460,30 @@ function relativeDay(value) {
   return `Edited ${then.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
 }
 
-function ProjectCard({ project, onOpen, onRename, onDelete }) {
+/**
+ * One saved plan.
+ *
+ * A plan is a drawing, so the drawing is the biggest thing on the card. It used
+ * to be a 58pt square — too small to recognise a floor plan in — sitting beside
+ * three stacked lines of grey text and, on the right, two coloured icon buttons
+ * *per row*, one of which deletes an evening's work. A list of six plans was
+ * therefore a list of twelve buttons, half of them destructive, competing with
+ * the six that actually open something.
+ *
+ * Now: a wide preview, the name, and the two facts about a plan that are worth
+ * comparing across rows, as pills rather than a run-on grey string. Rename and
+ * delete moved behind the one control that means "more about this row", where
+ * neither can be hit by mistake on the way to opening a plan.
+ */
+function ProjectCard({ project, onOpen, onMore }) {
   const edited = relativeDay(project.updatedAt);
-  const meta = [
-    `${project.roomCount || 0} ${project.roomCount === 1 ? "room" : "rooms"}`,
-    project.areaMeters ? `${Number(project.areaMeters).toFixed(1)} m²` : null,
-  ].filter(Boolean).join(" · ");
+  const rooms = `${project.roomCount || 0} ${project.roomCount === 1 ? "room" : "rooms"}`;
+  const area = project.areaMeters ? `${Number(project.areaMeters).toFixed(1)} m²` : null;
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={project.title}
+      accessibilityLabel={`${project.title}, ${rooms}${area ? `, ${area}` : ""}`}
       accessibilityHint="Opens this plan in the editor"
       android_ripple={{ color: "rgba(30,36,31,0.08)" }}
       style={({ pressed }) => [styles.projectCard, pressed && styles.projectCardPressed]}
@@ -3378,45 +3493,81 @@ function ProjectCard({ project, onOpen, onRename, onDelete }) {
         {project.thumbnail ? (
           <Image source={{ uri: project.thumbnail }} style={styles.projectThumbnailImage} resizeMode="cover" />
         ) : (
-          <Ionicons name="grid-outline" size={22} color={COLORS.primaryDark} />
+          <>
+            <Ionicons name="grid-outline" size={26} color={COLORS.brand300} />
+            <Text style={styles.projectThumbnailHint}>Drawn</Text>
+          </>
         )}
       </View>
 
-      {/* Name, what is in it, and when it was last touched — on separate lines,
-          because "3 rooms · 62.4 m²" and "Edited yesterday" answer different
-          questions and ran together as one grey string. A row of
-          "Traced"/"Drawn"/"This device" tags used to sit under this as well,
-          repeating what the thumbnail shows and what the note at the foot of the
-          list already says once for every plan. */}
-      <View style={styles.projectCardCopy}>
-        <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
-        <Text style={styles.projectCardMeta} numberOfLines={1}>{meta}</Text>
-        {!!edited && <Text style={styles.projectCardTime} numberOfLines={1}>{edited}</Text>}
-      </View>
+      <View style={styles.projectCardBody}>
+        <View style={styles.projectCardCopy}>
+          <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
+          {!!edited && <Text style={styles.projectCardTime} numberOfLines={1}>{edited}</Text>}
+          <View style={styles.projectStats}>
+            <View style={styles.projectStat}>
+              <Ionicons name="cube-outline" size={12} color={COLORS.primaryDark} />
+              <Text style={styles.projectStatText}>{rooms}</Text>
+            </View>
+            {!!area && (
+              <View style={styles.projectStat}>
+                <Ionicons name="resize-outline" size={12} color={COLORS.primaryDark} />
+                <Text style={styles.projectStatText}>{area}</Text>
+              </View>
+            )}
+          </View>
+        </View>
 
-      <View style={styles.projectActions}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Rename ${project.title}`}
+          accessibilityLabel={`More options for ${project.title}`}
           hitSlop={LAYOUT.hitSlop}
           android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
           style={({ pressed }) => [styles.projectAction, pressed && styles.pressedSurface]}
-          onPress={onRename}
+          onPress={onMore}
         >
-          <Ionicons name="create-outline" size={17} color={COLORS.textSecondary} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Delete ${project.title}`}
-          hitSlop={LAYOUT.hitSlop}
-          android_ripple={{ color: "rgba(190,58,47,0.16)", borderless: true }}
-          style={({ pressed }) => [styles.projectAction, styles.projectActionDanger, pressed && styles.pressedSurface]}
-          onPress={onDelete}
-        >
-          <Ionicons name="trash-outline" size={17} color={COLORS.danger} />
+          <Ionicons name="ellipsis-horizontal" size={18} color={COLORS.textSecondary} />
         </Pressable>
       </View>
     </Pressable>
+  );
+}
+
+/** Rename or delete one plan, asked away from the row that opens it. */
+function PlanActionSheet({ project, onClose, onRename, onDelete }) {
+  return (
+    <Modal transparent visible={!!project} animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable style={styles.actionSheet} onPress={() => {}}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.actionSheetTitle} numberOfLines={1}>{project?.title || "This plan"}</Text>
+
+          <Pressable
+            accessibilityRole="button"
+            android_ripple={{ color: "rgba(30,36,31,0.08)" }}
+            style={({ pressed }) => [styles.actionSheetRow, pressed && styles.pressedSurface]}
+            onPress={onRename}
+          >
+            <Ionicons name="create-outline" size={20} color={COLORS.textPrimary} />
+            <Text style={styles.actionSheetRowText}>Rename</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            android_ripple={{ color: "rgba(190,58,47,0.12)" }}
+            style={({ pressed }) => [styles.actionSheetRow, pressed && styles.pressedSurface]}
+            onPress={onDelete}
+          >
+            <Ionicons name="trash-outline" size={20} color={COLORS.danger} />
+            <Text style={[styles.actionSheetRowText, styles.actionSheetRowDanger]}>Delete</Text>
+          </Pressable>
+
+          <Pressable style={styles.sheetClose} onPress={onClose}>
+            <Text style={styles.sheetCloseText}>Cancel</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -3811,43 +3962,63 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
 
   // ── Header, shared by the library and the editor ─────────────────────────
-  header: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.base },
+  // One bar in two places, so moving between the library and the editor is not
+  // also a change of visual language. The icon buttons were 42pt squares filled
+  // at 16% white — under the touch minimum, and so low-contrast against a deep
+  // gradient that they read as embossing rather than as buttons.
+  header: { paddingHorizontal: SPACING.base, paddingBottom: SPACING.base },
   headerRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md, paddingTop: SPACING.sm },
   headerButton: {
-    width: ms(42), height: ms(42), borderRadius: RADIUS.md,
-    alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.16)",
+    width: ms(44), height: ms(44), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.24)",
   },
-  headerButtonPressed: { backgroundColor: "rgba(255,255,255,0.30)" },
-  headerButtonSaved: { backgroundColor: "rgba(255,255,255,0.30)" },
-  headerCopy: { flex: 1, minWidth: 0 },
+  headerButtonPressed: { backgroundColor: "rgba(255,255,255,0.32)" },
+  headerButtonSaved: { backgroundColor: "rgba(255,255,255,0.32)", borderColor: "rgba(255,255,255,0.5)" },
+  headerCopy: { flex: 1, minWidth: 0, gap: 5 },
   headerEyebrow: { ...TYPE.overline, color: "rgba(255,255,255,0.68)" },
+  headerStepChip: {
+    alignSelf: "flex-start", maxWidth: "100%",
+    paddingHorizontal: SPACING.sm, paddingVertical: 3,
+    borderRadius: RADIUS.xs, backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  headerStepChipText: { ...TYPE.caption, fontSize: 10.5, color: COLORS.white },
   headerTitleRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  headerTitle: { ...TYPE.h2, color: COLORS.white, marginTop: 1, flexShrink: 1 },
-  headerMeta: { ...TYPE.caption, color: "rgba(255,255,255,0.66)", marginTop: 2 },
+  headerTitle: { ...TYPE.h2, color: COLORS.white, flexShrink: 1 },
+  headerMeta: { ...TYPE.caption, color: "rgba(255,255,255,0.7)" },
 
-  stepper: { flexDirection: "row", alignItems: "center", marginTop: SPACING.base },
+  stepper: { flexDirection: "row", alignItems: "center", marginTop: SPACING.lg },
   // These are the flow's jump-between-steps control, so they carry hitSlop that
   // takes each one past the 44pt minimum without turning the header into a row
   // of buttons.
   step: {
-    width: ms(26), height: ms(26), borderRadius: RADIUS.pill,
+    width: ms(28), height: ms(28), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.34)",
+    borderWidth: 1.5, borderColor: "rgba(255,255,255,0.36)",
   },
   stepReached: { backgroundColor: COLORS.white, borderColor: COLORS.white },
   // The current step is a size larger than the rest, so "where am I" is legible
   // from the shape alone — a filled dot on its own only says "done".
-  stepActive: { width: ms(31), height: ms(31) },
+  stepActive: { width: ms(32), height: ms(32) },
   stepPressed: { opacity: 0.7 },
-  stepConnector: { flex: 1, height: 2, backgroundColor: "rgba(255,255,255,0.24)" },
+  stepConnector: { flex: 1, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.24)" },
   stepConnectorDone: { backgroundColor: COLORS.white },
-  stepNumber: { ...TYPE.caption, fontSize: 11, color: "rgba(255,255,255,0.72)" },
+  stepNumber: { ...TYPE.caption, fontSize: 11.5, color: "rgba(255,255,255,0.78)" },
   stepNumberActive: { color: COLORS.brand800 },
 
   // ── Library ──────────────────────────────────────────────────────────────
   libraryScreen: { flex: 1, backgroundColor: COLORS.background },
-  libraryHeader: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.lg },
-  libraryBody: { padding: SPACING.base, paddingBottom: SPACING.xl, gap: SPACING.sm },
+  libraryHeader: { paddingHorizontal: SPACING.base, paddingBottom: SPACING.base },
+  libraryHeaderMeta: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    marginTop: SPACING.md, paddingTop: SPACING.md,
+    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.16)",
+  },
+  libraryHeaderDot: {
+    width: 3, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.45)",
+  },
+  libraryBody: { padding: SPACING.base, paddingBottom: SPACING.xl, gap: SPACING.md },
   libraryFooter: {
     paddingHorizontal: SPACING.base, paddingTop: SPACING.sm + 2, paddingBottom: SPACING.sm + 2,
     backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.border,
@@ -3859,22 +4030,20 @@ const styles = StyleSheet.create({
   libraryPrimaryText: { ...TYPE.caption, fontSize: 13.5, color: COLORS.white },
 
   syncNote: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.xs, marginBottom: SPACING.xs,
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
+    padding: SPACING.md, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.warningSoft,
   },
-  syncNoteText: { flex: 1, ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 16 },
+  syncNoteText: { flex: 1, ...TYPE.caption, color: COLORS.warning, lineHeight: 16 },
   // Placeholder rows in the shape of a ProjectCard, so the list does not jump
   // when the real plans replace them.
-  librarySkeleton: { gap: SPACING.sm },
+  librarySkeleton: { gap: SPACING.md },
   skeletonCard: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.border,
   },
-  skeletonThumb: {
-    width: ms(58), height: ms(58), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
-  },
-  skeletonCopy: { flex: 1, gap: SPACING.sm },
+  skeletonThumb: { height: ms(120), backgroundColor: COLORS.surfaceSunken },
+  skeletonCopy: { padding: SPACING.md, gap: SPACING.sm },
   skeletonLine: { height: ms(12), borderRadius: RADIUS.xs, backgroundColor: COLORS.surfaceSunken },
   skeletonLineSmall: { height: ms(9) },
 
@@ -3897,27 +4066,58 @@ const styles = StyleSheet.create({
   libraryEmptyActionText: { ...TYPE.bodyStrong, color: COLORS.white },
 
   projectCard: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+    borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.sm,
   },
-  projectCardPressed: { backgroundColor: COLORS.surfaceAlt, borderColor: COLORS.borderStrong },
+  projectCardPressed: { borderColor: COLORS.primarySoft, ...SHADOW.md },
+  // Wide enough to recognise a floor plan in. A 58pt square showed a grey smudge
+  // and left the card looking like a settings row rather than a piece of work.
   projectThumbnail: {
-    width: ms(58), height: ms(58), borderRadius: RADIUS.md, overflow: "hidden",
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+    height: ms(128), alignItems: "center", justifyContent: "center", gap: SPACING.xs,
+    backgroundColor: COLORS.brand50,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
   projectThumbnailImage: { width: "100%", height: "100%" },
-  projectCardCopy: { flex: 1, minWidth: 0, gap: 2 },
-  projectCardTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
-  projectCardMeta: { ...TYPE.caption, color: COLORS.textSecondary },
-  projectCardTime: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
-  // 8pt apart, not 4 — the right-hand one deletes the plan.
-  projectActions: { flexDirection: "row", gap: SPACING.sm },
-  projectAction: {
-    width: ms(36), height: ms(36), borderRadius: RADIUS.pill,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  projectThumbnailHint: { ...TYPE.caption, fontSize: 10.5, color: COLORS.brand400 },
+  projectCardBody: {
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
+    paddingVertical: SPACING.md, paddingLeft: SPACING.base, paddingRight: SPACING.sm,
   },
-  projectActionDanger: { backgroundColor: COLORS.dangerSoft },
+  projectCardCopy: { flex: 1, minWidth: 0, gap: SPACING.xs },
+  projectCardTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  projectCardTime: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
+  // Two facts worth comparing down a column, so they are given a shape that
+  // scans rather than being run together into one grey sentence.
+  projectStats: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm, marginTop: 2 },
+  projectStat: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: SPACING.sm, paddingVertical: 4,
+    borderRadius: RADIUS.xs, backgroundColor: COLORS.primaryTint,
+  },
+  projectStatText: { ...TYPE.caption, fontSize: 10.5, color: COLORS.primaryDark },
+  projectAction: {
+    width: ms(40), height: ms(40), borderRadius: RADIUS.pill,
+    alignItems: "center", justifyContent: "center",
+  },
+
+  // ── "More" sheet for one plan ────────────────────────────────────────────
+  actionSheet: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
+    paddingHorizontal: SPACING.lg, paddingTop: SPACING.base, paddingBottom: SPACING.xl,
+  },
+  actionSheetTitle: {
+    ...TYPE.caption, color: COLORS.textTertiary,
+    textAlign: "center", marginBottom: SPACING.md,
+  },
+  actionSheetRow: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    height: ms(56), paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceAlt,
+    marginBottom: SPACING.sm,
+  },
+  actionSheetRowText: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
+  actionSheetRowDanger: { color: COLORS.danger },
 
   // ── Editor body ──────────────────────────────────────────────────────────
   // One gutter for the whole flow, so the canvas, the controls under it and the
@@ -4087,6 +4287,10 @@ const styles = StyleSheet.create({
   roomSizeArea: { minWidth: ms(54), ...TYPE.caption, color: COLORS.textSecondary, textAlign: "right" },
 
   openingWidth: { marginTop: SPACING.sm },
+  openingWidthHead: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.sm,
+  },
+  openingWidthMax: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary, marginBottom: SPACING.sm },
   openingWidthRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm, marginTop: 5 },
   openingWidthStep: {
     width: ms(44), height: ms(44), alignItems: "center", justifyContent: "center",
@@ -4355,13 +4559,18 @@ const styles = StyleSheet.create({
   // 48 and 40 tall with three different shadow weights, so a row of three
   // related controls read as three unrelated ones.
   viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  viewerBack: {
-    flexDirection: "row", alignItems: "center", gap: 3,
-    height: ms(46), paddingLeft: SPACING.sm, paddingRight: SPACING.md,
+  lightToggle: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.xs + 2,
+    height: ms(46), paddingHorizontal: SPACING.md,
     borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
-  viewerBackText: { ...TYPE.caption, color: COLORS.textPrimary },
+  // Near-black, not brand green. The one control in the app that is literally
+  // about light has to be legible as light or dark before it is legible as
+  // Livinai.
+  lightToggleNight: { backgroundColor: COLORS.surfaceInverse, borderColor: COLORS.surfaceInverse },
+  lightToggleText: { ...TYPE.caption, color: COLORS.textPrimary },
+  lightToggleTextNight: { color: COLORS.white },
   segmented: {
     flex: 1, flexDirection: "row", padding: 4,
     backgroundColor: COLORS.surface, borderRadius: RADIUS.pill,
@@ -4383,7 +4592,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
-  roundButtonActive: { backgroundColor: COLORS.brand800, borderColor: COLORS.brand900 },
 
   // Negative margins let the strip bleed to the screen edges so a long room
   // list scrolls off the side instead of stopping inside the gutter. The
