@@ -2316,14 +2316,13 @@ function WalkthroughStage({
       >
         {/* ── Top cluster ────────────────────────────────────────────────── */}
         <View style={styles.overlayTop} pointerEvents="box-none">
-          {/* Navigation on one row, then the view controls on their own.
-              Back, the view switcher and the light toggle were three unrelated
-              jobs sharing one line, so the switcher — the control most used on
-              this step — was squeezed between them into whatever width they
-              left. Back now sits in the top-left corner where a back control
-              belongs, the light toggle takes the opposite corner, and the
-              switcher gets the full width of the row below. */}
-          <View style={styles.viewerNav} pointerEvents="box-none">
+          {/* One row: leave, look, light.
+              The switcher is the control this step is for, so it takes the
+              middle and every pixel the two fixed-width buttons either side do
+              not need. Back and the light toggle are icon-led and their labels
+              give way first, which is what keeps all three on one line on a
+              narrow phone. */}
+          <View style={styles.viewControls} pointerEvents="box-none">
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Back to Style"
@@ -2332,8 +2331,34 @@ function WalkthroughStage({
               onPress={onBackToDesign}
             >
               <Ionicons name="chevron-back" size={18} color={COLORS.textPrimary} />
-              <Text style={styles.viewerBackText}>Style</Text>
+              <Text style={styles.viewerBackText} numberOfLines={1}>Style</Text>
             </Pressable>
+
+            <View style={styles.segmented} accessibilityRole="tablist">
+              {VIEW_MODES.map((item) => {
+                const active = viewMode === item.key;
+                return (
+                  <Pressable
+                    key={item.key}
+                    accessibilityRole="tab"
+                    accessibilityLabel={`${item.label} view`}
+                    accessibilityState={{ selected: active }}
+                    android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
+                    style={({ pressed }) => [
+                      styles.segment,
+                      active && styles.segmentActive,
+                      pressed && !active && styles.segmentPressed,
+                    ]}
+                    onPress={() => onChangeMode(item.key)}
+                  >
+                    <Ionicons name={item.icon} size={16} color={active ? COLORS.white : COLORS.textSecondary} />
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
             {/* The time of day, named.
                 This was a bare icon in a circle, and a circle holding a moon is
@@ -2361,38 +2386,13 @@ function WalkthroughStage({
                 size={16}
                 color={night ? COLORS.white : COLORS.accent}
               />
-              <Text style={[styles.lightToggleText, night && styles.lightToggleTextNight]}>
+              <Text
+                style={[styles.lightToggleText, night && styles.lightToggleTextNight]}
+                numberOfLines={1}
+              >
                 {night ? "Night" : "Day"}
               </Text>
             </Pressable>
-          </View>
-
-          <View style={styles.viewControls} pointerEvents="box-none">
-            <View style={styles.segmented} accessibilityRole="tablist">
-              {VIEW_MODES.map((item) => {
-                const active = viewMode === item.key;
-                return (
-                  <Pressable
-                    key={item.key}
-                    accessibilityRole="tab"
-                    accessibilityLabel={`${item.label} view`}
-                    accessibilityState={{ selected: active }}
-                    android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: true }}
-                    style={({ pressed }) => [
-                      styles.segment,
-                      active && styles.segmentActive,
-                      pressed && !active && styles.segmentPressed,
-                    ]}
-                    onPress={() => onChangeMode(item.key)}
-                  >
-                    <Ionicons name={item.icon} size={16} color={active ? COLORS.white : COLORS.textSecondary} />
-                    <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
           </View>
 
           {showRooms && (
@@ -4782,18 +4782,20 @@ const styles = StyleSheet.create({
   // One row, one height. Back, the view switcher and the light toggle were 48,
   // 48 and 40 tall with three different shadow weights, so a row of three
   // related controls read as three unrelated ones.
-  viewerNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  // Back, the switcher, the light toggle — one row, one height. The two buttons
+  // hold their size (`flexShrink: 0`) and the switcher takes everything else, so
+  // the control the step is for is never the one that gets squeezed.
+  viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   viewerBack: {
-    flexDirection: "row", alignItems: "center", gap: 2,
-    height: ms(46), paddingLeft: SPACING.sm, paddingRight: SPACING.base,
+    flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 1,
+    height: ms(46), paddingLeft: SPACING.xs + 2, paddingRight: SPACING.md,
     borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
   viewerBackText: { ...TYPE.caption, color: COLORS.textPrimary },
-  viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   lightToggle: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.xs + 2,
-    height: ms(46), paddingHorizontal: SPACING.md,
+    flexShrink: 0, flexDirection: "row", alignItems: "center", gap: SPACING.xs + 1,
+    height: ms(46), paddingHorizontal: SPACING.sm + 2,
     borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
@@ -4804,7 +4806,7 @@ const styles = StyleSheet.create({
   lightToggleText: { ...TYPE.caption, color: COLORS.textPrimary },
   lightToggleTextNight: { color: COLORS.white },
   segmented: {
-    flex: 1, flexDirection: "row", padding: 4,
+    flex: 1, minWidth: 0, flexDirection: "row", padding: 4,
     backgroundColor: COLORS.surface, borderRadius: RADIUS.pill,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
