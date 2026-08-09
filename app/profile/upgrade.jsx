@@ -51,8 +51,17 @@ export default function Upgrade() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [selectedPlan, setSelectedPlan] = useState('yearly');
-  const [selectedPack, setSelectedPack] = useState(COIN_PACKS[1].id);
+  /**
+   * One choice across all five things this screen sells.
+   *
+   * Plans and packs used to hold separate selections with a button each, so the
+   * screen always had two live answers to "what am I buying?" and two primary
+   * actions competing to be pressed. They are one radio group now — picking a
+   * coin pack clears the plan and the other way round — and one button below
+   * them acts on whatever is chosen.
+   */
+  const [selection, setSelection] = useState({ kind: 'plan', id: 'yearly' });
+  const isSelected = (kind, id) => selection.kind === kind && selection.id === id;
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [offerings, setOfferings] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -146,11 +155,13 @@ export default function Upgrade() {
     [packageForPack],
   );
 
-  const activePack = packs.find((pack) => pack.id === selectedPack);
+  const buyingPlan = selection.kind === 'plan';
+  const activePlan = plans.find((plan) => plan.id === selection.id);
+  const activePack = packs.find((pack) => pack.id === selection.id);
 
   // ── Buying ────────────────────────────────────────────────────────────────
   const handleUpgrade = async () => {
-    const plan = plans.find((item) => item.id === selectedPlan);
+    const plan = plans.find((item) => item.id === selection.id);
     if (!plan?.storePackage) {
       setDialog({
         title: 'This plan is not available yet',
@@ -210,7 +221,7 @@ export default function Upgrade() {
   };
 
   const buyCoins = async () => {
-    const pack = packs.find((item) => item.id === selectedPack);
+    const pack = packs.find((item) => item.id === selection.id);
     if (!pack?.storePackage) {
       setDialog({
         title: 'This pack is not available yet',
@@ -378,51 +389,9 @@ export default function Upgrade() {
 
         <View style={styles.planOptions}>
           {plans.map((plan) => {
-            const selected = !isSubscribed && selectedPlan === plan.id;
+            const selected = isSelected('plan', plan.id);
             const price = priceFor(plan, plan.storePackage);
-
-            const body = (
-              <>
-                {/* Reserved on both cards, filled on one, so the titles line
-                    up — and the same band the coin packs use below, rather
-                    than a differently sized pill doing the same job. It used to
-                    hang outside the card at top:-8/right:-8, where Android
-                    clips it. */}
-                <View style={[styles.badge, plan.badge && styles.badgeOn]}>
-                  {plan.badge ? (
-                    <Text style={styles.badgeText} numberOfLines={1}>{plan.badge}</Text>
-                  ) : null}
-                </View>
-                <View style={styles.cardBody}>
-                  {isSubscribed ? null : (
-                    <View style={[styles.radio, selected && styles.radioOn]}>
-                      {selected ? <View style={styles.radioDot} /> : null}
-                    </View>
-                  )}
-                  <Text style={styles.planTitle}>{plan.title}</Text>
-                  <Text style={styles.planPrice}>{price}</Text>
-                  <Text style={styles.planPeriod}>per {plan.period}</Text>
-                  {/* The saving from the price table. "Save 80%" used to be
-                      printed here beside two prices that never supported it. */}
-                  {plan.id === 'yearly' ? (
-                    <Text style={styles.savings}>Save {YEARLY_SAVING_PERCENT}%</Text>
-                  ) : (
-                    <View style={styles.savingsPlaceholder} />
-                  )}
-                </View>
-              </>
-            );
-
-            return isSubscribed ? (
-              <View
-                key={plan.id}
-                accessibilityRole="text"
-                accessibilityLabel={`${plan.title} plan, ${price} per ${plan.period}`}
-                style={styles.planCard}
-              >
-                {body}
-              </View>
-            ) : (
+            return (
               <Pressable
                 key={plan.id}
                 accessibilityRole="radio"
@@ -434,35 +403,37 @@ export default function Upgrade() {
                   selected && styles.planCardSelected,
                   pressed && styles.pressed,
                 ]}
-                onPress={() => setSelectedPlan(plan.id)}
+                onPress={() => setSelection({ kind: 'plan', id: plan.id })}
               >
-                {body}
+                {/* Reserved on both cards, filled on one, so the titles line
+                    up — and the same band the coin packs use below, rather
+                    than a differently sized pill doing the same job. It used to
+                    hang outside the card at top:-8/right:-8, where Android
+                    clips it. */}
+                <View style={[styles.badge, plan.badge && styles.badgeOn]}>
+                  {plan.badge ? (
+                    <Text style={styles.badgeText} numberOfLines={1}>{plan.badge}</Text>
+                  ) : null}
+                </View>
+                <View style={styles.cardBody}>
+                  <View style={[styles.radio, selected && styles.radioOn]}>
+                    {selected ? <View style={styles.radioDot} /> : null}
+                  </View>
+                  <Text style={styles.planTitle}>{plan.title}</Text>
+                  <Text style={styles.planPrice}>{price}</Text>
+                  <Text style={styles.planPeriod}>per {plan.period}</Text>
+                  {/* The saving from the price table. "Save 80%" used to be
+                      printed here beside two prices that never supported it. */}
+                  {plan.id === 'yearly' ? (
+                    <Text style={styles.savings}>Save {YEARLY_SAVING_PERCENT}%</Text>
+                  ) : (
+                    <View style={styles.savingsPlaceholder} />
+                  )}
+                </View>
               </Pressable>
             );
           })}
         </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={isSubscribed ? 'Manage your subscription' : 'Upgrade to Pro'}
-          accessibilityState={{ busy: busy === 'plan', disabled: !!busy }}
-          android_ripple={busy ? undefined : { color: 'rgba(255,255,255,0.20)' }}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            !!busy && styles.primaryButtonDisabled,
-            pressed && !busy && styles.pressed,
-          ]}
-          disabled={!!busy}
-          onPress={isSubscribed ? () => router.push('/profile/manageSubscription') : handleUpgrade}
-        >
-          {busy === 'plan' ? (
-            <ActivityIndicator size="small" color={COLORS.textTertiary} />
-          ) : (
-            <Text style={[styles.primaryButtonText, !!busy && styles.primaryButtonTextDisabled]}>
-              {isSubscribed ? 'Manage subscription' : 'Upgrade now'}
-            </Text>
-          )}
-        </Pressable>
 
         {/* ── Or buy coins outright ──────────────────────────────────────── */}
         <View style={styles.sectionGap}>
@@ -471,7 +442,7 @@ export default function Upgrade() {
 
         <View style={styles.packRow}>
           {packs.map((pack) => {
-            const selected = selectedPack === pack.id;
+            const selected = isSelected('pack', pack.id);
             const saving = packSaving(pack);
             return (
               <Pressable
@@ -485,7 +456,7 @@ export default function Upgrade() {
                   selected && styles.planCardSelected,
                   pressed && styles.pressed,
                 ]}
-                onPress={() => setSelectedPack(pack.id)}
+                onPress={() => setSelection({ kind: 'pack', id: pack.id })}
               >
                 <View style={[styles.badge, pack.badge && styles.badgeOn]}>
                   {pack.badge ? (
@@ -507,20 +478,58 @@ export default function Upgrade() {
           })}
         </View>
 
+        {/* ── One button, for whichever of the five is selected ───────────── */}
+        <View style={styles.summary}>
+          <Text style={styles.summaryLabel} numberOfLines={1}>
+            {buyingPlan
+              ? `${activePlan?.title} plan · per ${activePlan?.period}`
+              : `${activePack?.coins} coins · one-off`}
+          </Text>
+          <Text style={styles.summaryValue}>
+            {buyingPlan
+              ? priceFor(activePlan, activePlan?.storePackage)
+              : priceFor(activePack, activePack?.storePackage)}
+          </Text>
+        </View>
+
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Buy the selected coin pack"
-          accessibilityState={{ busy: busy === 'pack', disabled: !!busy }}
-          android_ripple={busy ? undefined : { color: 'rgba(30,36,31,0.08)' }}
-          style={({ pressed }) => [styles.secondaryButton, pressed && !busy && styles.pressed]}
+          accessibilityLabel={
+            buyingPlan
+              ? `${isSubscribed ? 'Change to' : 'Subscribe to'} the ${activePlan?.title} plan`
+              : `Buy ${activePack?.coins} coins`
+          }
+          accessibilityState={{ busy: !!busy, disabled: !!busy }}
+          android_ripple={busy ? undefined : { color: 'rgba(255,255,255,0.20)' }}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            !!busy && styles.primaryButtonDisabled,
+            pressed && !busy && styles.pressed,
+          ]}
           disabled={!!busy}
-          onPress={buyCoins}
+          onPress={buyingPlan ? handleUpgrade : buyCoins}
         >
-          {busy === 'pack' ? (
-            <ActivityIndicator size="small" color={COLORS.textPrimary} />
+          {busy ? (
+            <ActivityIndicator size="small" color={COLORS.textTertiary} />
           ) : (
-            <Text style={styles.secondaryButtonText}>Buy {activePack?.coins} coins</Text>
+            <Text style={[styles.primaryButtonText, !!busy && styles.primaryButtonTextDisabled]}>
+              {buyingPlan
+                ? (isSubscribed ? 'Change plan' : 'Upgrade now')
+                : `Buy ${activePack?.coins} coins`}
+            </Text>
           )}
+        </Pressable>
+
+        {/* Housekeeping, so it sits under the thing this page is actually for. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Manage your subscription"
+          android_ripple={{ color: 'rgba(30,36,31,0.06)' }}
+          style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}
+          onPress={() => router.push('/profile/manageSubscription')}
+        >
+          <Ionicons name="settings-outline" size={15} color={COLORS.textSecondary} />
+          <Text style={styles.ghostButtonText}>Manage subscription</Text>
         </Pressable>
 
         <Text style={styles.trustNote}>

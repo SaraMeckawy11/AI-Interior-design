@@ -191,15 +191,27 @@ export default StyleSheet.create({
   primaryButtonText: { ...TYPE.caption, color: COLORS.white },
   primaryButtonTextDisabled: { color: COLORS.textTertiary },
 
-  secondaryButton: {
-    ...BUTTON,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
+  // What is about to be charged, on the line above the button that charges it.
+  // With one button serving five options, the button's own label is the only
+  // other thing saying which one is selected, and "Upgrade now" does not say
+  // whether that is the monthly or the yearly.
+  summary: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+    marginTop: SPACING.base,
+    marginBottom: SPACING.sm,
   },
-  secondaryButtonText: { ...TYPE.caption, color: COLORS.textPrimary },
+  summaryLabel: { flexShrink: 1, ...TYPE.caption, color: COLORS.textSecondary },
+  summaryValue: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
 
   pressed: { opacity: 0.82 },
+
+  // Bottom of the screen, and quieter than either purchase button: managing an
+  // existing plan is housekeeping, not the thing this page is for.
+  ghostButton: { ...BUTTON, backgroundColor: 'transparent', marginTop: SPACING.xs },
+  ghostButtonText: { ...TYPE.caption, color: COLORS.textSecondary },
 
   trustNote: {
     ...TYPE.caption,
