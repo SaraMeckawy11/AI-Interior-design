@@ -688,25 +688,22 @@ def build_sofa(P, w=2.2, d=0.95):
         for sy in (-1, 1):                                         # wooden feet
             ms.append(_cyl(0.03, lift, P["wood_dark"],
                            cx=sx * (w / 2 - 0.10), cy=sy * (d / 2 - 0.10)))
-    cw = (w - 0.52) / 2
-    for sx in (-1, 1):
-        ms.append(_bx(cw - 0.04, d - 0.42, 0.15, _shade(fab, 1.07),
-                      cx=sx * (cw / 2 + 0.02), cy=0.08, z=lift + 0.34))  # seat cushions
-    # No back cushions and no throw pillows.
+    # No cushions of any kind: not throw pillows, not back cushions, and now not
+    # the seat cushions either.
     #
-    # The throw pillows went first: upright 0.15 m slabs at z=0.56, no lean, no
-    # rounding, standing 0.15 m in front of a back cushion they intersected, so
-    # what showed was a flat rectangle half-buried in the sofa.
+    # All three were the same mistake at different heights. Every one was an
+    # axis-aligned box with hard 90-degree corners, and upholstery is the one
+    # thing in a room that has no straight edges — so each read as a flat panel
+    # bolted to the sofa rather than as something soft resting on it. The throw
+    # pillows and back cushions also intersected the backrest they stood against
+    # (0.42 m boxes at -(d/2)+0.11..0.27 against a backrest spanning
+    # -(d/2)..-(d/2)+0.20), which put a visible seam across the whole piece.
     #
-    # The back cushions were the same defect one layer down and outlived that
-    # fix. Each was a 0.42 m upright box at cy = -(d/2 - 0.19) spanning
-    # -(d/2)+0.11 to -(d/2)+0.27, while the backrest behind it spans -(d/2) to
-    # -(d/2)+0.20 — so they overlapped it by 9 cm and the visible result was a
-    # pair of flat panels growing out of the backrest at a hard right angle,
-    # mis-aligned with everything around them. A cushion only reads as a cushion
-    # if it leans and is rounded; a box that does neither is worse than none.
-    # The backrest already reads as upholstery, and the seat cushions still sit
-    # on the base, so the sofa is fully dressed without them.
+    # The seat cushions were the least wrong of the three and still wrong: two
+    # 0.15 m slabs sitting proud of the seat base with a hard shadow line
+    # between them and a gap up the middle. The base, backrest and arms already
+    # read as an upholstered sofa; a cushion only adds to that if it leans and
+    # is rounded, and nothing here can do either.
     return ms, w, d
 
 
@@ -718,9 +715,8 @@ def build_armchair(P, w=0.92, d=0.85):
         _bx(w, 0.18, 0.74, _shade(fab, 0.92), cy=-(d / 2 - 0.09), z=lift + 0.06),
         _bx(0.16, d, 0.52, _shade(fab, 0.97), cx=-(w / 2 - 0.08), z=lift),
         _bx(0.16, d, 0.52, _shade(fab, 0.97), cx=(w / 2 - 0.08), z=lift),
-        _bx(w - 0.36, d - 0.34, 0.15, _shade(fab, 1.07), cy=0.06, z=lift + 0.34),
-        # The armchair's throw pillow is gone for the same reason as the sofa's:
-        # a flat upright slab clipping through the backrest behind it.
+        # No cushion, for the same reason the sofa has none: a hard-edged box
+        # sitting proud of the seat reads as a panel, not as upholstery.
     ]
     for sx in (-1, 1):
         for sy in (-1, 1):
@@ -3018,11 +3014,15 @@ class RoomFurnisher:
                     (fp.distance(placed) for placed in self.placed),
                     default=0.0,
                 )
-                score = boundary_clearance * 1.2 + placed_clearance * 2.0
+                # Clearance is circulation, not distance for its own sake. This
+                # used to be `placed_clearance * 2.0` uncapped, which paid a
+                # group to keep retreating: every extra metre between the dining
+                # zone and the sofa scored, so the table ended up against the
+                # far wall of an open-plan room with a void in the middle.
+                # Anything past a comfortable walking gap adds nothing.
+                score = boundary_clearance * 1.2 + min(placed_clearance, 0.90) * 2.0
                 if self.placed:
-                    # In open-plan rooms, intentionally separate the dining
-                    # zone from the conversation group.
-                    score += min(2.0, min(
+                    nearest = min(
                         np.linalg.norm(
                             position
                             - np.array(
@@ -3030,7 +3030,14 @@ class RoomFurnisher:
                             )
                         )
                         for placed in self.placed
-                    )) * 0.55
+                    )
+                    # And the room should read as one arrangement. The old rule
+                    # deliberately pushed the dining zone away from the
+                    # conversation group, which is how a table ends up marooned
+                    # at the other end of the room from everything else. Sitting
+                    # near the furniture is free; drifting past about 3.2 m from
+                    # the nearest group costs.
+                    score -= max(0.0, float(nearest) - 3.20) * 0.90
                 if preferred is not None:
                     score -= np.linalg.norm(
                         position - np.asarray(preferred, dtype=float)
