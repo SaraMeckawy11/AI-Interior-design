@@ -49,6 +49,7 @@ import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
 import { paletteForRequest, paletteForTone } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
+import { COIN_COST } from "../../constants/pricing";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
   COLOR_MOODS,
@@ -571,7 +572,33 @@ export default function WalkthroughScreen() {
         || DEFAULT_WALKTHROUGH_SETTINGS.style,
       useCatalog: true,
     });
-    setFurnitureEdits(saved.furnitureEdits || {});
+    /**
+     * Re-furnish a plan drawn against an older renderer.
+     *
+     * The geometry and the brief always reopen as they were, and the scene is
+     * rebuilt from them — so a plan furnished last month picks up the new
+     * furniture, the doorway kept clear and the cushions that no longer clip
+     * through the sofa, simply by being opened. That much falls out of the
+     * revision being part of every cache key.
+     *
+     * What does *not* survive is the hand-placed furniture. An edit is stored as
+     * "piece number seven sits here", and after a re-furnish piece seven is a
+     * different object in a different room — so replaying those offsets would
+     * take the new layout and shove random items out of place, which looks far
+     * more broken than the old layout ever did. They are dropped, and the
+     * designer's own placement stands. Nothing else about the plan is touched.
+     */
+    const editedUnder = saved.furnitureRevision;
+    const editsStillApply = editedUnder === LIVINAI_WEB_RENDERER_REVISION;
+    const savedEdits = saved.furnitureEdits || {};
+    setFurnitureEdits(editsStillApply ? savedEdits : {});
+    if (!editsStillApply && Object.keys(savedEdits).length) {
+      setNotice(
+        "This plan was furnished by an earlier version of Livinai. It has been "
+        + "rebuilt with the current furniture, so the pieces you moved by hand are "
+        + "back where Livinai places them.",
+      );
+    }
     setSelectedRoom(Number(saved.selectedRoom) || 0);
     setStage(Math.max(0, Math.min(STAGES.length - 1, Number(saved.stage) || 0)));
     setAiRenders(saved.aiRenders || {});
@@ -595,6 +622,10 @@ export default function WalkthroughScreen() {
       openings: openings.map((opening) => ({ ...opening, points: opening.points.map(normalize) })),
       settings,
       furnitureEdits,
+      // Which renderer furnished the plan these edits were made against. See
+      // `restoreSavedPlan`: an edit is a position for furniture piece *number
+      // seven*, so it only means anything while piece seven is the same object.
+      furnitureRevision: LIVINAI_WEB_RENDERER_REVISION,
       selectedRoom,
       stage,
       aiRenders,
@@ -1312,6 +1343,11 @@ export default function WalkthroughScreen() {
           lighting: night ? "Warm ambient evening light" : "Natural daylight",
           preserveGeometry: true,
           creativity: 42,
+          // Billed against the walkthrough line of the price list, not the flat
+          // design one. This render costs more to produce — it has already held
+          // a GPU to build the scene before the image pass starts — and until
+          // this field existed the two were charged the same.
+          product: "walkthrough",
           // The one piece of text that is the user's own — the Notes field on
           // the Style step — exactly as Interior sends its optional prompt.
           customPrompt: (settings.notes || "").trim(),
@@ -1319,6 +1355,13 @@ export default function WalkthroughScreen() {
       });
       const data = await response.json().catch(() => ({}));
       if (response.status === 403) {
+        // Say what was short before the paywall opens. The screen that comes
+        // next sells coins; arriving there without being told the number is how
+        // "not enough coins" reads as "pay us" rather than as an answer.
+        setNotice(
+          data.reason
+            || `A walkthrough render costs ${COIN_COST.walkthrough} coins, and you do not have enough.`,
+        );
         router.push("/profile/upgrade");
         return;
       }
@@ -2659,12 +2702,20 @@ function WalkthroughStage({
 
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              {/* Removing a wall belongs to the render brief, not to the dock.
-                  It is something you do *in order to* take a picture, and the
-                  dock is where the picture is taken — a toggle here meant
-                  choosing the framing in one place and using it in another.
-                  The chip reports work the person did not start and cannot see
-                  finish, so it is announced rather than only drawn. */}
+              {/* State on one line, the two things you can do on the next.
+                  All three used to share a row: an information chip that shrank
+                  to fit, a filled "Render" pill, and a bare 48pt circle holding
+                  a camera. Nothing said what the circle did — it read as a third
+                  view mode, or a settings button — and it sat at the far edge
+                  under the thumb that was steering, so it was as easy to hit by
+                  accident as on purpose. Two labelled buttons, sized by which
+                  one matters, is what a bottom action bar is.
+
+                  Removing a wall is not among them: that belongs to the render
+                  brief, because it is something you do *in order to* take a
+                  picture, and the dock is where the picture is taken. The chip
+                  reports work the person did not start and cannot see finish,
+                  so it is announced rather than only drawn. */}
               {hiddenWalls.length > 0 ? (
                 <Pressable
                   accessibilityRole="button"
@@ -2673,7 +2724,7 @@ function WalkthroughStage({
                   style={({ pressed }) => [styles.wallNotice, pressed && styles.pressedSurface]}
                   onPress={onRestoreWalls}
                 >
-                  <Ionicons name="eye-off-outline" size={16} color={COLORS.white} />
+                  <Ionicons name="eye-off-outline" size={15} color={COLORS.white} />
                   <Text style={styles.wallNoticeText} numberOfLines={1}>
                     {hiddenWalls.length === 1 ? "1 wall off" : `${hiddenWalls.length} walls off`}
                   </Text>
@@ -2692,38 +2743,43 @@ function WalkthroughStage({
                   <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
                 </View>
               )}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="AI render options"
-                accessibilityState={{ expanded: panel === "ai" }}
-                android_ripple={{ color: "rgba(255,255,255,0.18)", borderless: false }}
-                style={({ pressed }) => [
-                  styles.dockPrimary,
-                  panel === "ai" && styles.dockPrimaryActive,
-                  pressed && styles.pressedSurface,
-                ]}
-                onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
-              >
-                <Ionicons name="sparkles" size={18} color={COLORS.white} />
-                <Text style={styles.dockPrimaryText}>Render</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Take a photo of this view"
-                accessibilityState={{ busy: busy === "capture", disabled: busy === "capture" }}
-                android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
-                style={({ pressed }) => [
-                  styles.dockIcon,
-                  pressed && styles.pressedSurface,
-                  busy === "capture" && styles.dockIconBusy,
-                ]}
-                onPress={onCapture}
-                disabled={busy === "capture"}
-              >
-                {busy === "capture"
-                  ? <ActivityIndicator color={COLORS.textPrimary} size="small" />
-                  : <Ionicons name="camera-outline" size={20} color={COLORS.textPrimary} />}
-              </Pressable>
+
+              <View style={styles.dockActions} pointerEvents="box-none">
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Take a photo of this view"
+                  accessibilityState={{ busy: busy === "capture", disabled: busy === "capture" }}
+                  android_ripple={{ color: "rgba(30,36,31,0.14)" }}
+                  style={({ pressed }) => [
+                    styles.dockSecondary,
+                    busy === "capture" && styles.dockSecondaryBusy,
+                    pressed && styles.pressedSurface,
+                  ]}
+                  onPress={onCapture}
+                  disabled={busy === "capture"}
+                >
+                  {busy === "capture"
+                    ? <ActivityIndicator color={COLORS.textPrimary} size="small" />
+                    : <Ionicons name="camera-outline" size={19} color={COLORS.textPrimary} />}
+                  <Text style={styles.dockSecondaryText} numberOfLines={1}>Photo</Text>
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Render this view with AI"
+                  accessibilityState={{ expanded: panel === "ai" }}
+                  android_ripple={{ color: "rgba(255,255,255,0.18)" }}
+                  style={({ pressed }) => [
+                    styles.dockPrimary,
+                    panel === "ai" && styles.dockPrimaryActive,
+                    pressed && styles.pressedSurface,
+                  ]}
+                  onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
+                >
+                  <Ionicons name="sparkles" size={18} color={COLORS.white} />
+                  <Text style={styles.dockPrimaryText} numberOfLines={1}>Render with AI</Text>
+                </Pressable>
+              </View>
             </View>
           )}
         </View>
@@ -5240,23 +5296,27 @@ const styles = StyleSheet.create({
   stickRight: { position: "absolute", right: ms(8) },
 
   // ── Dock ─────────────────────────────────────────────────────────────────
-  dock: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  // A status line, then an action bar. Stacking them is what lets both buttons
+  // carry a label: on one row with the chip there was width for a filled pill
+  // and a bare circle, and the circle is the one that had to be guessed at.
+  dock: { gap: SPACING.sm },
   statusChip: {
-    flex: 1, minWidth: 0, height: ms(48),
+    alignSelf: "flex-start", maxWidth: "100%", height: ms(40),
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface, ...SHADOW.md,
+    backgroundColor: COLORS.surface, ...SHADOW.sm,
   },
+  dockActions: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
   statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
   // Takes the status chip's slot, but only while a wall is actually missing —
   // so the one state a person could otherwise forget they were in says so, and
   // carries its own way out.
   wallNotice: {
-    flex: 1, minWidth: 0, height: ms(48),
+    alignSelf: "flex-start", maxWidth: "100%", height: ms(40),
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.brand800, ...SHADOW.md,
+    backgroundColor: COLORS.brand800, ...SHADOW.sm,
   },
   wallNoticeText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.white },
   wallNoticeUndo: { ...TYPE.caption, color: "rgba(255,255,255,0.82)" },
@@ -5271,19 +5331,25 @@ const styles = StyleSheet.create({
   wallChipOff: { backgroundColor: COLORS.brand800, borderColor: COLORS.brand800 },
   wallChipText: { ...TYPE.caption, color: COLORS.textSecondary },
   wallChipTextOff: { color: COLORS.white },
+  // The AI render costs a credit and is the reason this step exists, so it is
+  // filled, wider, and carries the elevation. Photo is free and reversible, so
+  // it is the quiet one — but it is still a labelled button rather than an
+  // unexplained circle.
   dockPrimary: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(48), paddingHorizontal: SPACING.lg,
+    flex: 1.6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(52), paddingHorizontal: SPACING.base,
     borderRadius: RADIUS.pill, backgroundColor: COLORS.accent, ...SHADOW.md,
   },
   dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
   dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
-  dockIcon: {
-    width: ms(48), height: ms(48), borderRadius: RADIUS.pill,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: COLORS.surface, ...SHADOW.md,
+  dockSecondary: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    height: ms(52), paddingHorizontal: SPACING.base,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
-  dockIconBusy: { backgroundColor: COLORS.surfaceSunken },
+  dockSecondaryBusy: { backgroundColor: COLORS.surfaceSunken },
+  dockSecondaryText: { ...TYPE.caption, color: COLORS.textPrimary },
 
   // ── Sheets ───────────────────────────────────────────────────────────────
   // One shape for everything that slides up in this flow — the render brief, the
