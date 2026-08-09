@@ -52,10 +52,21 @@ GET   https://<workspace>--livinai-interior-health.modal.run               <- ne
 POST  https://<workspace>--livinai-interior-interiorai-generate.modal.run  <- legacy, still works
 ```
 
+Every one of these runs on a CPU container. The two `generate` endpoints route;
+they never hold a GPU while an engine works.
+
 ### 1c. Point the backend at the new router
 
-The legacy class endpoint still works, but it wakes a GPU container just to
-decide where to send the request. Switch `MODAL_ENDPOINT_URL` to the router:
+Both URLs now route from a cheap CPU container and cost exactly one GPU call, so
+this is tidiness rather than a fix. It was not always so: the legacy endpoint
+used to be a method on the `InteriorAI` GPU class, which meant every request
+woke a GPU container to run the router, and the router then started a *second*
+GPU container for the engine it chose — two cold starts and two GPU bills per
+design, showing up in the Modal dashboard as an `InteriorAI` call followed by a
+`GenKlein` call. It is now a module-level function that Modal publishes at the
+same address.
+
+Prefer the router URL anyway, since its name says what it does:
 
 ```
 MODAL_ENDPOINT_URL=https://sara123meckawy--livinai-interior-generate.modal.run
@@ -293,9 +304,10 @@ goes straight to the user, which is how it behaved before the fallback existed.
 
 ## Rollback
 
-* **Modal**: `modal app rollback livinai-interior` — or just point
-  `MODAL_ENDPOINT_URL` back at the legacy `...-interiorai-generate.modal.run`
-  URL, which still runs the ControlNet path for every request.
+* **Modal**: `modal app rollback livinai-interior`. Switching `MODAL_ENDPOINT_URL`
+  between the two `generate` URLs is no longer a rollback — both route the same
+  way now. To force every design onto the ControlNet path, send `mode: "guided"`
+  with room polygons, or roll the app back.
 * **Backend**: the new fields are additive; the previous build works against the
   new Modal app unchanged.
 * **App**: the walkthrough is a new route. Removing the card in

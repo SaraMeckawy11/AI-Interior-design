@@ -850,17 +850,12 @@ class InteriorAI:
             "has_window": has_window,
         }
 
-    # --------------------- legacy public HTTP endpoint ---------------------
-
-    @modal.fastapi_endpoint(method="POST", docs=True)
-    def generate(self, payload: dict, authorization: str = Header(default="") if Header else ""):
-        """Legacy endpoint kept so already-deployed backends keep working.
-
-        Prefer the app-level `generate` endpoint: it routes on a cheap CPU
-        container instead of waking this GPU class just to dispatch.
-        """
-        _require_token(authorization)
-        return _dispatch(payload or {})
+    # The legacy `-interiorai-generate` endpoint used to live here, as a method
+    # on this class. That made every request wake a GPU container to run the
+    # router, which then started a *second* GPU container for the engine it
+    # picked — two cold starts and two GPU bills per design. It is now the
+    # module-level `interiorai_generate` below, which Modal publishes at the
+    # same URL from a CPU container.
 
 
 # ---------------------------------------------------------------------------
@@ -938,6 +933,23 @@ def _dispatch(body: dict):
 @modal.fastapi_endpoint(method="POST", docs=True)
 def generate(payload: dict, authorization: str = Header(default="") if Header else ""):
     """Preferred entry point for the Livinai backend."""
+    _require_token(authorization)
+    return _dispatch(payload or {})
+
+
+# Modal builds an endpoint's URL from the app and function name, so this
+# module-level function is published at exactly the address the class method
+# used to own:
+#
+#     https://<workspace>--livinai-interior-interiorai-generate.modal.run
+#
+# Backends still configured with that URL therefore keep working — and now get
+# the same cheap CPU routing as `generate`, one GPU container per request. The
+# name is the only reason this is not simply an alias of `generate`.
+@app.function(image=router_image, secrets=[api_key_secret], timeout=900)
+@modal.fastapi_endpoint(method="POST", docs=True)
+def interiorai_generate(payload: dict, authorization: str = Header(default="") if Header else ""):
+    """Legacy entry point kept so already-deployed backends keep working."""
     _require_token(authorization)
     return _dispatch(payload or {})
 
