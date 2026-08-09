@@ -7,8 +7,10 @@ import {
   rendererReadiness,
   walkthroughModelPath,
 } from "../lib/walkthroughRenderer.js";
+import { sceneCacheKey } from "../lib/walkthroughSceneCache.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import WalkthroughPlan from "../models/WalkthroughPlan.js";
+import WalkthroughScene from "../models/WalkthroughScene.js";
 
 const router = express.Router();
 
@@ -206,8 +208,39 @@ router.delete("/plans/:id", isAuthenticated, async (req, res) => {
  * Build Livinai_web's canonical realtime scene with the renderer snapshot and
  * assets bundled in this repository. There is no second project, service URL,
  * or machine-specific source root in this path.
+ *
+ * A scene that has been built before is answered from `WalkthroughScene` without
+ * involving the exporter at all — no readiness probe, no Modal container, no
+ * poll loop. That is the common case by a wide margin: the app asks for a
+ * session every time someone reaches the Explore step, so walking through the
+ * same flat twice used to cost two GPU builds even though the exporter's own
+ * content-addressed cache meant the second one produced a byte-identical file.
  */
 router.post("/realtime/session", isAuthenticated, async (req, res) => {
+  const payload = req.body || {};
+  const key = sceneCacheKey(payload);
+
+  // `findOneAndUpdate` rather than `findOne`, so reading a scene is also what
+  // keeps it alive: the TTL index drops rows nobody has opened in 90 days.
+  try {
+    const cached = await WalkthroughScene.findOneAndUpdate(
+      { key },
+      { $set: { lastUsedAt: new Date() } },
+      { new: true },
+    );
+    if (cached) {
+      return res.json({
+        ...cached.data,
+        modelUrl: `/api/walkthrough/realtime/model/${cached.modelName}`,
+        sceneKey: key,
+        cached: true,
+      });
+    }
+  } catch (error) {
+    // A cache that cannot be read is a slow request, not a failed one.
+    console.error("walkthrough scene cache read failed:", error.message);
+  }
+
   // A server that cannot import the exporter will spend four minutes failing
   // the same way for every request. Answer immediately, and say why.
   const renderer = await rendererReadiness();
@@ -220,10 +253,25 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
   }
 
   try {
-    const { modelName, ...data } = await buildWalkthroughModel(req.body || {});
+    const { modelName, cached: _exporterCached, ...data } = await buildWalkthroughModel(payload);
+
+    // Upsert rather than create: two phones asking for the same new scene at the
+    // same moment both get here, and the second must not fail on the unique key.
+    try {
+      await WalkthroughScene.updateOne(
+        { key },
+        { $set: { modelName, data, lastUsedAt: new Date() } },
+        { upsert: true },
+      );
+    } catch (error) {
+      console.error("walkthrough scene cache write failed:", error.message);
+    }
+
     return res.json({
       ...data,
       modelUrl: `/api/walkthrough/realtime/model/${modelName}`,
+      sceneKey: key,
+      cached: false,
     });
   } catch (error) {
     console.error("POST /walkthrough/realtime/session error:", error.message);
@@ -253,7 +301,16 @@ router.get("/realtime/model/:filename", async (req, res) => {
     });
     return res.sendFile(modelPath);
   } catch (error) {
-    if (error.notFound) return res.status(404).json({ message: "This walkthrough model has expired." });
+    if (error.notFound) {
+      // The geometry is gone for good — evicted from the Modal volume, most
+      // likely. Any remembered session pointing at it would hand the same dead
+      // URL to the next person who opened that plan, so it goes too, and the
+      // retry the app already offers rebuilds the scene properly.
+      WalkthroughScene.deleteMany({ modelName: filename }).catch((cleanupError) => {
+        console.error("walkthrough scene cache purge failed:", cleanupError.message);
+      });
+      return res.status(404).json({ message: "This walkthrough model has expired." });
+    }
     console.error("GET /walkthrough/realtime/model error:", error.message);
     return res.status(502).json({ message: "This walkthrough model could not be loaded." });
   }

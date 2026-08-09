@@ -135,6 +135,32 @@ Everything else is identical. Either way the app calls
 `modelUrl`, and loads the GLB from the same `/api/walkthrough` origin. There is
 no renderer URL in the app, no `INTERIOR_PLAN_ROOT`, and no second checkout.
 
+#### What a session actually costs
+
+Almost always, nothing. `/realtime/session` looks the request up in the
+`walkthroughscenes` collection first, keyed by a hash of the geometry and the
+design (`backend/src/lib/walkthroughSceneCache.js`). A hit answers from Mongo and
+never wakes Modal — no container, no build, no poll loop — so reopening a plan,
+stepping back to Style and forward again, or two people drawing the same flat all
+cost one indexed lookup. Only a genuinely new combination of rooms, openings and
+finishes reaches the exporter.
+
+The GLB is cached separately and for the same reason: model names are
+content-addressed, `/realtime/model/:filename` keeps them on the instance's disk,
+and the response is `immutable` for a week so the WebView asks once.
+
+Two things invalidate a remembered scene:
+
+* `LIVINAI_WEB_RENDERER_REVISION` in `lib/exactWalkthroughScene.js` — bump it when
+  the exporter's output changes. It is part of the key, so the app and the server
+  invalidate together.
+* `WALKTHROUGH_SCENE_CACHE_VERSION` (optional, Render runtime) — bump it to drop
+  every remembered scene without shipping an app release.
+
+Rows expire 90 days after they were last opened. If a GLB is evicted from the
+Modal volume before then, the model route answers 404 *and* deletes the rows
+pointing at it, so the app's "Try again" rebuilds rather than retrying a dead URL.
+
 #### Option 1 — exporter on Modal (recommended)
 
 The Node service stays on Render's native runtime and never touches Python.

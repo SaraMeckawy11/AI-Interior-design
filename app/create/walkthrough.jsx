@@ -104,7 +104,7 @@ const STAGES = [
     key: "walk",
     label: "Explore",
     title: "Walk through it",
-    copy: "Walk, orbit or look from above. Tap any piece of furniture to move it.",
+    copy: "Walk through it, or look down on the whole floor. Tap any piece of furniture to move it.",
   },
 ];
 
@@ -133,8 +133,11 @@ const TOOLS = [
 
 const TOOL_GROUPS = [
   { label: "Shape the plan", keys: ["pan", "rect", "room", "select"] },
-  { label: "Put in a wall", keys: ["door", "window", "balcony"] },
+  { label: "Put in a wall", keys: ["door", "window", "balcony"], needsRooms: true },
 ];
+
+/** The tools that need a wall to aim at. */
+const OPENING_TOOLS = new Set(["door", "window", "balcony"]);
 
 const TOOL_HINTS = {
   pan: "Drag to move around the plan. Two fingers pan and pinch in any tool.",
@@ -146,9 +149,18 @@ const TOOL_HINTS = {
   select: "Tap a room or opening, then drag the shape or one of its handles.",
 };
 
+/**
+ * Two ways to look at a home: from inside it, or from above it.
+ *
+ * Orbit was a third, and it did not work. It flew the camera around the outside
+ * of a building that has a roof on it, so what it actually showed — most of the
+ * time, from most angles — was the top of the ceiling and the backs of the
+ * pendants hanging under it. A control whose ordinary result is a grey slab is
+ * not a view of anyone's home, and Bird already answers the question it was
+ * there to answer.
+ */
 const VIEW_MODES = [
   { key: "walk", icon: "walk-outline", label: "Walk" },
-  { key: "orbit", icon: "sync-outline", label: "Orbit" },
   { key: "plan", icon: "map-outline", label: "Bird" },
 ];
 
@@ -193,7 +205,6 @@ export default function WalkthroughScreen() {
   // Pan, not Box. Opening the canvas already armed to draw meant the first
   // exploratory drag on a traced photo left a room behind it.
   const [tool, setTool] = useState("pan");
-  const [canvasFocus, setCanvasFocus] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [roomEdgeType, setRoomEdgeType] = useState("straight");
   const [curveSettings, setCurveSettings] = useState(DEFAULT_CURVE_SETTINGS);
@@ -268,13 +279,22 @@ export default function WalkthroughScreen() {
   // identical on every phone and keeps furniture in proportion to the room.
   const sheetWidth = SHEET_WIDTH;
   const sheetHeight = Math.round(sheetWidth * canvasAspect);
-  // Minus the two hairlines of the card the canvas now sits in, so the drawing
+  // Minus the two hairlines of the card the canvas sits in, so the drawing
   // surface is not clipped by its own frame.
-  const canvasWidth = Math.round(canvasFocus ? LAYOUT.screenWidth : LAYOUT.screenWidth - SPACING.base * 2 - 2);
+  const canvasWidth = Math.round(LAYOUT.screenWidth - SPACING.base * 2 - 2);
+  /**
+   * As tall as the step can afford, always.
+   *
+   * There used to be an Expand button that swapped a 42%-of-screen canvas for a
+   * 66% one. It is gone, and this is the reason: a drawing surface is not a
+   * setting. Every plan is easier to draw on the big one, nobody wants the small
+   * one, and the button cost a control in the action row, a piece of state, a
+   * full-bleed layout variant of the canvas card, and a re-layout of the whole
+   * step in the middle of drawing. The canvas is now simply as large as the
+   * gutter and the phone allow.
+   */
   const canvasHeight = Math.round(
-    canvasFocus
-      ? Math.max(320, LAYOUT.screenHeight * 0.66)
-      : Math.max(280, Math.min(canvasWidth * 1.02, LAYOUT.screenHeight * 0.42)),
+    Math.max(300, Math.min(canvasWidth * 1.16, LAYOUT.screenHeight * 0.54)),
   );
   const pixelsPerMeter = detectedPixelsPerMeter || PLAN_PIXELS_PER_METER;
 
@@ -300,12 +320,77 @@ export default function WalkthroughScreen() {
   const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
   const currentRender = aiRenders[aiKey];
 
+  // Clearing the plan while a door was armed left the canvas with a tool that
+  // cannot do anything — every tap looking for a wall that no longer exists.
+  useEffect(() => {
+    if (rooms.length) return;
+    setTool((current) => (OPENING_TOOLS.has(current) ? "pan" : current));
+  }, [rooms.length]);
+
+  /**
+   * Everything about this plan that changes what gets built — and nothing else.
+   *
+   * The build effect used to re-run on the identity of `layout`, `roomConfigs`
+   * and `settings`, all three of which are new objects on almost every render.
+   * Stepping back to Style and forward to Explore, or flipping a viewer-only
+   * preference like "walk through walls", therefore asked the server to build a
+   * home it had built thirty seconds earlier. The exporter is deterministic, so
+   * the answer was always the same one — the request was pure cost.
+   */
+  const sceneSignature = useMemo(
+    () => JSON.stringify({
+      revision: LIVINAI_WEB_RENDERER_REVISION,
+      rooms: layout.rooms,
+      doors: layout.doors.map((opening) => opening.slice(0, 2)),
+      windows: layout.windows.map((opening) => opening.slice(0, 2)),
+      balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
+      pixelsPerMeter: layout.pixelsPerMeter,
+      configs: roomConfigs.map((room) => [room.name, room.roomType, room.style, room.kitchenType || ""]),
+      // The design fields the exporter reads. `freeExplore` is not among them:
+      // it decides whether the camera may walk through a wall, which is a
+      // property of the viewer, not of the home.
+      design: [
+        settings.designProfile,
+        settings.colorMood,
+        settings.notes,
+        settings.floorFinish,
+        settings.wallFinish,
+        settings.rugDesign,
+        settings.curtainDesign,
+        settings.decorSet,
+      ],
+    }),
+    [layout, roomConfigs, settings],
+  );
+
+  /**
+   * Scenes this session has already been handed, by signature.
+   *
+   * The server remembers built scenes too, so a miss here still usually costs
+   * one lookup rather than a build. This exists for the case that lookup cannot
+   * improve on: leaving Explore and coming straight back, which should be
+   * instant and should not touch the network at all. Holding the same object
+   * identity also keeps the WebView's memoised document stable, so the whole GPU
+   * scene is not thrown away and rebuilt on the way back in.
+   */
+  const sceneCache = useRef(new Map());
+
   // Build the scene with the canonical Livinai_web exporter. Rendering a
   // second, approximate room programme on-device was the source of mismatched
   // dimensions, furniture families, placement and finishes. The exporter owns
   // all of those decisions and returns one textured GLB for the phone to view.
   useEffect(() => {
     if (view !== "editor" || stage !== STAGES.length - 1 || !layout.rooms.length) return undefined;
+
+    const remembered = sceneCache.current.get(sceneSignature);
+    if (remembered) {
+      setExactScene(remembered.scene);
+      setExactSceneBaseUrl(remembered.origin);
+      setExactSceneLoading(false);
+      setExactSceneError("");
+      setExactSceneDetail("");
+      return undefined;
+    }
 
     const rendererRoot = (process.env.EXPO_PUBLIC_SERVER_URI || "").replace(/\/$/, "");
 
@@ -369,6 +454,7 @@ export default function WalkthroughScreen() {
         }
         if (controller.signal.aborted) return;
         const origin = rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
+        sceneCache.current.set(sceneSignature, { scene: data, origin });
         setExactScene(data);
         setExactSceneBaseUrl(origin);
       } catch (error) {
@@ -391,7 +477,20 @@ export default function WalkthroughScreen() {
     })();
 
     return () => controller.abort();
-  }, [exactSceneRetry, layout, roomConfigs, settings, stage, token, view]);
+  }, [exactSceneRetry, layout, roomConfigs, sceneSignature, settings, stage, token, view]);
+
+  /**
+   * Try again, and mean it.
+   *
+   * Retry has to be the one path that bypasses both caches, because the reason
+   * someone presses it is that what they were handed did not work — a scene
+   * whose GLB has been evicted, most often. The server drops its own row when it
+   * serves the 404 that produced this state, so this only has to forget ours.
+   */
+  const rebuildScene = useCallback(() => {
+    sceneCache.current.delete(sceneSignature);
+    setExactSceneRetry((value) => value + 1);
+  }, [sceneSignature]);
 
   // ── Autosave ─────────────────────────────────────────────────────────────
   // Drawing a home takes real effort; geometry is saved in normalized canvas
@@ -1429,7 +1528,7 @@ export default function WalkthroughScreen() {
                 setExactSceneError("Your home was built, but it could not be opened here.");
                 setExactSceneDetail(message);
               }}
-              onRetryExact={() => setExactSceneRetry((value) => value + 1)}
+              onRetryExact={rebuildScene}
               onBackToDesign={goBack}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
@@ -1463,26 +1562,25 @@ export default function WalkthroughScreen() {
               {/* ── Step 1 · Draw ────────────────────────────────────── */}
               {stage === 0 && (
                 <>
-                  {!canvasFocus && (
-                    <PlanSourceBar
-                      planImage={planImage}
-                      detecting={detecting}
-                      error={planError}
-                      onUpload={() => uploadPlan()}
-                      onClear={() => {
-                        setPlanImage(null);
-                        setCanvasAspect(CANVAS_RATIO);
-                        setDetectedPixelsPerMeter(null);
-                        setPlanError("");
-                      }}
-                    />
-                  )}
+                  <PlanSourceBar
+                    planImage={planImage}
+                    detecting={detecting}
+                    error={planError}
+                    onUpload={() => uploadPlan()}
+                    onClear={() => {
+                      setPlanImage(null);
+                      setCanvasAspect(CANVAS_RATIO);
+                      setDetectedPixelsPerMeter(null);
+                      setPlanError("");
+                    }}
+                  />
 
                   <ToolPalette
                     tool={tool}
                     onChange={setTool}
                     snapToGrid={snapToGrid}
                     onToggleSnap={() => setSnapToGrid((value) => !value)}
+                    hasRooms={rooms.length > 0}
                   />
 
                   {tool === "room" && (
@@ -1501,13 +1599,13 @@ export default function WalkthroughScreen() {
                     />
                   )}
 
-                  {/* The instruction is now attached to the surface it is about.
-                      It used to float as loose grey text above the canvas, where
-                      it read as page furniture rather than as the answer to
-                      "what does this tool do", and the canvas itself had no
-                      frame at all — the grid simply began somewhere in the
-                      middle of the scroll. */}
-                  <View style={[styles.canvasCard, canvasFocus && styles.canvasCardFocused]}>
+                  {/* One frame around the drawing surface, with the instruction
+                      for the armed tool attached to the top of it. The canvas
+                      used to draw a rounded border and a shadow of its own
+                      *inside* this card, so the plan sat in two nested frames a
+                      hairline apart, and the instruction floated above both as
+                      loose grey text that read as page furniture. */}
+                  <View style={styles.canvasCard}>
                     <View style={styles.canvasHint} accessibilityLiveRegion="polite">
                       <Ionicons name={activeTool?.icon || "grid-outline"} size={14} color={COLORS.primaryDark} />
                       <Text style={styles.canvasHintText}>
@@ -1548,6 +1646,7 @@ export default function WalkthroughScreen() {
                       onSelectShape={selectShape}
                       onSetCurveControl={setCurveControl}
                       onBeginEdit={rememberPlan}
+                      onStartDrawing={() => setTool("rect")}
                     />
                   </View>
 
@@ -1645,9 +1744,10 @@ export default function WalkthroughScreen() {
                     </View>
                   )}
 
-                  {/* Four equal cells. They used to be pill buttons sized by
-                      their own labels, so "Clear plan" was twice the width of
-                      "Undo" and the row read as four unrelated things. */}
+                  {/* Three equal cells: the two that take back a mistake, and
+                      the one that takes back all of them. Expand used to sit
+                      between Redo and Clear, which put a harmless view control
+                      next to the only destructive button on the step. */}
                   <View style={styles.actionRow}>
                     <ActionButton
                       icon="arrow-undo-outline"
@@ -1657,12 +1757,6 @@ export default function WalkthroughScreen() {
                     />
                     <ActionButton icon="arrow-redo-outline" label="Redo" disabled={!future.length} onPress={redo} />
                     <ActionButton
-                      icon={canvasFocus ? "contract-outline" : "expand-outline"}
-                      label={canvasFocus ? "Shrink" : "Expand"}
-                      active={canvasFocus}
-                      onPress={() => setCanvasFocus((value) => !value)}
-                    />
-                    <ActionButton
                       icon="trash-outline"
                       label="Clear"
                       tone="danger"
@@ -1671,31 +1765,24 @@ export default function WalkthroughScreen() {
                     />
                   </View>
 
+                  {/* What is on the sheet, in one line.
+                      A "Room sizes" card used to sit here listing every room
+                      with an editable width and depth — the same two fields the
+                      Rooms step already shows on each room's own card, under the
+                      heading "Exact size". Two places to type the same number is
+                      one place too many, and on a five-room plan it doubled the
+                      length of the step that is hardest to scroll while drawing.
+                      Typing a size lives on the Rooms step; this step draws. */}
                   {!!rooms.length && (
-                    <View style={styles.card}>
-                      <View style={styles.cardTitleRow}>
-                        <Text style={styles.cardSectionTitle}>Room sizes</Text>
-                        {/* The three metric tiles that used to sit above this
-                            card said the same thing in three boxes. */}
-                        <Text style={styles.cardTitleMeta}>
-                          {rooms.length} · {openings.length} openings · {totalArea.toFixed(1)} m²
-                        </Text>
-                      </View>
-                      {rooms.map((room, index) => (
-                        <RoomSizeRow
-                          key={`size-${index}`}
-                          index={index}
-                          label={roomConfigs[index]?.name || `Room ${index + 1}`}
-                          room={room}
-                          pixelsPerMeter={pixelsPerMeter}
-                          active={selectedRoom === index}
-                          onFocus={() => {
-                            setSelectedRoom(index);
-                            setSelection({ kind: "room", index });
-                          }}
-                          onResize={resizeRoom}
-                        />
-                      ))}
+                    <View style={styles.planSummary}>
+                      <Ionicons name="analytics-outline" size={15} color={COLORS.primaryDark} />
+                      <Text style={styles.planSummaryText} numberOfLines={1}>
+                        {rooms.length === 1 ? "1 room" : `${rooms.length} rooms`}
+                        {" · "}
+                        {openings.length === 1 ? "1 opening" : `${openings.length} openings`}
+                        {" · "}
+                        {totalArea.toFixed(1)} m²
+                      </Text>
                     </View>
                   )}
                 </>
@@ -1809,7 +1896,7 @@ export default function WalkthroughScreen() {
                       android_ripple={{ color: "rgba(51,96,74,0.10)" }}
                       onPress={() => setStyleExpanded((value) => !value)}
                     >
-                      <Text style={styles.disclosureText}>Soft furnishings and decor</Text>
+                      <Text style={styles.disclosureText}>More detail</Text>
                       <Ionicons
                         name={styleExpanded ? "chevron-up" : "chevron-down"}
                         size={17}
@@ -1817,11 +1904,20 @@ export default function WalkthroughScreen() {
                       />
                     </Pressable>
 
+                    {/* Everything past the four questions above lives behind one
+                        disclosure, closed by default. Rugs, curtains and decor
+                        all default to "Auto by style" and are read by the same
+                        designer that reads the profile, so a plan is complete
+                        without opening this — and "Walk through walls" joined
+                        them because it is a preference about the camera, not a
+                        decision about the home, and it was the only control on
+                        the step that changed nothing about what gets built. */}
                     {styleExpanded && (
                       <View style={styles.card}>
                         <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
                         <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
                         <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
+
                         <View style={[styles.notesHead, { marginTop: SPACING.lg }]}>
                           <Text style={styles.fieldLabel}>Notes (optional)</Text>
                           {/* The field silently stopped accepting characters at
@@ -1838,28 +1934,25 @@ export default function WalkthroughScreen() {
                           multiline
                           maxLength={240}
                         />
+
+                        <Pressable
+                          style={({ pressed }) => [styles.settingToggle, pressed && styles.pressedSurface]}
+                          accessibilityRole="switch"
+                          accessibilityLabel="Walk through walls"
+                          accessibilityState={{ checked: settings.freeExplore }}
+                          android_ripple={{ color: "rgba(30,36,31,0.08)" }}
+                          onPress={() => updateSetting("freeExplore", !settings.freeExplore)}
+                        >
+                          <View style={styles.settingToggleCopy}>
+                            <Text style={styles.settingToggleTitle}>Walk through walls</Text>
+                            <Text style={styles.settingToggleText}>Review furniture without using the doors.</Text>
+                          </View>
+                          <View style={[styles.switchTrack, settings.freeExplore && styles.switchTrackOn]}>
+                            <View style={[styles.switchKnob, settings.freeExplore && styles.switchKnobOn]} />
+                          </View>
+                        </Pressable>
                       </View>
                     )}
-
-                    {/* A checkbox drawn for a setting that is a mode, not a
-                        selection. A track and a knob say "on or off" without
-                        having to read the label first. */}
-                    <Pressable
-                      style={({ pressed }) => [styles.settingToggle, pressed && styles.pressedSurface]}
-                      accessibilityRole="switch"
-                      accessibilityLabel="Walk through walls"
-                      accessibilityState={{ checked: settings.freeExplore }}
-                      android_ripple={{ color: "rgba(30,36,31,0.08)" }}
-                      onPress={() => updateSetting("freeExplore", !settings.freeExplore)}
-                    >
-                      <View style={styles.settingToggleCopy}>
-                        <Text style={styles.settingToggleTitle}>Walk through walls</Text>
-                        <Text style={styles.settingToggleText}>Useful for reviewing furniture without using the doors.</Text>
-                      </View>
-                      <View style={[styles.switchTrack, settings.freeExplore && styles.switchTrackOn]}>
-                        <View style={[styles.switchKnob, settings.freeExplore && styles.switchKnobOn]} />
-                      </View>
-                    </Pressable>
                   </>
                 )
               )}
@@ -2150,17 +2243,19 @@ function WalkthroughStage({
         <View style={styles.overlayTop} pointerEvents="box-none">
           <View style={styles.viewControls} pointerEvents="box-none">
             {/* The Explore step has no footer, so it is the one step with no
-                Back beside its Continue. Without this the only way back to the
-                brief was the header — which now leaves the walkthrough — or the
-                stepper dots, which are 26pt targets in the top bar. */}
+                Back beside its Continue. It is labelled rather than left as a
+                bare chevron: a lone arrow next to a lone sun, both round and
+                both white, gave two unrelated actions the same shape and left
+                neither of them saying what it did. */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Back to Style"
-              android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
-              style={({ pressed }) => [styles.roundButton, pressed && styles.pressedSurface]}
+              android_ripple={{ color: "rgba(30,36,31,0.16)" }}
+              style={({ pressed }) => [styles.viewerBack, pressed && styles.pressedSurface]}
               onPress={onBackToDesign}
             >
-              <Ionicons name="chevron-back" size={20} color={COLORS.textPrimary} />
+              <Ionicons name="chevron-back" size={17} color={COLORS.textPrimary} />
+              <Text style={styles.viewerBackText}>Style</Text>
             </Pressable>
             <View style={styles.segmented} accessibilityRole="tablist">
               {VIEW_MODES.map((item) => {
@@ -2187,11 +2282,16 @@ function WalkthroughStage({
                 );
               })}
             </View>
+            {/* Day and evening, drawn as the two states of one control rather
+                than as a button that changes icon. The filled state is what
+                says which one you are in — a white circle holding a moon reads
+                as "press for night" and a dark circle holding a moon reads as
+                "you are in night", and only the second is true. */}
             <Pressable
               accessibilityRole="switch"
-              accessibilityLabel={night ? "Switch to daylight" : "Switch to evening light"}
+              accessibilityLabel={night ? "Evening light. Switch to daylight" : "Daylight. Switch to evening light"}
               accessibilityState={{ checked: night }}
-              android_ripple={{ color: "rgba(30,36,31,0.16)", borderless: true }}
+              android_ripple={{ color: night ? "rgba(255,255,255,0.20)" : "rgba(30,36,31,0.16)", borderless: true }}
               style={({ pressed }) => [
                 styles.roundButton,
                 night && styles.roundButtonActive,
@@ -2199,7 +2299,11 @@ function WalkthroughStage({
               ]}
               onPress={onToggleNight}
             >
-              <Ionicons name={night ? "moon" : "sunny-outline"} size={19} color={night ? COLORS.white : COLORS.textPrimary} />
+              <Ionicons
+                name={night ? "moon" : "sunny"}
+                size={18}
+                color={night ? COLORS.white : COLORS.warning}
+              />
             </Pressable>
           </View>
 
@@ -2214,9 +2318,7 @@ function WalkthroughStage({
               text={
                 viewMode === "walk"
                   ? "Drag to look around · Tap any piece to edit it"
-                  : viewMode === "orbit"
-                    ? "Drag to orbit the home · Tap any piece to edit it"
-                    : "Drag to rotate the furnished plan"
+                  : "Drag to turn the plan · Tap any piece to edit it"
               }
             />
           )}
@@ -3383,38 +3485,60 @@ function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
  * competed with the one tool that was actually selected. A labelled switch says
  * "on or off" without having to be interpreted.
  */
-function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap }) {
+function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap, hasRooms }) {
   return (
     <View style={styles.palette}>
-      {TOOL_GROUPS.map((group, groupIndex) => (
-        <View key={group.label} style={groupIndex > 0 && styles.paletteGroupNext}>
-          <Text style={styles.paletteGroupLabel}>{group.label}</Text>
-          <View style={styles.paletteRow}>
-            {group.keys.map((key) => {
-              const item = TOOLS.find((entry) => entry.key === key);
-              if (!item) return null;
-              const active = tool === key;
-              return (
-                <Pressable
-                  key={key}
-                  accessibilityRole="radio"
-                  accessibilityLabel={item.label}
-                  accessibilityState={{ selected: active, checked: active }}
-                  style={({ pressed }) => [styles.toolCell, pressed && !active && styles.pressedSurface]}
-                  onPress={() => onChange(key)}
-                >
-                  <View style={[styles.tool, active && styles.toolActive]}>
-                    <Ionicons name={item.icon} size={19} color={active ? COLORS.white : COLORS.textSecondary} />
-                    <Text style={[styles.toolLabel, active && styles.toolLabelActive]} numberOfLines={1}>
-                      {item.label}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
+      {TOOL_GROUPS.map((group, groupIndex) => {
+        // A door has to go into a wall, and until a room is drawn there are no
+        // walls. Arming one of these on an empty sheet used to leave the canvas
+        // silently inert: every tap landed on nothing and the tool stayed lit,
+        // which reads as a broken app rather than as a step out of order.
+        const locked = group.needsRooms && !hasRooms;
+        return (
+          <View key={group.label} style={groupIndex > 0 && styles.paletteGroupNext}>
+            <View style={styles.paletteGroupHead}>
+              <Text style={styles.paletteGroupLabel}>{group.label}</Text>
+              {locked && <Text style={styles.paletteGroupLocked}>Draw a room first</Text>}
+            </View>
+            <View style={styles.paletteRow}>
+              {group.keys.map((key) => {
+                const item = TOOLS.find((entry) => entry.key === key);
+                if (!item) return null;
+                const active = tool === key;
+                return (
+                  <Pressable
+                    key={key}
+                    accessibilityRole="radio"
+                    accessibilityLabel={item.label}
+                    accessibilityState={{ selected: active, checked: active, disabled: locked }}
+                    disabled={locked}
+                    style={({ pressed }) => [styles.toolCell, pressed && !active && styles.pressedSurface]}
+                    onPress={() => onChange(key)}
+                  >
+                    <View style={[styles.tool, active && styles.toolActive, locked && styles.toolLocked]}>
+                      <Ionicons
+                        name={item.icon}
+                        size={19}
+                        color={active ? COLORS.white : locked ? COLORS.textTertiary : COLORS.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.toolLabel,
+                          active && styles.toolLabelActive,
+                          locked && styles.toolLabelLocked,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {item.label}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
-      ))}
+        );
+      })}
 
       <Pressable
         accessibilityRole="switch"
@@ -3827,7 +3951,14 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
   },
   paletteGroupNext: { marginTop: SPACING.md },
-  paletteGroupLabel: { ...TYPE.overline, color: COLORS.textTertiary, marginBottom: SPACING.sm },
+  paletteGroupHead: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    gap: SPACING.sm, marginBottom: SPACING.sm,
+  },
+  paletteGroupLabel: { ...TYPE.overline, color: COLORS.textTertiary },
+  // Says why the row below it is grey, on the row itself. A disabled control
+  // that does not explain itself is indistinguishable from a broken one.
+  paletteGroupLocked: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
   // Cells flex within their own group, so each row fills the card whether it
   // holds three tools or four and no label's length can change a button's size.
   paletteRow: { flexDirection: "row", marginHorizontal: -3 },
@@ -3837,8 +3968,10 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
   toolActive: { backgroundColor: COLORS.primaryDark, ...SHADOW.xs },
+  toolLocked: { backgroundColor: COLORS.surfaceAlt, opacity: 0.6 },
   toolLabel: { ...TYPE.caption, fontSize: 10, color: COLORS.textSecondary },
   toolLabelActive: { color: COLORS.white },
+  toolLabelLocked: { color: COLORS.textTertiary },
 
   snapRow: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
@@ -3851,13 +3984,7 @@ const styles = StyleSheet.create({
 
   canvasCard: {
     borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
-  },
-  // Expanded, the drawing surface takes the full width of the phone, so the card
-  // gives up the side hairlines it would otherwise draw off-screen.
-  canvasCardFocused: {
-    marginHorizontal: -SPACING.base,
-    borderRadius: 0, borderLeftWidth: 0, borderRightWidth: 0,
+    borderWidth: 1, borderColor: COLORS.borderStrong, ...SHADOW.sm,
   },
   canvasHint: {
     flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
@@ -3914,6 +4041,14 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
   },
   summaryBarText: { flex: 1, ...TYPE.caption, color: COLORS.primaryDark },
+
+  planSummary: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    marginTop: SPACING.md, paddingHorizontal: SPACING.md, minHeight: ms(40),
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  planSummaryText: { flex: 1, ...TYPE.caption, color: COLORS.primaryDark },
 
   card: {
     backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.base,
@@ -3990,9 +4125,9 @@ const styles = StyleSheet.create({
   disclosureText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
 
   settingToggle: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.md,
-    padding: SPACING.base, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.lg,
+    padding: SPACING.md, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
   },
   settingToggleCopy: { flex: 1, minWidth: 0 },
   settingToggleTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
@@ -4216,26 +4351,39 @@ const styles = StyleSheet.create({
   overlayTop: { gap: SPACING.sm },
   overlayBottom: { gap: SPACING.md },
 
+  // One row, one height. Back, the view switcher and the light toggle were 48,
+  // 48 and 40 tall with three different shadow weights, so a row of three
+  // related controls read as three unrelated ones.
   viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  viewerBack: {
+    flexDirection: "row", alignItems: "center", gap: 3,
+    height: ms(46), paddingLeft: SPACING.sm, paddingRight: SPACING.md,
+    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
+  },
+  viewerBackText: { ...TYPE.caption, color: COLORS.textPrimary },
   segmented: {
     flex: 1, flexDirection: "row", padding: 4,
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.pill, ...SHADOW.md,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.pill,
+    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
-  // 40 + the 4pt of track padding above and below clears the 44pt minimum.
+  // 36 + the 4pt of track padding above and below matches the 46pt of the two
+  // buttons either side of it.
   segment: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, height: ms(40), borderRadius: RADIUS.pill,
+    gap: 6, height: ms(36), borderRadius: RADIUS.pill,
   },
   segmentActive: { backgroundColor: COLORS.primaryDark },
   segmentPressed: { backgroundColor: COLORS.surfaceSunken },
   segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.white },
   roundButton: {
-    width: ms(48), height: ms(48), borderRadius: RADIUS.pill,
+    width: ms(46), height: ms(46), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: COLORS.surface, ...SHADOW.md,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
-  roundButtonActive: { backgroundColor: COLORS.brand800 },
+  roundButtonActive: { backgroundColor: COLORS.brand800, borderColor: COLORS.brand900 },
 
   // Negative margins let the strip bleed to the screen edges so a long room
   // list scrolls off the side instead of stopping inside the gutter. The
@@ -4413,7 +4561,7 @@ const styles = StyleSheet.create({
   noticeButton: { marginTop: SPACING.lg, paddingVertical: SPACING.md, borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark },
   noticeButtonText: { ...TYPE.bodyStrong, color: COLORS.white, textAlign: "center" },
 
-  // Four equal cells under the canvas — same grid logic as the tool palette.
+  // Equal cells under the canvas — same grid logic as the tool palette.
   actionRow: { flexDirection: "row", marginTop: SPACING.sm, marginHorizontal: -3 },
   actionCell: { flex: 1, paddingHorizontal: 3 },
   action: {
@@ -4424,12 +4572,6 @@ const styles = StyleSheet.create({
   actionActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.primarySoft },
   actionDisabled: { opacity: 0.45 },
   actionLabel: { ...TYPE.caption, fontSize: 10 },
-
-  cardTitleRow: {
-    flexDirection: "row", alignItems: "baseline", justifyContent: "space-between",
-    gap: SPACING.sm, marginBottom: SPACING.sm,
-  },
-  cardTitleMeta: { ...TYPE.caption, color: COLORS.textTertiary, flexShrink: 1 },
 
   // 50pt, and the primary carries the row's only elevation, so which of the two
   // equal-width buttons is the way forward reads before either label does.

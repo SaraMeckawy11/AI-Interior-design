@@ -330,6 +330,7 @@ export default function PlanCanvas({
   onSelectShape,
   onSetCurveControl,
   onBeginEdit,
+  onStartDrawing,
 }) {
   const [pointer, setPointer] = useState(null);
   const [rectDraft, setRectDraft] = useState(null);
@@ -1188,12 +1189,34 @@ export default function PlanCanvas({
         </Pressable>
       </View>
 
+      {/* An empty sheet with the Pan tool armed is the state a first-time user
+          lands in, and "Pick a tool to start" pointed them back at a palette
+          they had just scrolled past. The way to start is now on the empty
+          surface itself, which is where they are looking. `box-none` so the
+          grid underneath still takes every touch that is not the button. */}
       {rooms.length === 0 && draft.length === 0 && !rectDraft && !imageUri && (
-        <View style={styles.empty} pointerEvents="none">
-          <Text style={styles.emptyTitle}>
-            {tool === "rect" ? "Drag to draw a room" : tool === "room" ? "Tap to place each corner" : "Pick a tool to start"}
+        <View style={styles.empty} pointerEvents="box-none">
+          <Text style={styles.emptyTitle} pointerEvents="none">
+            {tool === "rect"
+              ? "Drag to draw a room"
+              : tool === "room"
+                ? "Tap to place each corner"
+                : "This is your floor plan"}
           </Text>
-          <Text style={styles.emptyBody}>Each square is half a metre · pinch to zoom, two fingers to move</Text>
+          <Text style={styles.emptyBody} pointerEvents="none">
+            Each square is half a metre · pinch to zoom, two fingers to move
+          </Text>
+          {tool !== "rect" && tool !== "room" && !!onStartDrawing && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Draw a room"
+              android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+              style={({ pressed }) => [styles.emptyAction, pressed && { opacity: 0.78 }]}
+              onPress={onStartDrawing}
+            >
+              <Text style={styles.emptyActionText}>Draw a room</Text>
+            </Pressable>
+          )}
         </View>
       )}
 
@@ -1213,13 +1236,12 @@ export default function PlanCanvas({
 }
 
 const styles = StyleSheet.create({
+  // No border, no radius, no shadow. The step wraps this in a card that draws
+  // all three; when the canvas drew them too the plan sat inside two frames a
+  // hairline apart, with the corners of the inner one cutting across the grid.
   canvas: {
-    borderRadius: RADIUS.xl,
     overflow: "hidden",
-    borderWidth: 1.5,
-    borderColor: COLORS.borderStrong,
     backgroundColor: COLORS.surfaceSunken,
-    ...SHADOW.md,
   },
   empty: {
     ...StyleSheet.absoluteFillObject,
@@ -1230,6 +1252,17 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { ...TYPE.bodyStrong, color: COLORS.textSecondary },
   emptyBody: { ...TYPE.caption, color: COLORS.textTertiary, textAlign: "center" },
+  emptyAction: {
+    marginTop: 12,
+    height: 44,
+    paddingHorizontal: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.primaryDark,
+    ...SHADOW.sm,
+  },
+  emptyActionText: { ...TYPE.caption, color: COLORS.white },
   viewportControls: {
     position: "absolute",
     right: 10,
@@ -1241,6 +1274,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.94)",
     borderWidth: 1,
     borderColor: COLORS.border,
+    ...SHADOW.sm,
   },
   // These float over the drawing surface, so a near-miss does not do nothing —
   // it places a corner. 34×32 was not enough of a target for that; with the
