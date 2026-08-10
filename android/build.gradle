@@ -1,12 +1,22 @@
 // Top-level build file for Livinai
 
 buildscript {
+    ext {
+        buildToolsVersion = findProperty('android.buildToolsVersion') ?: '35.0.0'
+        minSdkVersion = Integer.parseInt(findProperty('android.minSdkVersion') ?: '24')
+        compileSdkVersion = Integer.parseInt(findProperty('android.compileSdkVersion') ?: '35')
+        targetSdkVersion = Integer.parseInt(findProperty('android.targetSdkVersion') ?: '35')
+        kotlinVersion = findProperty('android.kotlinVersion') ?: '2.0.21'
+        ndkVersion = "27.1.12297006"
+    }
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        // Deliberately version-less.
+        // Deliberately version-less. Versions come from Expo's version catalog (see
+        // expoAutolinking.useExpoVersionCatalog() in settings.gradle), so they must not be
+        // pinned here.
         //
         // These used to be pinned to AGP 8.1.0, Kotlin 1.9.10 and react-native-gradle-plugin
         // 0.72.0 — all left over from an older React Native. None of them were what the build
@@ -25,6 +35,10 @@ buildscript {
     }
 }
 
+// Apply Expo and React Native root project plugins
+apply plugin: "expo-root-project"
+apply plugin: "com.facebook.react.rootproject"
+
 allprojects {
     repositories {
         google()
@@ -32,7 +46,3 @@ allprojects {
         maven { url 'https://www.jitpack.io' }
     }
 }
-
-// Apply Expo and React Native root project plugins
-apply plugin: "expo-root-project"
-apply plugin: "com.facebook.react.rootproject"
