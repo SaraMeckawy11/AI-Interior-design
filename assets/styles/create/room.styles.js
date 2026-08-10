@@ -78,6 +78,14 @@ iconCircleSelected: {
   elevation: 3,
 },
 
+addItemCircle: {
+  backgroundColor: COLORS.primaryTint,
+  borderColor: COLORS.brand300,
+  borderStyle: 'dashed',
+  shadowOpacity: 0,
+  elevation: 0,
+},
+
 iconLabel: {
   fontSize: moderateScale(11),
   color: COLORS.textPrimary,
@@ -90,6 +98,10 @@ iconLabelSelected: {
   fontWeight: 'bold',
   color: COLORS.primaryDark,
 },
+addItemLabel: {
+  color: COLORS.primaryDark,
+  fontWeight: '600',
+},
 
 // Applied for custom-added items (keeps the selected ring style when selected)
 customRoomBackground: {
@@ -97,41 +109,6 @@ customRoomBackground: {
   // no border changes here to avoid overriding the selected state
 },
 
-manualInput: {
-    fontSize: moderateScale(14),
-    color: COLORS.textPrimary,
-    minHeight: verticalScale(44),
-    marginTop: verticalScale(6),
-    backgroundColor: '#f9f9f9',
-    paddingVertical: verticalScale(6),
-    paddingHorizontal: moderateScale(16),
-    borderRadius: moderateScale(16),
-    borderColor: COLORS.border,
-    borderWidth: moderateScale(1),
-  },
-
-manualCard: {
-    marginTop: verticalScale(6),
-    padding: moderateScale(8),
-    // borderWidth: 1,
-    // borderColor: COLORS.border,
-    // borderRadius: 10,
-  },
-
-addButton: {
-    marginTop: verticalScale(6),
-    backgroundColor: COLORS.primaryDark,
-    minHeight: verticalScale(44),
-    justifyContent: 'center',
-    borderRadius: moderateScale(16),
-    alignItems: 'center',
-  },
-
-addButtonText: {
-  fontSize: moderateScale(14),
-  color: 'white',
-  fontWeight: 'bold',
-},
 cancelText: {
     marginTop: verticalScale(12),
     color: 'red',

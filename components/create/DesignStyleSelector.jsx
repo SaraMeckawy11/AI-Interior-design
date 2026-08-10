@@ -2,7 +2,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  TextInput,
   Image,
   Modal,
   TouchableWithoutFeedback,
@@ -11,6 +10,7 @@ import React, { useState } from "react";
 import styles from "../../assets/styles/create/design.styles";
 import { Ionicons } from "@expo/vector-icons";
 import COLORS from "../../constants/colors";
+import CustomItemComposer from "./CustomItemComposer";
 
 const INITIAL_STYLES = ["Modern", "Rustic", "Bohemian"];
 
@@ -182,31 +182,25 @@ export default function DesignStyleSelector({ designStyle, setDesignStyle, onInp
             onPress={() => setShowInput(!showInput)}
           >
             <View style={styles.iconAdd}>
-              <Ionicons name="add-outline" size={28} color="#6B7280" />
+              <View style={styles.addIconBadge}>
+                <Ionicons name="add" size={20} color={COLORS.primaryDark} />
+              </View>
             </View>
-            <Text style={styles.iconLabel}>Add Style</Text>
+            <Text style={[styles.iconLabel, styles.addItemLabel]}>Custom</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {showInput && (
-        <View style={styles.manualCard}>
-          <TextInput
-            style={styles.manualInput}
-            placeholder="Enter design style"
-            placeholderTextColor={COLORS.placeholderText}
-            selectionColor={COLORS.primaryDark}
-            value={manualInput}
-            onChangeText={setManualInput}
-            onFocus={(event) => onInputFocus?.(event.target)}
-            onSubmitEditing={handleAddCustomStyle}
-            returnKeyType="done"
-            autoFocus
-          />
-          <TouchableOpacity style={styles.addButton} onPress={handleAddCustomStyle}>
-            <Text style={styles.addButtonText}>Add</Text>
-          </TouchableOpacity>
-        </View>
+        <CustomItemComposer
+          title="Custom style"
+          placeholder="e.g. Organic modern"
+          value={manualInput}
+          onChangeText={setManualInput}
+          onInputFocus={onInputFocus}
+          onAdd={handleAddCustomStyle}
+          onClose={() => setShowInput(false)}
+        />
       )}
 
       {/* Delete Confirmation Modal */}

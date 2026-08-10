@@ -47,6 +47,7 @@ import PlanCanvas, {
 } from "../../components/walkthrough/PlanCanvas";
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
+import { SERVER_URI, apiUrl } from "../../configs/api";
 import { paletteForRequest, paletteForTone } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
 import { COIN_COST, coinLabel } from "../../constants/pricing";
@@ -87,24 +88,28 @@ import {
 const STAGES = [
   {
     key: "draw",
+    icon: "grid-outline",
     label: "Draw",
     title: "Draw the floor plan",
     copy: "Place rooms, then add the doors, windows and balconies between them.",
   },
   {
     key: "rooms",
+    icon: "home-outline",
     label: "Rooms",
     title: "Name every room",
     copy: "Give each space a name and a function. Its measured area stays visible while you choose.",
   },
   {
     key: "style",
+    icon: "color-palette-outline",
     label: "Style",
     title: "Set the direction",
     copy: "One brief for the whole home, so every room is furnished to match.",
   },
   {
     key: "walk",
+    icon: "cube-outline",
     label: "Explore",
     title: "Walk through it",
     copy: "Walk through it, or look down on the whole floor. Tap any piece of furniture to move it.",
@@ -427,16 +432,7 @@ export default function WalkthroughScreen() {
       return undefined;
     }
 
-    const rendererRoot = (process.env.EXPO_PUBLIC_SERVER_URI || "").replace(/\/$/, "");
-
-    if (!rendererRoot) {
-      setExactScene(null);
-      setExactSceneBaseUrl("");
-      setExactSceneLoading(false);
-      setExactSceneError("This build of Livinai is not pointed at a server yet.");
-      setExactSceneDetail("EXPO_PUBLIC_SERVER_URI is empty.");
-      return undefined;
-    }
+    const rendererRoot = SERVER_URI;
 
     const controller = new AbortController();
     setExactScene(null);
@@ -1129,7 +1125,7 @@ export default function WalkthroughScreen() {
       const image = await FileSystem.readAsStringAsync(stableUri, { encoding: FileSystem.EncodingType.Base64 });
       const controller = new AbortController();
       detectionTimeout = setTimeout(() => controller.abort(), 60000);
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/floorplans/detect`, {
+      const response = await fetch(apiUrl("/api/floorplans/detect"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1311,7 +1307,7 @@ export default function WalkthroughScreen() {
   const runAiRender = async (image) => {
     const room = roomConfigs[selectedRoom] || {};
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs`, {
+      const response = await fetch(apiUrl("/api/designs"), {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1429,7 +1425,7 @@ export default function WalkthroughScreen() {
     if (!snapshot) return;
     setBusy("save");
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URI}/api/designs/walkthrough`, {
+      const response = await fetch(apiUrl("/api/designs/walkthrough"), {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1558,7 +1554,12 @@ export default function WalkthroughScreen() {
       ) : (
         <>
           {/* ── Header ─────────────────────────────────────────────────── */}
-          <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          <LinearGradient
+            colors={[COLORS.surface, COLORS.brand100]}
+            start={{ x: 0.08, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.editorHeaderSurface}
+          >
             <SafeAreaView edges={["top"]} style={styles.header}>
               <View style={styles.headerRow}>
                 {/* Leaves the walkthrough. Moving between steps is the footer's
@@ -1569,10 +1570,10 @@ export default function WalkthroughScreen() {
                   accessibilityHint="Saves this plan and returns to Create"
                   onPress={leaveWalkthrough}
                   hitSlop={LAYOUT.hitSlop}
-                  android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+                  android_ripple={{ color: "rgba(30,36,31,0.10)", borderless: true }}
                   style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
                 >
-                  <Ionicons name="chevron-back" size={20} color={COLORS.white} />
+                  <Ionicons name="chevron-back" size={20} color={COLORS.textPrimary} />
                 </Pressable>
 
                 {/* The plan's name is what this screen is *about*, so it is the
@@ -1593,15 +1594,11 @@ export default function WalkthroughScreen() {
                   style={({ pressed }) => [styles.headerCopy, pressed && styles.pressedSurface]}
                   onPress={() => setRenaming("current")}
                 >
-                  <View style={styles.headerStepChip}>
-                    <Text style={styles.headerStepChipText} numberOfLines={1}>
-                      {`Step ${stage + 1} of ${STAGES.length} · ${current.label}`}
-                    </Text>
-                  </View>
                   <View style={styles.headerTitleRow}>
                     <Text style={styles.headerTitle} numberOfLines={1}>{projectTitle}</Text>
-                    <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.72)" />
+                    <Ionicons name="create-outline" size={14} color={COLORS.textTertiary} />
                   </View>
+                  <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
                 </Pressable>
 
                 {/* The icon alone said "save"; it never said whether the last
@@ -1619,7 +1616,7 @@ export default function WalkthroughScreen() {
                   accessibilityState={{ busy: syncState === "saving", disabled: syncState === "saving" }}
                   onPress={() => pushToCloud({ announce: true })}
                   hitSlop={LAYOUT.hitSlop}
-                  android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+                  android_ripple={{ color: "rgba(30,36,31,0.10)", borderless: true }}
                   style={({ pressed }) => [
                     styles.headerButton,
                     syncState === "saved" && styles.headerButtonSaved,
@@ -1628,57 +1625,55 @@ export default function WalkthroughScreen() {
                   disabled={syncState === "saving"}
                 >
                   {syncState === "saving" ? (
-                    <ActivityIndicator size="small" color={COLORS.white} />
+                    <ActivityIndicator size="small" color={COLORS.primaryDark} />
                   ) : (
                     <Ionicons
                       name={syncState === "saved" ? "checkmark" : "save-outline"}
                       size={18}
-                      color={COLORS.white}
+                      color={syncState === "saved" ? COLORS.success : COLORS.textPrimary}
                     />
                   )}
                 </Pressable>
               </View>
 
-              {/* Numbered dots joined by a connector, which is how a stepper is
-                  normally read. The connectors stretch, so the four steps are
-                  spaced evenly across the header instead of huddling to the left
-                  beside a caption that repeated the label already in the eyebrow
-                  a line above it. */}
-              <View style={styles.stepper} accessibilityRole="tablist">
+              <View style={styles.headerDivider} />
+              <View style={styles.stageBar}>
+                <View style={styles.stageBarRow}>
+                  <LinearGradient colors={COLORS.gradientBrandDeep} style={styles.stageBarMark}>
+                    <Ionicons name={current.icon} size={16} color={COLORS.white} />
+                  </LinearGradient>
+                  <View style={styles.stageBarCopy}>
+                    <Text style={styles.stageBarMeta} numberOfLines={1}>
+                      {`STEP ${stage + 1} OF ${STAGES.length}  /  ${current.label}`}
+                    </Text>
+                    <Text style={styles.stageBarTitle} numberOfLines={1}>{current.title}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.stepper} accessibilityRole="tablist">
                 {STAGES.map((item, index) => {
                   const done = index < stage;
                   const active = index === stage;
                   const reachable = index <= stage || rooms.length > 0;
                   return (
-                    <React.Fragment key={item.key}>
-                      {index > 0 && (
-                        <View style={[styles.stepConnector, index <= stage && styles.stepConnectorDone]} />
-                      )}
-                      <Pressable
-                        disabled={!reachable}
-                        accessibilityRole="tab"
-                        accessibilityLabel={`Step ${index + 1}, ${item.label}`}
-                        accessibilityState={{ selected: active, disabled: !reachable }}
-                        hitSlop={{ top: 12, bottom: 12, left: 9, right: 9 }}
-                        style={({ pressed }) => [
-                          styles.step,
-                          (done || active) && styles.stepReached,
-                          active && styles.stepActive,
-                          pressed && reachable && styles.stepPressed,
-                        ]}
-                        onPress={() => setStage(index)}
-                      >
-                        {done ? (
-                          <Ionicons name="checkmark" size={13} color={COLORS.brand800} />
-                        ) : (
-                          <Text style={[styles.stepNumber, active && styles.stepNumberActive]}>
-                            {index + 1}
-                          </Text>
-                        )}
-                      </Pressable>
-                    </React.Fragment>
+                    <Pressable
+                      key={item.key}
+                      disabled={!reachable}
+                      accessibilityRole="tab"
+                      accessibilityLabel={`Step ${index + 1}, ${item.label}`}
+                      accessibilityState={{ selected: active, disabled: !reachable }}
+                      hitSlop={{ top: 10, bottom: 10, left: 2, right: 2 }}
+                      style={({ pressed }) => [
+                        styles.step,
+                        (done || active) && styles.stepReached,
+                        active && styles.stepActive,
+                        pressed && reachable && styles.stepPressed,
+                      ]}
+                      onPress={() => setStage(index)}
+                    />
                   );
                 })}
+                </View>
               </View>
             </SafeAreaView>
           </LinearGradient>
@@ -1743,11 +1738,6 @@ export default function WalkthroughScreen() {
                   of the four steps, so the one screen in the flow that asks the
                   most of a person — Draw — began with no statement of the job at
                   all, only a tool hint. */}
-              <View style={styles.stageHead} accessibilityRole="header">
-                <Text style={styles.stageTitle}>{current.title}</Text>
-                <Text style={styles.stageCopy}>{current.copy}</Text>
-              </View>
-
               {/* ── Step 1 · Draw ────────────────────────────────────── */}
               {stage === 0 && (
                 <>
@@ -2068,8 +2058,13 @@ export default function WalkthroughScreen() {
                         reader to notice on their own that two of them are about
                         taste and two are about materials. They are the same two
                         pairs the whole flow is built on, so they are two cards. */}
-                    <View style={styles.card}>
-                      <Text style={styles.cardSectionTitle}>Direction</Text>
+                    <View style={[styles.card, styles.cardFirst]}>
+                      <View style={styles.cardSectionHead}>
+                        <View style={styles.cardSectionIcon}>
+                          <Ionicons name="color-palette-outline" size={16} color={COLORS.primaryDark} />
+                        </View>
+                        <Text style={styles.cardSectionTitle}>Direction</Text>
+                      </View>
                       {/* One style for the whole home, asked once. */}
                       <ChipRow label="Design style" options={WALKTHROUGH_STYLES} value={settings.style} onChange={(v) => updateSetting("style", v)} />
                       <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
@@ -2082,7 +2077,12 @@ export default function WalkthroughScreen() {
                     </View>
 
                     <View style={styles.card}>
-                      <Text style={styles.cardSectionTitle}>Surfaces</Text>
+                      <View style={styles.cardSectionHead}>
+                        <View style={styles.cardSectionIcon}>
+                          <Ionicons name="layers-outline" size={16} color={COLORS.primaryDark} />
+                        </View>
+                        <Text style={styles.cardSectionTitle}>Surfaces</Text>
+                      </View>
                       <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
                       <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
                     </View>
@@ -2170,17 +2170,6 @@ export default function WalkthroughScreen() {
               from a shape than from a word. */}
           {stage < STAGES.length - 1 && (
             <SafeAreaView edges={["bottom"]} style={styles.footer}>
-              {/* A greyed-out Continue with no explanation left the only unmet
-                  requirement of the whole flow unstated. It is one line, and it
-                  sits directly above the button it is about. */}
-              {!canContinue && (
-                <View style={styles.footerHint} accessibilityLiveRegion="polite">
-                  <Ionicons name="information-circle-outline" size={15} color={COLORS.warning} />
-                  <Text style={styles.footerHintText} numberOfLines={2}>
-                    Draw at least one room to continue.
-                  </Text>
-                </View>
-              )}
               <View style={styles.footerRow}>
                 <Pressable
                   accessibilityRole="button"
@@ -2189,9 +2178,9 @@ export default function WalkthroughScreen() {
                   style={({ pressed }) => [styles.footerButton, styles.footerGhost, pressed && styles.pressedSurface]}
                   onPress={goBack}
                 >
-                  <Ionicons name="arrow-back" size={17} color={COLORS.textPrimary} />
+                  <Ionicons name="chevron-back" size={18} color={COLORS.primaryDark} />
                   <Text style={styles.footerGhostText} numberOfLines={1}>
-                    {stage === 0 ? "Plans" : STAGES[stage - 1].label}
+                    {stage === 0 ? "Plans" : "Back"}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -2217,11 +2206,15 @@ export default function WalkthroughScreen() {
                     style={[styles.footerPrimaryText, !canContinue && styles.footerPrimaryTextDisabled]}
                     numberOfLines={1}
                   >
-                    {stage === STAGES.length - 2 ? "Walk through" : STAGES[stage + 1].label}
+                    {!canContinue
+                      ? "Add a room first"
+                      : stage === STAGES.length - 2
+                        ? "Explore in 3D"
+                        : "Continue"}
                   </Text>
                   <Ionicons
-                    name="arrow-forward"
-                    size={17}
+                    name={canContinue ? "arrow-forward" : "lock-closed-outline"}
+                    size={canContinue ? 18 : 15}
                     color={canContinue ? COLORS.white : COLORS.textTertiary}
                   />
                 </Pressable>
@@ -2683,7 +2676,7 @@ function WalkthroughStage({
                 accessibilityLabel={status.label}
               >
                 {status.busy
-                  ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                  ? <ActivityIndicator size="small" color={COLORS.white} />
                   : <View style={styles.statusDot} />}
                 <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
               </View>
@@ -2701,7 +2694,7 @@ function WalkthroughStage({
                 onPress={() => onSetPanel(panel === "ai" ? null : "ai")}
               >
                 <Ionicons name="sparkles" size={18} color={COLORS.white} />
-                <Text style={styles.dockPrimaryText}>Render</Text>
+                <Text style={styles.dockPrimaryText}>AI render</Text>
               </Pressable>
             </View>
           )}
@@ -2815,7 +2808,7 @@ function RenderSheet({
 
           <View style={styles.sheetHead}>
             <View style={[styles.sheetIcon, styles.sheetIconAccent]}>
-              <Ionicons name="sparkles" size={18} color={COLORS.accentStrong} />
+              <Ionicons name="sparkles" size={18} color={COLORS.primaryDark} />
             </View>
             <View style={styles.sheetHeadCopy}>
               <Text style={styles.sheetTitle}>Render with AI</Text>
@@ -3582,37 +3575,54 @@ function CurveStepper({ label, value, min, max, step, suffix, onChange }) {
 function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, onStart, onOpen, onMore }) {
   return (
     <View style={styles.libraryScreen}>
-      <LinearGradient colors={COLORS.gradientBrandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <SafeAreaView edges={["top"]} style={styles.libraryHeader}>
+      <SafeAreaView edges={["top"]} style={styles.libraryHeader}>
           <View style={styles.headerRow}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Back"
               onPress={onBack}
               hitSlop={LAYOUT.hitSlop}
-              android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+              android_ripple={{ color: "rgba(30,36,31,0.10)", borderless: true }}
               style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
             >
-              <Ionicons name="chevron-back" size={20} color={COLORS.white} />
+              <Ionicons name="chevron-back" size={20} color={COLORS.textPrimary} />
             </Pressable>
             <View style={styles.headerCopy}>
-              <Text style={styles.headerEyebrow}>3D Walkthrough</Text>
-              <Text style={styles.headerTitle} numberOfLines={1}>Your plans</Text>
+              <Text style={styles.headerTitle} numberOfLines={1}>3D Walkthrough</Text>
+              <Text style={styles.headerEyebrow}>Your saved plans</Text>
             </View>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Refresh your saved plans"
               accessibilityState={{ busy: loading, disabled: loading }}
-              android_ripple={{ color: "rgba(255,255,255,0.22)", borderless: true }}
+              android_ripple={{ color: "rgba(30,36,31,0.10)", borderless: true }}
               style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
               onPress={onRefresh}
               disabled={loading}
             >
               {loading
-                ? <ActivityIndicator size="small" color={COLORS.white} />
-                : <Ionicons name="refresh-outline" size={18} color={COLORS.white} />}
+                ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
+                : <Ionicons name="refresh-outline" size={18} color={COLORS.textPrimary} />}
             </Pressable>
           </View>
+
+          <LinearGradient
+            colors={[COLORS.surface, COLORS.brand100]}
+            start={{ x: 0.08, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.libraryHero}
+          >
+            <View style={styles.flowHeroOrb} />
+            <View style={styles.flowHeroMeta}>
+              <LinearGradient colors={COLORS.gradientBrandDeep} style={styles.flowHeroMark}>
+                <Ionicons name="cube-outline" size={18} color={COLORS.white} />
+              </LinearGradient>
+              <Text style={styles.libraryHeroEyebrow}>YOUR 3D WORKSPACE</Text>
+            </View>
+            <Text style={styles.flowHeroTitle}>Bring your floor plan to life</Text>
+            <Text style={styles.flowHeroCopy}>
+              Draw, furnish, and explore every room in one guided flow.
+            </Text>
 
           {/* The size of the list, and where it lives, on one line at the foot
               of the bar. The count used to be a third line inside the title
@@ -3629,15 +3639,15 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
               <Ionicons
                 name={synced ? "cloud-done-outline" : signedIn ? "cloud-offline-outline" : "phone-portrait-outline"}
                 size={13}
-                color="rgba(255,255,255,0.7)"
+                color={COLORS.textSecondary}
               />
               <Text style={styles.headerMeta} numberOfLines={1}>
                 {synced ? "Saved to your account" : signedIn ? "Saved on this device" : "On this device only"}
               </Text>
             </View>
           )}
+          </LinearGradient>
         </SafeAreaView>
-      </LinearGradient>
 
       <ScrollView
         contentContainerStyle={styles.libraryBody}
@@ -3719,9 +3729,7 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
             style={({ pressed }) => [styles.libraryPrimary, pressed && styles.pressedSurface]}
             onPress={onStart}
           >
-            <View style={styles.libraryPrimaryIcon}>
-              <Ionicons name="add" size={16} color={COLORS.white} />
-            </View>
+            <Ionicons name="add" size={19} color={COLORS.white} />
             <Text style={styles.libraryPrimaryText}>New plan</Text>
           </Pressable>
         </SafeAreaView>
@@ -3960,7 +3968,7 @@ function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap, hasRooms }) {
                       <Ionicons
                         name={item.icon}
                         size={19}
-                        color={active ? COLORS.white : locked ? COLORS.textTertiary : COLORS.textSecondary}
+                        color={active ? COLORS.primaryDark : locked ? COLORS.textTertiary : COLORS.textSecondary}
                       />
                       <Text
                         style={[
@@ -4020,14 +4028,17 @@ function ActionButton({ icon, label, onPress, disabled, active, tone }) {
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled, selected: !!active }}
-      style={({ pressed }) => [styles.actionCell, pressed && !disabled && styles.pressedSurface]}
+      style={({ pressed }) => [
+        styles.actionCell,
+        active && styles.actionActive,
+        disabled && styles.actionDisabled,
+        pressed && !disabled && styles.pressedSurface,
+      ]}
       onPress={onPress}
       disabled={disabled}
     >
-      <View style={[styles.action, active && styles.actionActive, disabled && styles.actionDisabled]}>
-        <Ionicons name={icon} size={17} color={color} />
-        <Text style={[styles.actionLabel, { color }]} numberOfLines={1}>{label}</Text>
-      </View>
+      <Ionicons name={icon} size={16} color={color} />
+      <Text style={[styles.actionLabel, { color }]} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -4241,7 +4252,7 @@ function SnapshotModal({ snapshot, kind, busy, onClose, onShare, onSaveGallery, 
               <Ionicons
                 name={isRender ? "sparkles" : "camera-outline"}
                 size={18}
-                color={isRender ? COLORS.accentStrong : COLORS.primaryDark}
+                color={COLORS.primaryDark}
               />
             </View>
             <View style={styles.sheetHeadCopy}>
@@ -4322,75 +4333,109 @@ const styles = StyleSheet.create({
   // also a change of visual language. The icon buttons were 42pt squares filled
   // at 16% white — under the touch minimum, and so low-contrast against a deep
   // gradient that they read as embossing rather than as buttons.
-  header: { paddingHorizontal: SPACING.base, paddingBottom: SPACING.base },
+  editorHeaderSurface: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.brand200,
+  },
+  header: {
+    paddingHorizontal: SPACING.base,
+    paddingBottom: 0,
+    backgroundColor: "transparent",
+  },
   headerRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md, paddingTop: SPACING.sm },
   headerButton: {
     width: ms(44), height: ms(44), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.24)",
+    backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  headerButtonPressed: { backgroundColor: "rgba(255,255,255,0.32)" },
-  headerButtonSaved: { backgroundColor: "rgba(255,255,255,0.32)", borderColor: "rgba(255,255,255,0.5)" },
-  headerCopy: { flex: 1, minWidth: 0, gap: 5 },
-  headerEyebrow: { ...TYPE.overline, color: "rgba(255,255,255,0.68)" },
-  headerStepChip: {
-    alignSelf: "flex-start", maxWidth: "100%",
-    paddingHorizontal: SPACING.sm, paddingVertical: 3,
-    borderRadius: RADIUS.xs, backgroundColor: "rgba(255,255,255,0.16)",
+  headerButtonPressed: { backgroundColor: COLORS.surfaceSunken },
+  headerButtonSaved: { backgroundColor: COLORS.successSoft, borderColor: COLORS.successSoft },
+  headerCopy: { flex: 1, minWidth: 0, gap: 1 },
+  headerEyebrow: { ...TYPE.caption, color: COLORS.textTertiary },
+  headerDivider: {
+    height: 1,
+    marginTop: SPACING.sm,
+    marginHorizontal: -SPACING.base,
+    backgroundColor: COLORS.brand200,
   },
-  headerStepChipText: { ...TYPE.caption, fontSize: 10.5, color: COLORS.white },
-  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
-  headerTitle: { ...TYPE.h2, color: COLORS.white, flexShrink: 1 },
-  headerMeta: { ...TYPE.caption, color: "rgba(255,255,255,0.7)" },
-
-  stepper: { flexDirection: "row", alignItems: "center", marginTop: SPACING.lg },
-  // These are the flow's jump-between-steps control, so they carry hitSlop that
-  // takes each one past the 44pt minimum without turning the header into a row
-  // of buttons.
-  step: {
-    width: ms(28), height: ms(28), borderRadius: RADIUS.pill,
+  stageBar: {
+    marginHorizontal: -SPACING.base,
+    paddingHorizontal: SPACING.base,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.sm,
+  },
+  stageBarRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  stageBarMark: {
+    width: ms(32), height: ms(32), borderRadius: RADIUS.sm,
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1.5, borderColor: "rgba(255,255,255,0.36)",
   },
-  stepReached: { backgroundColor: COLORS.white, borderColor: COLORS.white },
-  // The current step is a size larger than the rest, so "where am I" is legible
-  // from the shape alone — a filled dot on its own only says "done".
-  stepActive: { width: ms(32), height: ms(32) },
+  stageBarCopy: { flex: 1, minWidth: 0 },
+  stageBarMeta: { ...TYPE.overline, fontSize: 8.5, lineHeight: ms(12), color: COLORS.primaryDark },
+  stageBarTitle: { ...TYPE.small, fontFamily: TYPE.bodyStrong.fontFamily, color: COLORS.textPrimary },
+  stepper: { flexDirection: "row", alignItems: "center", gap: SPACING.xs, marginTop: SPACING.sm },
+  step: {
+    flex: 1, height: 3, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.brand200,
+  },
+  stepReached: { backgroundColor: COLORS.brand500 },
+  stepActive: { backgroundColor: COLORS.primaryDark },
   stepPressed: { opacity: 0.7 },
-  stepConnector: { flex: 1, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.24)" },
-  stepConnectorDone: { backgroundColor: COLORS.white },
-  stepNumber: { ...TYPE.caption, fontSize: 11.5, color: "rgba(255,255,255,0.78)" },
-  stepNumberActive: { color: COLORS.brand800 },
+  flowHero: {
+    marginTop: SPACING.md,
+    padding: SPACING.base,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.brand200,
+    overflow: "hidden",
+  },
+  flowHeroOrb: {
+    position: "absolute",
+    width: ms(150), height: ms(150), borderRadius: RADIUS.pill,
+    top: ms(-80), right: ms(-58), backgroundColor: "rgba(255,255,255,0.48)",
+  },
+  flowHeroMeta: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  flowHeroMark: {
+    width: ms(36), height: ms(36), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", ...SHADOW.xs,
+  },
+  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  headerTitle: { ...TYPE.h3, color: COLORS.textPrimary, flexShrink: 1 },
+  headerMeta: { ...TYPE.caption, color: COLORS.textSecondary },
+  flowHeroTitle: { ...TYPE.h3, color: COLORS.textPrimary, marginTop: SPACING.md },
+  flowHeroCopy: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2, lineHeight: ms(17) },
 
   // ── Library ──────────────────────────────────────────────────────────────
   libraryScreen: { flex: 1, backgroundColor: COLORS.background },
-  libraryHeader: { paddingHorizontal: SPACING.base, paddingBottom: SPACING.base },
+  libraryHeader: {
+    paddingHorizontal: SPACING.base,
+    paddingBottom: SPACING.sm,
+    backgroundColor: COLORS.background,
+  },
+  libraryHero: {
+    marginTop: SPACING.md,
+    padding: SPACING.base,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.brand200,
+    overflow: "hidden",
+  },
+  libraryHeroEyebrow: { ...TYPE.overline, fontSize: 9, color: COLORS.primaryDark },
   libraryHeaderMeta: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     marginTop: SPACING.md, paddingTop: SPACING.md,
-    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.16)",
+    borderTopWidth: 1, borderTopColor: COLORS.brand200,
   },
   libraryHeaderDot: {
-    width: 3, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.45)",
+    width: 3, height: 3, borderRadius: 2, backgroundColor: COLORS.brand400,
   },
-  libraryBody: { padding: SPACING.base, paddingBottom: SPACING.xl, gap: SPACING.md },
+  libraryBody: { padding: SPACING.base, paddingTop: SPACING.sm, paddingBottom: SPACING.xl, gap: SPACING.md },
   // Same docked-bar treatment as the editor's step footer, so the one primary
   // action sits on the same layer wherever you are in the walkthrough.
   libraryFooter: {
-    paddingHorizontal: SPACING.base, paddingTop: SPACING.md, paddingBottom: SPACING.md,
-    backgroundColor: COLORS.surface,
-    borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#16211D",
-        shadowOffset: { width: 0, height: -6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 16,
-      },
-      android: { elevation: 16 },
-      default: {},
-    }),
+    paddingHorizontal: SPACING.base, paddingTop: SPACING.xs, paddingBottom: SPACING.sm,
+    backgroundColor: COLORS.background,
+    alignItems: "flex-end",
   },
   /**
    * The one thing this screen is for.
@@ -4403,16 +4448,9 @@ const styles = StyleSheet.create({
    * button".
    */
   libraryPrimary: {
+    minWidth: ms(132), height: ms(46), borderRadius: RADIUS.md,
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(54), borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
-    ...SHADOW.brand,
-  },
-  // The plus reads as part of the label rather than as a second control, so it
-  // gets a soft inset disc rather than sitting loose against the fill.
-  libraryPrimaryIcon: {
-    width: ms(24), height: ms(24), borderRadius: RADIUS.pill,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
+    paddingHorizontal: SPACING.lg, backgroundColor: COLORS.primaryDark,
   },
   libraryPrimaryText: { ...TYPE.bodyStrong, fontSize: 15, color: COLORS.white },
 
@@ -4436,11 +4474,11 @@ const styles = StyleSheet.create({
 
   libraryEmpty: {
     alignItems: "center", padding: SPACING.xl, gap: SPACING.md,
-    borderRadius: RADIUS.xl, backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.border,
   },
   libraryEmptyIcon: {
-    width: ms(60), height: ms(60), borderRadius: RADIUS.pill,
+    width: ms(60), height: ms(60), borderRadius: RADIUS.lg,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
   libraryEmptyTitle: { ...TYPE.h3, color: COLORS.textPrimary },
@@ -4448,15 +4486,15 @@ const styles = StyleSheet.create({
   libraryEmptyAction: {
     marginTop: SPACING.xs, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     height: ms(48), paddingHorizontal: SPACING.xl,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryDark,
   },
   libraryEmptyActionText: { ...TYPE.bodyStrong, color: COLORS.white },
 
   projectCard: {
     borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.sm,
+    borderWidth: 1, borderColor: COLORS.border,
   },
-  projectCardPressed: { borderColor: COLORS.primarySoft, ...SHADOW.md },
+  projectCardPressed: { borderColor: COLORS.brand300, backgroundColor: COLORS.primaryTint },
   // Wide enough to recognise a floor plan in. A 58pt square showed a grey smudge
   // and left the card looking like a settings row rather than a piece of work.
   projectThumbnail: {
@@ -4505,35 +4543,30 @@ const styles = StyleSheet.create({
   // ── Editor body ──────────────────────────────────────────────────────────
   // One gutter for the whole flow, so the canvas, the controls under it and the
   // walkthrough overlay on the last step all line up with each other.
-  body: { paddingHorizontal: SPACING.base, paddingTop: SPACING.base, paddingBottom: SPACING.xxxl },
-  stageHead: { marginBottom: SPACING.base, gap: SPACING.xs },
-  stageTitle: { ...TYPE.h2, color: COLORS.textPrimary },
-  stageCopy: { ...TYPE.small, color: COLORS.textSecondary },
+  body: { paddingHorizontal: SPACING.base, paddingTop: SPACING.sm, paddingBottom: SPACING.xxxl },
 
   sourceBar: {
-    marginBottom: SPACING.sm, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm + 2,
+    marginBottom: SPACING.md, paddingHorizontal: SPACING.sm, minHeight: ms(40),
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
   sourceBarRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   sourceBarTitle: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
   sourceBarButton: {
-    paddingHorizontal: SPACING.base, height: ms(34), justifyContent: "center",
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryTint,
+    paddingHorizontal: SPACING.md, height: ms(32), justifyContent: "center",
+    borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryTint,
   },
   sourceBarButtonText: { ...TYPE.caption, color: COLORS.primaryDark },
   sourceBarError: {
-    ...TYPE.caption, color: COLORS.accentStrong, lineHeight: 17,
+    ...TYPE.caption, color: COLORS.danger, lineHeight: 17,
     marginTop: SPACING.sm, paddingTop: SPACING.sm,
     borderTopWidth: 1, borderTopColor: COLORS.border,
   },
 
   palette: {
-    marginBottom: SPACING.sm, padding: SPACING.md,
-    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+    marginBottom: SPACING.md,
   },
-  paletteGroupNext: { marginTop: SPACING.md },
+  paletteGroupNext: { marginTop: SPACING.sm },
   paletteGroupHead: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     gap: SPACING.sm, marginBottom: SPACING.sm,
@@ -4547,19 +4580,21 @@ const styles = StyleSheet.create({
   paletteRow: { flexDirection: "row", marginHorizontal: -3 },
   toolCell: { flex: 1, paddingHorizontal: 3 },
   tool: {
-    height: ms(56), alignItems: "center", justifyContent: "center", gap: 4,
-    borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+    height: ms(50), alignItems: "center", justifyContent: "center", gap: 3,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
-  toolActive: { backgroundColor: COLORS.primaryDark, ...SHADOW.xs },
+  toolActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.brand300 },
   toolLocked: { backgroundColor: COLORS.surfaceAlt, opacity: 0.6 },
   toolLabel: { ...TYPE.caption, fontSize: 10, color: COLORS.textSecondary },
-  toolLabelActive: { color: COLORS.white },
+  toolLabelActive: { color: COLORS.primaryDark },
   toolLabelLocked: { color: COLORS.textTertiary },
 
   snapRow: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    marginTop: SPACING.md, paddingTop: SPACING.md, minHeight: ms(44),
-    borderTopWidth: 1, borderTopColor: COLORS.border,
+    marginTop: SPACING.sm, paddingHorizontal: SPACING.sm, minHeight: ms(42),
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
   snapCopy: { flex: 1, minWidth: 0 },
   snapTitle: { ...TYPE.caption, color: COLORS.textPrimary },
@@ -4567,7 +4602,7 @@ const styles = StyleSheet.create({
 
   canvasCard: {
     borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.borderStrong, ...SHADOW.sm,
+    borderWidth: 1, borderColor: COLORS.border,
   },
   canvasHint: {
     flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
@@ -4613,36 +4648,41 @@ const styles = StyleSheet.create({
   selectionActionText: { ...TYPE.caption, color: COLORS.danger },
   openingEditor: {
     marginTop: SPACING.sm, padding: SPACING.base, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
   },
 
 
 
   summaryBar: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    marginBottom: SPACING.md, padding: SPACING.md, borderRadius: RADIUS.md,
-    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
+    marginBottom: SPACING.sm, paddingHorizontal: SPACING.xs, minHeight: ms(36),
   },
   summaryBarText: { flex: 1, ...TYPE.caption, color: COLORS.primaryDark },
 
   planSummary: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    marginTop: SPACING.md, paddingHorizontal: SPACING.md, minHeight: ms(40),
-    borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
-    borderWidth: 1, borderColor: COLORS.primarySoft,
+    marginTop: SPACING.sm, paddingHorizontal: SPACING.xs, minHeight: ms(36),
   },
   planSummaryText: { flex: 1, ...TYPE.caption, color: COLORS.primaryDark },
 
   card: {
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.base,
-    marginTop: SPACING.md, borderWidth: 1, borderColor: COLORS.border, ...SHADOW.xs,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md,
+    marginTop: SPACING.sm, borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
-  cardSectionTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  cardFirst: { marginTop: 0 },
+  cardSectionHead: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    marginBottom: SPACING.xs,
+  },
+  cardSectionIcon: {
+    width: ms(30), height: ms(30), borderRadius: RADIUS.sm,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+  },
+  cardSectionTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
 
   palettePreview: {
     flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md,
-    padding: SPACING.md, borderRadius: RADIUS.md,
-    backgroundColor: COLORS.surfaceAlt, borderWidth: 1, borderColor: COLORS.border,
+    paddingTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
   },
   paletteSwatchCell: { flex: 1, minWidth: 0, alignItems: "center", gap: 4 },
   paletteSwatch: {
@@ -4654,19 +4694,18 @@ const styles = StyleSheet.create({
   roomIndexLabel: { flex: 1, minWidth: 0, ...TYPE.overline, color: COLORS.textTertiary },
   roomCardHead: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    marginBottom: SPACING.md, paddingBottom: SPACING.md,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    marginBottom: SPACING.sm,
   },
   roomSwatch: { width: ms(10), height: ms(28), borderRadius: RADIUS.xs },
   roomNameField: {
     flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: SPACING.sm,
     minHeight: ms(44), paddingHorizontal: SPACING.md, borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: COLORS.surfaceAlt, borderWidth: 1, borderColor: COLORS.border,
   },
   roomName: { flex: 1, minWidth: 0, ...TYPE.bodyStrong, color: COLORS.textPrimary, paddingVertical: 0 },
   roomDelete: {
-    width: ms(40), height: ms(40), borderRadius: RADIUS.pill,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.dangerSoft,
+    width: ms(40), height: ms(40), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center",
   },
 
   roomSizeRow: {
@@ -4712,19 +4751,19 @@ const styles = StyleSheet.create({
   // 32pt tall was under the touch minimum for controls sitting 8pt apart in a
   // scrolling row — the easiest place in the flow to pick the wrong answer.
   chip: {
-    minHeight: ms(42), justifyContent: "center",
-    paddingHorizontal: SPACING.base, paddingVertical: SPACING.sm, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surfaceSunken, borderWidth: 1, borderColor: "transparent",
+    minHeight: ms(40), justifyContent: "center",
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surfaceAlt, borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
-  chipActive: { backgroundColor: COLORS.primaryDark, borderColor: COLORS.primaryDark },
+  chipActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.brand300 },
   chipText: { ...TYPE.caption, color: COLORS.textSecondary },
-  chipTextActive: { color: COLORS.white },
+  chipTextActive: { color: COLORS.primaryDark },
 
   disclosure: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     marginTop: SPACING.md, paddingHorizontal: SPACING.base, height: ms(48),
-    borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryTint,
-    borderWidth: 1, borderColor: COLORS.primarySoft,
+    borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
   disclosureText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
 
@@ -4758,11 +4797,11 @@ const styles = StyleSheet.create({
 
   empty: {
     alignItems: "center", gap: SPACING.md, paddingVertical: SPACING.xxl,
-    paddingHorizontal: SPACING.lg, borderRadius: RADIUS.xl,
+    paddingHorizontal: SPACING.lg, borderRadius: RADIUS.lg,
     backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
   },
   emptyIcon: {
-    width: ms(52), height: ms(52), borderRadius: RADIUS.pill,
+    width: ms(52), height: ms(52), borderRadius: RADIUS.lg,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
   emptyText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center" },
@@ -4831,31 +4870,10 @@ const styles = StyleSheet.create({
   // seen (Android's `elevation` casts downwards only).
   footer: {
     paddingHorizontal: SPACING.base,
-    paddingTop: SPACING.md, paddingBottom: SPACING.md,
-    backgroundColor: COLORS.surface,
-    borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#16211D",
-        shadowOffset: { width: 0, height: -6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 16,
-      },
-      android: { elevation: 16 },
-      default: {},
-    }),
+    paddingTop: SPACING.xs, paddingBottom: SPACING.sm,
+    backgroundColor: COLORS.background,
   },
-  footerRow: { flexDirection: "row", gap: SPACING.md },
-  // The hint is about the disabled button directly under it, so it is tied to it
-  // with the same tint the button uses rather than left as loose grey text.
-  footerHint: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
-    marginBottom: SPACING.md,
-    borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.warningSoft,
-  },
-  footerHintText: { flex: 1, ...TYPE.caption, color: COLORS.warning, lineHeight: 16 },
+  footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: SPACING.sm },
 
   /**
    * Secondary, not outlined.
@@ -4866,9 +4884,15 @@ const styles = StyleSheet.create({
    * and still puts the whole of the row's weight on Continue, which is the
    * hierarchy the step actually has.
    */
-  footerGhost: { backgroundColor: COLORS.surfaceSunken },
-  footerGhostText: { ...TYPE.bodyStrong, fontSize: 15, color: COLORS.textPrimary },
-  footerPrimary: { backgroundColor: COLORS.primaryDark, ...SHADOW.brand },
+  footerGhost: {
+    paddingHorizontal: SPACING.xs,
+    backgroundColor: "transparent",
+  },
+  footerGhostText: { ...TYPE.caption, color: COLORS.primaryDark },
+  footerPrimary: {
+    minWidth: ms(132), paddingHorizontal: SPACING.lg,
+    backgroundColor: COLORS.primaryDark,
+  },
   /**
    * Disabled, and still readable.
    *
@@ -4907,17 +4931,18 @@ const styles = StyleSheet.create({
     maxWidth: ms(380),
     alignItems: "center",
     padding: SPACING.xl,
-    borderRadius: RADIUS.xl,
+    borderRadius: RADIUS.lg,
     backgroundColor: COLORS.surface,
-    ...SHADOW.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   stateIconBrand: {
-    width: ms(60), height: ms(60), borderRadius: RADIUS.pill,
+    width: ms(60), height: ms(60), borderRadius: RADIUS.lg,
     alignItems: "center", justifyContent: "center",
     backgroundColor: COLORS.primaryTint,
   },
   stateIconDanger: {
-    width: ms(60), height: ms(60), borderRadius: RADIUS.pill,
+    width: ms(60), height: ms(60), borderRadius: RADIUS.lg,
     alignItems: "center", justifyContent: "center",
     backgroundColor: COLORS.dangerSoft,
   },
@@ -4949,7 +4974,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.lg, alignSelf: "stretch",
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: SPACING.sm, height: ms(50),
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.primaryDark,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryDark,
   },
   statePrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
   stateSecondary: {
@@ -5004,14 +5029,14 @@ const styles = StyleSheet.create({
   viewerBack: {
     flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 1,
     height: ms(46), paddingLeft: SPACING.xs + 2, paddingRight: SPACING.md,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
   viewerBackText: { ...TYPE.caption, color: COLORS.textPrimary },
   lightToggle: {
     flexShrink: 0, flexDirection: "row", alignItems: "center", gap: SPACING.xs + 1,
     height: ms(46), paddingHorizontal: SPACING.sm + 2,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
   // Near-black, not brand green. The one control in the app that is literally
@@ -5022,14 +5047,14 @@ const styles = StyleSheet.create({
   lightToggleTextNight: { color: COLORS.white },
   segmented: {
     flex: 1, minWidth: 0, flexDirection: "row", padding: 4,
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
   // 36 + the 4pt of track padding above and below matches the 46pt of the two
   // buttons either side of it.
   segment: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, height: ms(36), borderRadius: RADIUS.pill,
+    gap: 6, height: ms(36), borderRadius: RADIUS.md,
   },
   segmentActive: { backgroundColor: COLORS.primaryDark },
   segmentPressed: { backgroundColor: COLORS.surfaceSunken },
@@ -5047,7 +5072,7 @@ const styles = StyleSheet.create({
   // a mis-tap jumps the camera into the wrong room. 40 plus hitSlop clears it.
   roomPill: {
     justifyContent: "center", height: ms(40), maxWidth: ms(170),
-    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.md,
     backgroundColor: COLORS.surface, ...SHADOW.sm,
   },
   roomPillActive: { backgroundColor: COLORS.primaryDark },
@@ -5064,7 +5089,7 @@ const styles = StyleSheet.create({
 
   // ── Contextual sheet (selection and AI) ──────────────────────────────────
   panelCard: {
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
     padding: SPACING.base, gap: SPACING.md, ...SHADOW.lg,
   },
   panelHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md },
@@ -5079,7 +5104,7 @@ const styles = StyleSheet.create({
     width: ms(38), height: ms(38), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
   },
-  panelMeta: { ...TYPE.caption, color: COLORS.accentStrong, marginTop: -SPACING.sm },
+  panelMeta: { ...TYPE.caption, color: COLORS.primaryDark, marginTop: -SPACING.sm },
   panelBody: { ...TYPE.small, color: COLORS.textSecondary, marginTop: -SPACING.sm },
 
   editorRow: { flexDirection: "row", gap: SPACING.md },
@@ -5094,15 +5119,15 @@ const styles = StyleSheet.create({
 
   panelGhost: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(44), borderRadius: RADIUS.pill, backgroundColor: COLORS.surfaceSunken,
+    height: ms(44), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
   panelGhostText: { ...TYPE.caption, color: COLORS.textSecondary },
 
   toggleGroup: {
     flexDirection: "row", gap: SPACING.xs, padding: 4,
-    backgroundColor: COLORS.surfaceSunken, borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.surfaceSunken, borderRadius: RADIUS.lg,
   },
-  toggleOption: { flex: 1, alignItems: "center", justifyContent: "center", height: ms(38), borderRadius: RADIUS.pill },
+  toggleOption: { flex: 1, alignItems: "center", justifyContent: "center", height: ms(38), borderRadius: RADIUS.md },
   toggleOptionActive: { backgroundColor: COLORS.primaryDark },
   toggleText: { ...TYPE.caption, color: COLORS.textSecondary },
   toggleTextActive: { color: COLORS.white },
@@ -5159,21 +5184,23 @@ const styles = StyleSheet.create({
   // A bare row again: the chip and the pill each carry their own surface and
   // shadow, so the dock floats over the room instead of laying a white panel
   // across the bottom of it.
-  dock: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  dock: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.xs,
+    justifyContent: "flex-end",
+  },
   statusChip: {
-    flex: 1, minWidth: 0, height: ms(48),
+    flex: 1, minWidth: 0, height: ms(44),
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    paddingHorizontal: SPACING.base, borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.surface, ...SHADOW.md,
+    paddingHorizontal: SPACING.xs,
   },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success },
-  statusText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary },
+  statusText: { flex: 1, ...TYPE.caption, color: COLORS.white },
   dockPrimary: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(48), paddingHorizontal: SPACING.lg,
-    borderRadius: RADIUS.pill, backgroundColor: COLORS.accent, ...SHADOW.md,
+    height: ms(42), paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryDark,
   },
-  dockPrimaryActive: { backgroundColor: COLORS.accentStrong },
+  dockPrimaryActive: { backgroundColor: COLORS.brand800 },
   dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
 
   // ── Sheets ───────────────────────────────────────────────────────────────
@@ -5193,7 +5220,7 @@ const styles = StyleSheet.create({
     width: ms(44), height: ms(44), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
-  sheetIconAccent: { backgroundColor: COLORS.accentTint },
+  sheetIconAccent: { backgroundColor: COLORS.primaryTint },
   sheetHeadCopy: { flex: 1, minWidth: 0 },
   sheetTitle: { ...TYPE.h3, color: COLORS.textPrimary },
   sheetSubtitle: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
@@ -5211,7 +5238,7 @@ const styles = StyleSheet.create({
   // that spends a design credit.
   sheetPrimary: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
-    height: ms(52), borderRadius: RADIUS.md, backgroundColor: COLORS.accent, ...SHADOW.sm,
+    height: ms(52), borderRadius: RADIUS.lg, backgroundColor: COLORS.primaryDark, ...SHADOW.sm,
   },
   sheetPrimaryBusy: { backgroundColor: COLORS.disabled },
   sheetPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
@@ -5250,12 +5277,15 @@ const styles = StyleSheet.create({
   noticeButtonText: { ...TYPE.bodyStrong, color: COLORS.white, textAlign: "center" },
 
   // Equal cells under the canvas — same grid logic as the tool palette.
-  actionRow: { flexDirection: "row", marginTop: SPACING.sm, marginHorizontal: -3 },
-  actionCell: { flex: 1, paddingHorizontal: 3 },
-  action: {
-    height: ms(46), alignItems: "center", justifyContent: "center", gap: 2,
+  actionRow: {
+    flexDirection: "row", marginTop: SPACING.sm, padding: 3,
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
-    borderWidth: 1, borderColor: COLORS.border,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
+  },
+  actionCell: {
+    flex: 1, minHeight: ms(40), flexDirection: "row",
+    alignItems: "center", justifyContent: "center", gap: 5,
+    borderRadius: RADIUS.sm,
   },
   actionActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.primarySoft },
   actionDisabled: { opacity: 0.45 },
@@ -5265,8 +5295,8 @@ const styles = StyleSheet.create({
   // and the primary carries the row's only elevation, so which of the two
   // equal-width buttons is the way forward reads before either label does.
   footerButton: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: SPACING.sm, height: ms(54), borderRadius: RADIUS.md,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: SPACING.xs, height: ms(46), borderRadius: RADIUS.md,
   },
 
   // ── Confirm dialog, matching the Collection screen's delete dialog ────────

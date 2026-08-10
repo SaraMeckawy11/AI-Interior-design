@@ -193,12 +193,14 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
         {showAll && customTones.length < MAX_CUSTOM_TONES && (
           <TouchableOpacity
             style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Add a custom color tone"
             onPress={() => setShowColorPicker(true)}
           >
             <View style={styles.addSwatch}>
-              <Ionicons name="add-outline" size={28} color="#6B7280" />
+              <Ionicons name="add" size={20} color={COLORS.primaryDark} />
             </View>
-            <Text style={styles.iconLabel}>Add Tone</Text>
+            <Text style={[styles.iconLabel, styles.addItemLabel]}>Custom</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -236,7 +238,17 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
           <View style={styles.overlay}>
             <TouchableWithoutFeedback>
               <View style={styles.modalContainer}>
-                <Text style={styles.modalTitleP}>Pick a Color</Text>
+                <View style={styles.pickerHeader}>
+                  <Text style={styles.modalTitleP}>Custom tone</Text>
+                  <TouchableOpacity
+                    style={styles.pickerCloseButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close color picker"
+                    onPress={() => setShowColorPicker(false)}
+                  >
+                    <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </View>
 
                 <View style={styles.pickerWrapper}>
                   <ColorPicker
@@ -275,17 +287,18 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
 
                 <View style={styles.modalButtonRowP}>
                   <TouchableOpacity
-                  style={styles.cancelButton}
+                    style={styles.pickerCancelButton}
                     onPress={() => setShowColorPicker(false)}
                   >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                    <Text style={styles.pickerCancelText}>Cancel</Text>
                   </TouchableOpacity>
 
                    <TouchableOpacity
-                    style={styles.deleteButton}
+                    style={styles.pickerPrimaryButton}
                     onPress={handleAddCustomTone}
                   >
-                    <Text style={styles.deleteText}>Add Color</Text>
+                    <Ionicons name="checkmark" size={18} color={COLORS.white} />
+                    <Text style={styles.pickerPrimaryText}>Add tone</Text>
                   </TouchableOpacity>
                 </View>
               </View>

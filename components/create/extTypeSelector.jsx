@@ -2,7 +2,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  TextInput,
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
@@ -10,6 +9,7 @@ import React, { useState } from 'react';
 import styles from '../../assets/styles/create/room.styles';
 import { Ionicons } from '@expo/vector-icons';
 import COLORS from '../../constants/colors';
+import CustomItemComposer from './CustomItemComposer';
 
 const MAX_VISIBLE_ICONS = 4;
 const MAX_CUSTOM_ROOMS = 1;
@@ -129,7 +129,11 @@ const ExtTypeSelector = ({ roomType, setRoomType, onInputFocus }) => {
                   isCustom && styles.customRoomBackground
                 ]}
               >
-                <Ionicons name={getRoomIcon(type)} size={18} color="gray" />
+                <Ionicons
+                  name={getRoomIcon(type)}
+                  size={18}
+                  color={roomType === type ? COLORS.primaryDark : COLORS.textSecondary}
+                />
               </View>
               <Text
                 style={[
@@ -148,32 +152,24 @@ const ExtTypeSelector = ({ roomType, setRoomType, onInputFocus }) => {
             style={styles.iconButton}
             onPress={() => setShowInputField(!showInputField)}
           >
-            <View style={styles.iconCircle}>
-              <Ionicons name="add-outline" size={24} color="gray" />
+            <View style={[styles.iconCircle, styles.addItemCircle]}>
+              <Ionicons name="add" size={20} color={COLORS.primaryDark} />
             </View>
-            <Text style={styles.iconLabel}>Add</Text>
+            <Text style={[styles.iconLabel, styles.addItemLabel]}>Custom</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {showAllRooms && showInputField && (
-        <View style={styles.manualCard}>
-          <TextInput
-            style={styles.manualInput}
-            placeholder="Enter exterior type"
-            placeholderTextColor={COLORS.placeholderText}
-            selectionColor={COLORS.primaryDark}
-            value={manualRoomInput}
-            onChangeText={setManualRoomInput}
-            onFocus={(event) => onInputFocus?.(event.target)}
-            onSubmitEditing={handleAddRoom}
-            returnKeyType="done"
-            autoFocus
-          />
-          <TouchableOpacity style={styles.addButton} onPress={handleAddRoom}>
-            <Text style={styles.addButtonText}>Add</Text>
-          </TouchableOpacity>
-        </View>
+        <CustomItemComposer
+          title="Custom exterior"
+          placeholder="e.g. Courtyard"
+          value={manualRoomInput}
+          onChangeText={setManualRoomInput}
+          onInputFocus={onInputFocus}
+          onAdd={handleAddRoom}
+          onClose={() => setShowInputField(false)}
+        />
       )}
 
       {/* Error Modal */}

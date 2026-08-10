@@ -50,9 +50,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     margin: moderateScale(2),
-    borderWidth:1,
-    borderColor: "rgba(0,0,0,0.06)",
-    backgroundColor: "rgba(127,160,136,0.06)"
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: COLORS.brand300,
+    backgroundColor: COLORS.primaryTint,
+  },
+  addIconBadge: {
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: moderateScale(20),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.brand100,
   },
   iconImageWrapper: {
     width: moderateScale(92),
@@ -98,38 +107,6 @@ const styles = StyleSheet.create({
     color: COLORS.primaryDark,
   },
   
-  manualCard: {
-    marginTop: verticalScale(6),
-    padding: verticalScale(8),
-    // borderWidth: 1,
-    // borderColor: COLORS.border,
-    // borderRadius: 10,
-  },
-  manualInput: {
-    fontSize: moderateScale(14),
-    color: COLORS.textPrimary,
-    minHeight: verticalScale(44),
-    marginTop: verticalScale(6),
-    backgroundColor: '#f9f9f9',
-    paddingVertical: verticalScale(6),
-    paddingHorizontal: moderateScale(16),
-    borderRadius: moderateScale(16),
-    borderColor: COLORS.border,
-    borderWidth: moderateScale(1),
-  },
-  addButton: {
-    marginTop: verticalScale(6),
-    backgroundColor: COLORS.primaryDark,
-    minHeight: verticalScale(44),
-    justifyContent: 'center',
-    borderRadius: moderateScale(16),
-    alignItems: 'center',
-  },
-  addButtonText: {
-    fontSize: moderateScale(14),
-    color: '#fff',
-    fontWeight: 'bold',
-  },
   cancelText: {
     marginTop: verticalScale(12),
     color: 'red',
@@ -199,6 +176,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 8,
     backgroundColor: COLORS.primaryDark,
+  },
+  addItemLabel: {
+    color: COLORS.primaryDark,
+    fontWeight: '600',
   },
 
   deleteText: {
