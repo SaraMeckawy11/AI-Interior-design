@@ -1117,7 +1117,7 @@ def health():
     return {
         "status": "ok",
         "engines": {"default": FLUX_MODEL_ID, "guided": "Lykon/dreamshaper-8 + depth/seg ControlNet"},
-        "promptEngine": "gen-klein-v1",
+        "promptEngine": "gen-klein-v2-building-lock-exact-colors",
     }
 
 

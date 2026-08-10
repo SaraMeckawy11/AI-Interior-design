@@ -240,14 +240,18 @@ export default function Exterior() {
         roomType,
         designStyle,
         colorTone,
-        colorPalette: paletteForRequest(colorTone),
+        // Exterior asks for one facade color, so do not silently invent the
+        // interior selector's secondary and accent colors.
+        colorPalette: paletteForRequest(colorTone, undefined, 1),
         customPrompt: prompt,
         // Gen-Klein fields — see the matching block in interior.jsx.
         mode: "exterior",
         material: "Natural stone",
         lighting: "Natural daylight",
         preserveGeometry: true,
-        creativity: 42,
+        // Buildings use the model's most conservative setting because their
+        // facade grid and massing must remain identical to the source photo.
+        creativity: roomType === "Building" ? 10 : 42,
       };
 
       if (imageDataUrl) {
@@ -414,7 +418,11 @@ export default function Exterior() {
             />
 
             {/* Color Tone */}
-            <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
+            <ColorToneSelector
+              colorTone={colorTone}
+              setColorTone={setColorTone}
+              colorCount={1}
+            />
             
             {/* Custom Prompt (Optional) */}
             {/* <View style={styles.formGroup}>

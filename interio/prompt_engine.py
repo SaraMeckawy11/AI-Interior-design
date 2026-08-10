@@ -10,8 +10,8 @@ same language. The important properties, in order of impact on output quality:
    constraint, not a preference.
 2. **Explicit programme.** "Redesign this bedroom" produces a mood board;
    naming the furniture a bedroom must contain produces a room.
-3. **60/30/10 colour.** Giving the model an explicit colour ratio is what stops
-   the output from turning into a single-hue wash.
+3. **Explicit colour count.** Interiors use a named 60/30/10 scheme; exteriors
+   use exactly the one, two or three facade colors the user selected.
 4. **Placement and quality rules last**, so they act as a final filter over
    everything above.
 
@@ -138,28 +138,74 @@ def _program_text(space_type: str, mode: str) -> str:
     return table.get(key, f"the essential functional elements of a premium {space_type or mode}")
 
 
-def _palette_names(color_palette) -> tuple[str, str, str] | None:
-    """The three colours of a 60/30/10 scheme, or None if the client sent none.
+def _palette_names(color_palette) -> tuple[str, ...] | None:
+    """The exact ordered colors selected by the client, or None.
 
-    The app derives the secondary and the accent from the tone a person tapped
-    and shows all three as circles before they generate, so naming them here is
-    what makes the picture match the swatch. Older builds send only the tone
-    name; those fall through to the generic clause below.
+    New clients send an explicit ``colors`` list and count. Legacy clients send
+    dominant/secondary/accent fields, which remain a three-color scheme.
     """
     if not isinstance(color_palette, dict):
         return None
-    dominant = str(color_palette.get("dominant") or "").strip()
-    secondary = str(color_palette.get("secondary") or "").strip()
-    accent = str(color_palette.get("accent") or "").strip()
-    if not (dominant and secondary and accent):
-        return None
-    return dominant, secondary, accent
+    explicit = color_palette.get("colors")
+    if isinstance(explicit, list):
+        names = []
+        for entry in explicit[:3]:
+            value = entry.get("name") if isinstance(entry, dict) else entry
+            name = str(value or "").strip()
+            if name:
+                names.append(name)
+        if names:
+            return tuple(names)
+
+    legacy = tuple(
+        str(color_palette.get(key) or "").strip()
+        for key in ("dominant", "secondary", "accent")
+    )
+    return legacy if all(legacy) else None
 
 
-def _color_clause(color_tone: str, color_palette) -> str:
-    """The 60/30/10 line, as specific as the client allows it to be."""
+def _exterior_palette_names(color_tone: str, color_palette) -> tuple[str, ...]:
+    """Exterior colors, treating legacy auto-expanded palettes as one choice."""
     names = _palette_names(color_palette)
-    if names:
+    if isinstance(color_palette, dict):
+        if isinstance(color_palette.get("colors"), list) and names:
+            return names
+        try:
+            count = int(color_palette.get("colorCount"))
+        except (TypeError, ValueError):
+            count = 0
+        if names and 1 <= count <= 3:
+            return names[:count]
+    # Old exterior clients selected one tone but sent three automatically
+    # derived fields. The user's actual choice is color_tone, not those extras.
+    return (str(color_tone or "Neutral").strip(),)
+
+
+def _color_clause(color_tone: str, color_palette, mode: str) -> str:
+    """Write a mode-appropriate rule for exactly the selected color count."""
+    names = _palette_names(color_palette)
+    if mode == "exterior":
+        selected = _exterior_palette_names(color_tone, color_palette)
+        if len(selected) == 1:
+            return (
+                f"Exterior color rule: use exactly one user-selected facade color, {selected[0]}, "
+                "as the only painted or pigmented architectural color. Do not invent a secondary "
+                "or accent paint color. Natural stone, timber, metal, glass, sky and planting keep "
+                "their physically realistic material colors and do not count as extra palette colors."
+            )
+        if len(selected) == 2:
+            return (
+                f"Exterior color rule: use exactly two user-selected facade colors and no others: "
+                f"70% {selected[0]} and 30% {selected[1]}. Natural material, glazing and landscape "
+                "colors remain physically realistic."
+            )
+        return (
+            f"Exterior color 60/30/10: use exactly these three selected facade colors and no others: "
+            f"60% {selected[0]}, 30% {selected[1]}, 10% {selected[2]}. Natural material, glazing "
+            "and landscape colors remain physically realistic."
+        )
+
+    if names and len(names) == 3:
         dominant, secondary, accent = names
         return (
             f"Color 60/30/10: 60% {dominant} on the largest surfaces, "
@@ -191,7 +237,19 @@ def build_prompt(
     program = _program_text(space_type, mode)
     creativity = max(10, min(80, int(creativity or 42)))
 
+    is_building = mode == "exterior" and (space_type or "").strip().lower() == "building"
     geometry = (
+        "THE INPUT BUILDING IS AN IMMUTABLE STRUCTURAL TEMPLATE. Preserve 100% of its visible "
+        "architecture and pixel layout: identical footprint, silhouette, massing, story count, "
+        "floor heights, roof form and roofline, facade proportions, setbacks, projections, balconies, "
+        "columns, beams, slabs, stairs, railings and boundary walls. Keep the exact count, shape, size "
+        "and position of every window, door and opening, including sill and head heights. Keep the "
+        "camera position, crop, focal length, perspective, horizon and surrounding context unchanged. "
+        "Do not add, remove, move, resize, cover, merge or reinterpret any architectural element. "
+        "Apply the requested style only through color, surface finish, material finish, lighting and "
+        "non-obscuring landscaping; ignore any style or client instruction that would change structure."
+        if is_building and preserve_geometry
+        else
         "KEEP THE INPUT GEOMETRY EXACT: preserve every wall, window, door, opening, column, "
         "ceiling or roof edge, level, sill height, camera position, focal length and perspective. "
         "Never add, remove, move, resize, cover or convert an architectural opening. "
@@ -207,7 +265,12 @@ def build_prompt(
         if creativity < 60
         else "expressive but architecturally credible"
     )
-    personal = f"\nCLIENT NOTE: {custom_prompt.strip()}" if (custom_prompt or "").strip() else ""
+    personal_label = (
+        "CLIENT NOTE (finishes only; locked building structure takes priority)"
+        if is_building
+        else "CLIENT NOTE"
+    )
+    personal = f"\n{personal_label}: {custom_prompt.strip()}" if (custom_prompt or "").strip() else ""
 
     if mode == "interior":
         placement = (
@@ -231,7 +294,7 @@ NON-NEGOTIABLE SPATIAL CONSTRAINT:
 DESIGN DIRECTION:
 - Program: {program}.
 - Style vocabulary: {style_text}; make {material} the hero material.
-- {_color_clause(color_tone, color_palette)}
+- {_color_clause(color_tone, color_palette, mode)}
 - Lighting: {lighting}. Preserve believable light direction from the source photograph.
 - Creative character: {freedom}.
 
@@ -266,14 +329,19 @@ def build_short_prompt(
     hero = f", {material.lower()} hero material" if material else ""
     light = lighting.lower() if lighting else ("soft natural daylight" if mode == "interior" else "credible daylight")
     lock = "same walls windows and camera, " if preserve_geometry else ""
-    # Three colour words instead of one costs about four tokens and is the
-    # difference between a palette and a single-hue wash, so it stays even here.
-    names = _palette_names(color_palette)
-    palette = (
-        f"{names[0].lower()} 60 {names[1].lower()} 30 {names[2].lower()} 10 palette"
-        if names
-        else f"{color_tone.lower()} 60/30/10 palette"
+    names = (
+        _exterior_palette_names(color_tone, color_palette)
+        if mode == "exterior"
+        else _palette_names(color_palette)
     )
+    if mode == "exterior" and names and len(names) == 1:
+        palette = f"exactly one facade color {names[0].lower()}, no extra paint colors"
+    elif names and len(names) == 2:
+        palette = f"exactly two colors {names[0].lower()} 70 {names[1].lower()} 30"
+    elif names and len(names) == 3:
+        palette = f"{names[0].lower()} 60 {names[1].lower()} 30 {names[2].lower()} 10 palette"
+    else:
+        palette = f"{color_tone.lower()} 60/30/10 palette"
     return (
         f"photorealistic {design_style.lower()} {space_type.lower()} {mode}, {program}, "
         f"{materials}{hero}, {palette}, {light}, "
