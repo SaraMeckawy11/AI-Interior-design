@@ -245,7 +245,9 @@ export default function Exterior() {
         colorTone,
         // Exterior asks for one facade color, so do not silently invent the
         // interior selector's secondary and accent colors.
-        colorPalette: paletteForRequest(colorTone, undefined, 1),
+        // The whole 60/30/10 scheme with its hexes, the same as Interior sends.
+        // The three colours the swatches show are the three the facade gets.
+        colorPalette: paletteForRequest(colorTone),
         customPrompt: prompt,
         // Gen-Klein fields — see the matching block in interior.jsx.
         mode: "exterior",
@@ -426,11 +428,17 @@ export default function Exterior() {
               onInputFocus={revealFocusedInput}
             />
 
-            {/* Color Tone */}
+            {/* Color Tone.
+                Three colours here, exactly as Interior asks for them. Cutting
+                the exterior back to a single facade colour left the model to
+                invent whatever went on the trim, the frames and the front door
+                — which is most of what anyone actually looks at on a house —
+                and the swatches on this screen then described a fraction of the
+                result. A facade is a 60/30/10 scheme like any other: a body, a
+                secondary for base and trim, and one accent. */}
             <ColorToneSelector
               colorTone={colorTone}
               setColorTone={setColorTone}
-              colorCount={1}
             />
             
             {/* Custom Prompt (Optional) */}

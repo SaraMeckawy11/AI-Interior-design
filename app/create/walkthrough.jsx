@@ -593,6 +593,28 @@ export default function WalkthroughScreen() {
    */
   const forceRebuild = useRef(false);
 
+  /**
+   * The request body, as of this render.
+   *
+   * The effect below must not depend on `layout`, `sceneRoomConfigs` or
+   * `settings`: all three are new objects on almost every render, which is
+   * exactly what `sceneSignature` exists to paper over — and the effect went on
+   * listing them as dependencies anyway, so the fix never took. Every render
+   * re-ran the effect, and a re-run *aborts the fetch in flight*. Reaching
+   * Explore while anything at all was still settling therefore cancelled the
+   * build and started another one, repeatedly: the step could sit on its
+   * progress card indefinitely, and one home could cost several builds.
+   *
+   * Read from a ref instead, so the effect runs once per plan that is actually
+   * different and the body it sends is still the current one.
+   */
+  const scenePayload = useRef(null);
+  scenePayload.current = { layout, sceneRoomConfigs, settings };
+
+  // A boolean, not `layout.rooms.length`, for the same reason: the guard needs
+  // to know whether there is anything to build, not which object said so.
+  const hasRooms = layout.rooms.length > 0;
+
   // Build the scene with the canonical Livinai_web exporter. Rendering a
   // second, approximate room programme on-device was the source of mismatched
   // dimensions, furniture families, placement and finishes. The exporter owns
@@ -602,7 +624,7 @@ export default function WalkthroughScreen() {
   // session's memory, then the device's store, then the network. Reopening an
   // untouched plan stops at the second and costs one AsyncStorage read.
   useEffect(() => {
-    if (view !== "editor" || stage !== STAGES.length - 1 || !layout.rooms.length) return undefined;
+    if (view !== "editor" || stage !== STAGES.length - 1 || !hasRooms) return undefined;
 
     const remembered = sceneCache.current.get(sceneSignature);
     if (remembered) {
@@ -639,6 +661,7 @@ export default function WalkthroughScreen() {
         }
         forceRebuild.current = false;
 
+        const { layout: planLayout, sceneRoomConfigs: configs, settings: brief } = scenePayload.current;
         const response = await fetch(`${rendererRoot}/api/walkthrough/realtime/session`, {
           method: "POST",
           headers: {
@@ -647,13 +670,13 @@ export default function WalkthroughScreen() {
           },
           body: JSON.stringify({
             rendererRevision: LIVINAI_WEB_RENDERER_REVISION,
-            rooms: layout.rooms,
-            doors: layout.doors.map((opening) => opening.slice(0, 2)),
-            windows: layout.windows.map((opening) => opening.slice(0, 2)),
-            balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
-            pixelsPerMeter: layout.pixelsPerMeter,
-            roomConfigs: sceneRoomConfigs,
-            settings: { ...settings, useCatalog: true },
+            rooms: planLayout.rooms,
+            doors: planLayout.doors.map((opening) => opening.slice(0, 2)),
+            windows: planLayout.windows.map((opening) => opening.slice(0, 2)),
+            balconies: planLayout.balconies.map((opening) => opening.slice(0, 2)),
+            pixelsPerMeter: planLayout.pixelsPerMeter,
+            roomConfigs: configs,
+            settings: { ...brief, useCatalog: true },
             width: 960,
             height: 600,
           }),
@@ -706,7 +729,7 @@ export default function WalkthroughScreen() {
     })();
 
     return () => controller.abort();
-  }, [exactSceneRetry, layout, sceneRoomConfigs, sceneSignature, settings, stage, token, view]);
+  }, [exactSceneRetry, hasRooms, sceneSignature, stage, token, view]);
 
   /**
    * Try again, and mean it.
@@ -840,11 +863,20 @@ export default function WalkthroughScreen() {
     openingCount: openings.length,
     areaMeters: Number(totalArea.toFixed(2)),
     planImage,
-    // The plan's own picture, and nothing else. Generating an AI render used to
-    // overwrite this, so a plan a person had traced from a photo silently
-    // adopted a rendered room as its cover — a picture they never chose, on a
-    // card they use to recognise their own work.
-    thumbnail: planImage || null,
+    /**
+     * No cover image at all, deliberately.
+     *
+     * The library card does not show one any more, so a thumbnail is an upload
+     * nobody looks at — and rows written by older builds still carry an AI
+     * render in this field, which is exactly the picture that had to go: a
+     * generated room standing in for the user's own drawing on the card they
+     * use to recognise it. Sending an explicit null is what clears those, since
+     * the sync layer reads null as "remove it" and undefined as "keep it".
+     *
+     * The renders themselves are untouched — they live with the plan and in the
+     * user's collection.
+     */
+    thumbnail: null,
     updatedAt: new Date().toISOString(),
     data: planData(),
   }), [openings.length, planData, planImage, projectId, projectTitle, remoteId, rooms.length, totalArea]);
@@ -2490,7 +2522,13 @@ export default function WalkthroughScreen() {
                         >
                           <View style={styles.settingToggleCopy}>
                             <Text style={styles.settingToggleTitle}>Walk through walls</Text>
-                            <Text style={styles.settingToggleText}>Review furniture without using the doors.</Text>
+                            {/* Off by default now that walls are solid and the
+                                camera slides along them. This is the escape
+                                hatch for a plan whose rooms were drawn without
+                                doors between them, not the normal way round. */}
+                            <Text style={styles.settingToggleText}>
+                              Off, you use the doors. On, you can step straight through a wall.
+                            </Text>
                           </View>
                           <View style={[styles.switchTrack, settings.freeExplore && styles.switchTrackOn]}>
                             <View style={[styles.switchKnob, settings.freeExplore && styles.switchKnobOn]} />
@@ -2907,7 +2945,7 @@ function WalkthroughStage({
               onDone={() => coached.current.add(viewMode)}
               text={
                 viewMode === "walk"
-                  ? "Drag to look · Two fingers to move · Tap a piece to edit"
+                  ? "Drag to look · Tap the floor to walk there · Tap a piece to edit"
                   : "Drag to turn · Pinch to zoom · Two fingers to pan"
               }
             />
@@ -3929,6 +3967,10 @@ function describeScene(sceneInfo) {
 }
 
 // ── Small building blocks ──────────────────────────────────────────────────
+const STICK_BASE = ms(140);
+const STICK_KNOB = ms(60);
+const STICK_TRAVEL = Math.round((STICK_BASE - STICK_KNOB) / 2);
+
 /**
  * Analog movement stick.
  *
@@ -3939,7 +3981,16 @@ function describeScene(sceneInfo) {
  * already accepted a joystick vector — only the UI was missing.
  */
 function MoveStick({ onChange }) {
-  const travel = ms(34); // how far the knob can leave centre
+  /**
+   * The stick was 116pt across with 34pt of travel, so its whole usable range
+   * sat under the pad of the thumb that was also covering it — a control you
+   * steer by feel, sized so that feel is the one thing it cannot give you. The
+   * base is now 140 with 44pt of travel and a 60pt knob, comfortably past the
+   * 44pt minimum target and wide enough to know where centre is without looking.
+   */
+  const travel = STICK_TRAVEL;
+  /** Fades up while the stick is held, so the control says it is listening. */
+  const held = useRef(new Animated.Value(0)).current;
   /**
    * The knob moves natively, not through React.
    *
@@ -3967,9 +4018,13 @@ function MoveStick({ onChange }) {
        */
       const deadZone = 0.14;
 
+      const setHeld = (value) => {
+        Animated.timing(held, { toValue: value, duration: MOTION.fast, useNativeDriver: true }).start();
+      };
       const release = () => {
         Animated.spring(knobX, { toValue: 0, useNativeDriver: true, ...MOTION.spring }).start();
         Animated.spring(knobY, { toValue: 0, useNativeDriver: true, ...MOTION.spring }).start();
+        setHeld(0);
         latest.current(0, 0);
       };
       const apply = (dx, dy) => {
@@ -3985,18 +4040,29 @@ function MoveStick({ onChange }) {
           return;
         }
         const scaled = (magnitude - deadZone) / (1 - deadZone);
-        latest.current((x / reach) * scaled, (y / reach) * scaled);
+        // Gentle at the start of the throw and linear by the end of it. A
+        // straight ramp made the usable half of the travel — creeping up to a
+        // chair, easing round a doorway — the first few millimetres of it.
+        const shaped = scaled * (0.45 + 0.55 * scaled);
+        latest.current((x / reach) * shaped, (y / reach) * shaped);
       };
       return PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => apply(0, 0),
+        // The stick keeps the gesture once it has it, so a fast drag cannot be
+        // claimed halfway through by the view underneath and turn a walk into a
+        // look.
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          setHeld(1);
+          apply(0, 0);
+        },
         onPanResponderMove: (_, gesture) => apply(gesture.dx, gesture.dy),
         onPanResponderRelease: release,
         onPanResponderTerminate: release,
       });
     },
-    [knobX, knobY, travel],
+    [held, knobX, knobY, travel],
   );
 
   // A finger lifted outside the stick, or a mode change mid-gesture, would
@@ -4004,15 +4070,24 @@ function MoveStick({ onChange }) {
   useEffect(() => () => latest.current(0, 0), []);
 
   return (
-    <View style={styles.stickBase} {...responder.panHandlers}>
-      <Ionicons name="chevron-up" size={13} color={COLORS.textTertiary} style={styles.stickUp} />
-      <Ionicons name="chevron-down" size={13} color={COLORS.textTertiary} style={styles.stickDown} />
-      <Ionicons name="chevron-back" size={13} color={COLORS.textTertiary} style={styles.stickLeft} />
-      <Ionicons name="chevron-forward" size={13} color={COLORS.textTertiary} style={styles.stickRight} />
+    <View
+      style={styles.stickBase}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel="Movement stick"
+      accessibilityHint="Hold and drag to walk. Push further to walk faster."
+      {...responder.panHandlers}
+    >
+      <Animated.View style={[styles.stickRing, { opacity: held }]} pointerEvents="none" />
+      <Ionicons name="chevron-up" size={14} color={COLORS.textTertiary} style={styles.stickUp} />
+      <Ionicons name="chevron-down" size={14} color={COLORS.textTertiary} style={styles.stickDown} />
+      <Ionicons name="chevron-back" size={14} color={COLORS.textTertiary} style={styles.stickLeft} />
+      <Ionicons name="chevron-forward" size={14} color={COLORS.textTertiary} style={styles.stickRight} />
       <Animated.View
         style={[styles.stickKnob, { transform: [{ translateX: knobX }, { translateY: knobY }] }]}
+        pointerEvents="none"
       >
-        <Ionicons name="walk" size={20} color={COLORS.white} />
+        <Ionicons name="walk" size={24} color={COLORS.white} />
       </Animated.View>
     </View>
   );
@@ -4419,12 +4494,12 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
           // spinner on an empty screen. The list stops changing height when the
           // plans arrive, and the wait reads as "loading a list", not "broken".
           <View style={styles.librarySkeleton} accessibilityLabel="Loading your plans">
-            {[0, 1].map((row) => (
+            {[0, 1, 2].map((row) => (
               <View key={row} style={styles.skeletonCard}>
-                <View style={styles.skeletonThumb} />
+                <View style={styles.skeletonTile} />
                 <View style={styles.skeletonCopy}>
                   <View style={[styles.skeletonLine, { width: "58%" }]} />
-                  <View style={[styles.skeletonLine, styles.skeletonLineSmall, { width: "38%" }]} />
+                  <View style={[styles.skeletonLine, styles.skeletonLineSmall, { width: "34%" }]} />
                 </View>
               </View>
             ))}
@@ -4538,56 +4613,64 @@ function ProjectCard({ project, onOpen, onMore }) {
   const edited = relativeDay(project.updatedAt);
   const rooms = `${project.roomCount || 0} ${project.roomCount === 1 ? "room" : "rooms"}`;
   const area = project.areaMeters ? `${Number(project.areaMeters).toFixed(1)} m²` : null;
+  const openings = project.openingCount
+    ? `${project.openingCount} ${project.openingCount === 1 ? "opening" : "openings"}`
+    : null;
+  const traced = project.source === "upload";
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${project.title}, ${rooms}${area ? `, ${area}` : ""}`}
+      accessibilityLabel={`${project.title}, ${rooms}${area ? `, ${area}` : ""}${edited ? `, ${edited.toLowerCase()}` : ""}`}
       accessibilityHint="Opens this plan in the editor"
       android_ripple={{ color: "rgba(30,36,31,0.08)" }}
       style={({ pressed }) => [styles.projectCard, pressed && styles.projectCardPressed]}
       onPress={onOpen}
     >
-      <View style={styles.projectThumbnail}>
-        {project.thumbnail ? (
-          <Image source={{ uri: project.thumbnail }} style={styles.projectThumbnailImage} resizeMode="cover" />
-        ) : (
-          <>
-            <Ionicons name="grid-outline" size={26} color={COLORS.brand300} />
-            <Text style={styles.projectThumbnailHint}>Drawn</Text>
-          </>
-        )}
+      {/* Traced from a photo, or drawn from nothing. It is the one thing about a
+          plan a glyph can say faster than a word, and it is the difference
+          between two plans of the same flat. */}
+      <View style={styles.projectTile}>
+        <Ionicons
+          name={traced ? "image-outline" : "grid-outline"}
+          size={22}
+          color={COLORS.primaryDark}
+        />
       </View>
 
-      <View style={styles.projectCardBody}>
-        <View style={styles.projectCardCopy}>
-          <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
-          {!!edited && <Text style={styles.projectCardTime} numberOfLines={1}>{edited}</Text>}
-          <View style={styles.projectStats}>
-            <View style={styles.projectStat}>
-              <Ionicons name="cube-outline" size={12} color={COLORS.primaryDark} />
-              <Text style={styles.projectStatText}>{rooms}</Text>
-            </View>
-            {!!area && (
-              <View style={styles.projectStat}>
-                <Ionicons name="resize-outline" size={12} color={COLORS.primaryDark} />
-                <Text style={styles.projectStatText}>{area}</Text>
-              </View>
-            )}
+      <View style={styles.projectCardCopy}>
+        <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
+        {!!edited && <Text style={styles.projectCardTime} numberOfLines={1}>{edited}</Text>}
+        <View style={styles.projectStats}>
+          <View style={styles.projectStat}>
+            <Ionicons name="cube-outline" size={12} color={COLORS.primaryDark} />
+            <Text style={styles.projectStatText}>{rooms}</Text>
           </View>
+          {!!area && (
+            <View style={styles.projectStat}>
+              <Ionicons name="resize-outline" size={12} color={COLORS.primaryDark} />
+              <Text style={styles.projectStatText}>{area}</Text>
+            </View>
+          )}
+          {!!openings && (
+            <View style={styles.projectStat}>
+              <Ionicons name="log-in-outline" size={12} color={COLORS.primaryDark} />
+              <Text style={styles.projectStatText}>{openings}</Text>
+            </View>
+          )}
         </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`More options for ${project.title}`}
-          hitSlop={LAYOUT.hitSlop}
-          android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
-          style={({ pressed }) => [styles.projectAction, pressed && styles.pressedSurface]}
-          onPress={onMore}
-        >
-          <Ionicons name="ellipsis-horizontal" size={18} color={COLORS.textSecondary} />
-        </Pressable>
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`More options for ${project.title}`}
+        hitSlop={LAYOUT.hitSlop}
+        android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+        style={({ pressed }) => [styles.projectAction, pressed && styles.pressedSurface]}
+        onPress={onMore}
+      >
+        <Ionicons name="ellipsis-horizontal" size={18} color={COLORS.textSecondary} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -5220,11 +5303,15 @@ const styles = StyleSheet.create({
   // when the real plans replace them.
   librarySkeleton: { gap: SPACING.md },
   skeletonCard: {
-    borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    padding: SPACING.md, minHeight: ms(78),
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.border,
   },
-  skeletonThumb: { height: ms(120), backgroundColor: COLORS.surfaceSunken },
-  skeletonCopy: { padding: SPACING.md, gap: SPACING.sm },
+  skeletonTile: {
+    width: ms(46), height: ms(46), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+  },
+  skeletonCopy: { flex: 1, gap: SPACING.sm },
   skeletonLine: { height: ms(12), borderRadius: RADIUS.xs, backgroundColor: COLORS.surfaceSunken },
   skeletonLineSmall: { height: ms(9) },
 
@@ -5246,23 +5333,19 @@ const styles = StyleSheet.create({
   },
   libraryEmptyActionText: { ...TYPE.bodyStrong, color: COLORS.white },
 
+  // A row, not a poster. Everything on it is text or a glyph, so a list of forty
+  // plans costs nothing to paint and four of them fit on a phone screen at once
+  // instead of one and a half.
   projectCard: {
-    borderRadius: RADIUS.lg, overflow: "hidden", backgroundColor: COLORS.surface,
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+    padding: SPACING.md, paddingRight: SPACING.sm,
+    borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.border,
   },
   projectCardPressed: { borderColor: COLORS.brand300, backgroundColor: COLORS.primaryTint },
-  // Wide enough to recognise a floor plan in. A 58pt square showed a grey smudge
-  // and left the card looking like a settings row rather than a piece of work.
-  projectThumbnail: {
-    height: ms(128), alignItems: "center", justifyContent: "center", gap: SPACING.xs,
-    backgroundColor: COLORS.brand50,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
-  },
-  projectThumbnailImage: { width: "100%", height: "100%" },
-  projectThumbnailHint: { ...TYPE.caption, fontSize: 10.5, color: COLORS.brand400 },
-  projectCardBody: {
-    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
-    paddingVertical: SPACING.md, paddingLeft: SPACING.base, paddingRight: SPACING.sm,
+  projectTile: {
+    width: ms(46), height: ms(46), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
   },
   projectCardCopy: { flex: 1, minWidth: 0, gap: SPACING.xs },
   projectCardTitle: { ...TYPE.h3, color: COLORS.textPrimary },
@@ -5946,21 +6029,30 @@ const styles = StyleSheet.create({
   renderBody: { ...TYPE.small, color: "rgba(255,255,255,0.80)", textAlign: "center" },
 
   // ── Movement stick ───────────────────────────────────────────────────────
+  // Bottom left, not bottom right. Looking around is a drag anywhere on the
+  // room, so putting the stick under the same thumb meant one hand doing both
+  // jobs and neither of them well. On the left it belongs to the left thumb and
+  // the right one is free to look, which is how every phone app that asks for
+  // both has laid this out for fifteen years.
   stickBase: {
-    alignSelf: "flex-end", width: ms(116), height: ms(116), borderRadius: RADIUS.pill,
+    alignSelf: "flex-start", width: STICK_BASE, height: STICK_BASE, borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.86)",
+    backgroundColor: "rgba(255,255,255,0.80)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", ...SHADOW.md,
   },
+  stickRing: {
+    ...StyleSheet.absoluteFillObject, borderRadius: RADIUS.pill,
+    borderWidth: 2, borderColor: COLORS.primaryDark, backgroundColor: "rgba(255,255,255,0.14)",
+  },
   stickKnob: {
-    width: ms(48), height: ms(48), borderRadius: RADIUS.pill,
+    width: STICK_KNOB, height: STICK_KNOB, borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
     backgroundColor: COLORS.primaryDark, ...SHADOW.sm,
   },
-  stickUp: { position: "absolute", top: ms(8) },
-  stickDown: { position: "absolute", bottom: ms(8) },
-  stickLeft: { position: "absolute", left: ms(8) },
-  stickRight: { position: "absolute", right: ms(8) },
+  stickUp: { position: "absolute", top: ms(9) },
+  stickDown: { position: "absolute", bottom: ms(9) },
+  stickLeft: { position: "absolute", left: ms(9) },
+  stickRight: { position: "absolute", right: ms(9) },
 
   // ── Dock ─────────────────────────────────────────────────────────────────
   // A bare row again: the chip and the pill each carry their own surface and
