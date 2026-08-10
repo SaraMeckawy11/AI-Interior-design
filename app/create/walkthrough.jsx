@@ -1275,10 +1275,14 @@ export default function WalkthroughScreen() {
 
   // ── AI render (mirrors the web studio's generateAiRender) ────────────────
   const pendingPurpose = useRef("photo");
+  const pendingRenderBrief = useRef(null);
 
-  const requestCapture = (purpose) => {
+  const requestCapture = (purpose, renderBrief = null) => {
     pendingPurpose.current = purpose;
     if (purpose === "ai") {
+      // The canvas capture returns asynchronously. Keep the choices made in the
+      // sheet with that capture instead of reading a later UI selection.
+      pendingRenderBrief.current = renderBrief;
       setRendering(true);
       viewerRef.current?.capture("ai", cameraSource === "designer" && viewMode !== "plan");
     } else {
@@ -1304,8 +1308,13 @@ export default function WalkthroughScreen() {
    * payload is exactly Interior's: what the room is, how it should look, and
    * nothing the picture already says.
    */
-  const runAiRender = async (image) => {
+  const runAiRender = async (image, renderBrief = null) => {
     const room = roomConfigs[selectedRoom] || {};
+    const roomType = viewMode === "plan"
+      ? "Floor Plan"
+      : renderBrief?.roomType || room.roomType || "Living Room";
+    const designStyle = renderBrief?.designStyle || settings.style || "Modern";
+    const colorTone = renderBrief?.colorTone || settings.colorMood || "Warm neutral";
     try {
       const response = await fetch(apiUrl("/api/designs"), {
         method: "POST",
@@ -1313,10 +1322,10 @@ export default function WalkthroughScreen() {
         body: JSON.stringify({
           image,
           mode: "interior",
-          roomType: viewMode === "plan" ? "Floor Plan" : room.roomType || "Living Room",
-          designStyle: settings.style || "Modern",
-          colorTone: settings.colorMood || "Warm neutral",
-          colorPalette: paletteForRequest(settings.colorMood),
+          roomType,
+          designStyle,
+          colorTone,
+          colorPalette: paletteForRequest(colorTone),
           material: settings.floorFinish === "Auto by style" ? "Natural oak" : settings.floorFinish,
           lighting: night ? "Warm ambient evening light" : "Natural daylight",
           preserveGeometry: true,
@@ -1353,7 +1362,7 @@ export default function WalkthroughScreen() {
           label:
             viewMode === "plan"
               ? "Whole-home bird view"
-              : `${room.name || `Room ${selectedRoom + 1}`} · ${room.roomType || "Interior"}`,
+              : `${room.name || `Room ${selectedRoom + 1}`} · ${roomType}`,
           createdAt: new Date().toISOString(),
         },
       }));
@@ -1361,6 +1370,7 @@ export default function WalkthroughScreen() {
     } catch (error) {
       setNotice(error.message || "The AI render could not be generated.");
     } finally {
+      pendingRenderBrief.current = null;
       setRendering(false);
     }
   };
@@ -1368,7 +1378,7 @@ export default function WalkthroughScreen() {
   const handleSnapshot = useCallback(
     (image, purpose) => {
       if (purpose === "ai") {
-        runAiRender(image);
+        runAiRender(image, pendingRenderBrief.current);
       } else {
         setSnapshotKind("capture");
         setSnapshot(image);
@@ -1718,7 +1728,7 @@ export default function WalkthroughScreen() {
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
               onFocusRoom={focusRoom}
-              onRender={() => requestCapture("ai")}
+              onRender={(renderBrief) => requestCapture("ai", renderBrief)}
               onSetPanel={setPanel}
               onSetCameraSource={changeCameraSource}
               onSetOutputMode={setOutputMode}
@@ -2714,6 +2724,9 @@ function WalkthroughStage({
         visible={panel === "ai" && !showingAi}
         viewMode={viewMode}
         cameraSource={cameraSource}
+        defaultRoomType={roomConfigs[selectedRoom]?.roomType || "Living Room"}
+        defaultDesignStyle={settings.style || "Modern"}
+        defaultColorTone={settings.colorMood || "Warm neutral"}
         hasRender={!!currentRender}
         rendering={rendering}
         onClose={() => onSetPanel(null)}
@@ -2783,14 +2796,17 @@ function AiRenderLayer({ render }) {
 /**
  * "Render with AI" — the one action in the walkthrough that spends a credit.
  *
- * Two questions and one button. The camera choice is a segmented control with
- * both options visible and a sentence underneath saying what the chosen one
- * does, rather than a note the reader has to map back onto a toggle.
+ * A compact render brief and one button. It reuses the Rooms and Style choices
+ * so the last step does not introduce a second design language just before a
+ * person spends a credit.
  */
 function RenderSheet({
   visible,
   viewMode,
   cameraSource,
+  defaultRoomType,
+  defaultDesignStyle,
+  defaultColorTone,
   hasRender,
   rendering,
   onClose,
@@ -2798,12 +2814,37 @@ function RenderSheet({
   onShowLast,
   onRender,
 }) {
+  const insets = useSafeAreaInsets();
   const bird = viewMode === "plan";
+  const [roomType, setRoomType] = useState(defaultRoomType || "Living Room");
+  const [designStyle, setDesignStyle] = useState(defaultDesignStyle || "Modern");
+  const [colorTone, setColorTone] = useState(defaultColorTone || "Warm neutral");
+
+  // Start each render from the room and whole-home choices already made. The
+  // brief stays local until Render is pressed, so exploring options here does
+  // not silently rewrite the plan.
+  useEffect(() => {
+    if (!visible) return;
+    setRoomType(defaultRoomType || "Living Room");
+    setDesignStyle(defaultDesignStyle || "Modern");
+    setColorTone(defaultColorTone || "Warm neutral");
+  }, [defaultColorTone, defaultDesignStyle, defaultRoomType, visible]);
+
+  const submitRender = () => {
+    onRender({
+      roomType: bird ? "Floor Plan" : roomType,
+      designStyle,
+      colorTone,
+    });
+  };
 
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={[styles.sheet, styles.renderSheet, { paddingBottom: Math.max(insets.bottom, SPACING.lg) }]}
+          onPress={() => {}}
+        >
           <View style={styles.sheetHandle} />
 
           <View style={styles.sheetHead}>
@@ -2828,35 +2869,71 @@ function RenderSheet({
             </Pressable>
           </View>
 
-          {!bird && (
-            <View style={styles.sheetField}>
-              <Text style={styles.fieldLabel}>Camera</Text>
-              <View style={styles.toggleGroup} accessibilityRole="tablist">
-                {[
-                  { key: "designer", label: "Designer" },
-                  { key: "current", label: "My view" },
-                ].map((option) => {
-                  const active = cameraSource === option.key;
-                  return (
-                    <Pressable
-                      key={option.key}
-                      accessibilityRole="tab"
-                      accessibilityState={{ selected: active }}
-                      android_ripple={{ color: "rgba(30,36,31,0.10)" }}
-                      style={({ pressed }) => [
-                        styles.toggleOption,
-                        active && styles.toggleOptionActive,
-                        pressed && !active && styles.pressedSurface,
-                      ]}
-                      onPress={() => onSetCameraSource(option.key)}
-                    >
-                      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{option.label}</Text>
-                    </Pressable>
-                  );
-                })}
+          <ScrollView
+            style={styles.renderBriefScroll}
+            contentContainerStyle={styles.renderBriefContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {bird ? (
+              <View style={styles.renderScopeBlock}>
+                <Text style={styles.fieldLabel}>Render scope</Text>
+                <View
+                  style={styles.renderScopeValue}
+                  accessibilityRole="text"
+                  accessibilityLabel="Render scope, whole floor plan"
+                >
+                  <Ionicons name="map-outline" size={17} color={COLORS.primaryDark} />
+                  <Text style={styles.renderScopeText}>Whole floor plan</Text>
+                  <Ionicons name="lock-closed-outline" size={14} color={COLORS.textTertiary} />
+                </View>
+                <Text style={styles.renderFieldHint}>Switch to Walk view to render a specific room type.</Text>
               </View>
+            ) : (
+              <ChipRow label="Room type" options={ROOM_TYPES} value={roomType} onChange={setRoomType} />
+            )}
+
+            <ChipRow
+              label="Design style"
+              options={WALKTHROUGH_STYLES}
+              value={designStyle}
+              onChange={setDesignStyle}
+            />
+
+            <View style={styles.renderToneBlock}>
+              <ChipRow label="Color tone" options={COLOR_MOODS} value={colorTone} onChange={setColorTone} />
+              <PalettePreview tone={colorTone} />
             </View>
-          )}
+
+            {!bird && (
+              <View style={styles.sheetField}>
+                <Text style={styles.fieldLabel}>Camera</Text>
+                <View style={styles.toggleGroup} accessibilityRole="tablist">
+                  {[
+                    { key: "designer", label: "Designer" },
+                    { key: "current", label: "My view" },
+                  ].map((option) => {
+                    const active = cameraSource === option.key;
+                    return (
+                      <Pressable
+                        key={option.key}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                        android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                        style={({ pressed }) => [
+                          styles.toggleOption,
+                          active && styles.toggleOptionActive,
+                          pressed && !active && styles.pressedSurface,
+                        ]}
+                        onPress={() => onSetCameraSource(option.key)}
+                      >
+                        <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{option.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
 
           {/* One line, and only the line that answers "what will I get?". This
               used to report how many furniture pieces the camera had framed and
@@ -2872,6 +2949,7 @@ function RenderSheet({
                   : "Rendered from exactly the view you are looking at."}
             </Text>
           </View>
+          </ScrollView>
 
           <Pressable
             accessibilityRole="button"
@@ -2883,7 +2961,7 @@ function RenderSheet({
               pressed && !rendering && styles.pressedSurface,
             ]}
             disabled={rendering}
-            onPress={onRender}
+            onPress={submitRender}
           >
             {rendering
               ? <ActivityIndicator size="small" color={COLORS.white} />
@@ -5214,6 +5292,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
     paddingHorizontal: SPACING.lg, paddingTop: SPACING.base, paddingBottom: SPACING.xxl,
   },
+  renderSheet: { maxHeight: "92%" },
+  renderBriefScroll: { flexShrink: 1, marginHorizontal: -SPACING.xs },
+  renderBriefContent: { paddingHorizontal: SPACING.xs, paddingBottom: SPACING.xs, gap: SPACING.base },
   sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.lg },
   sheetHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.lg },
   sheetIcon: {
@@ -5228,6 +5309,15 @@ const styles = StyleSheet.create({
     width: ms(36), height: ms(36), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
   },
+  renderScopeBlock: { gap: SPACING.xs },
+  renderScopeValue: {
+    minHeight: ms(48), flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    paddingHorizontal: SPACING.base, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryTint, borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  renderScopeText: { flex: 1, ...TYPE.bodyStrong, color: COLORS.primaryDark },
+  renderFieldHint: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
+  renderToneBlock: { gap: SPACING.sm },
   sheetField: { marginBottom: SPACING.base },
   sheetNoteRow: {
     flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
