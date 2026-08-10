@@ -3,7 +3,7 @@ import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import * as MediaLibrary from "expo-media-library";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -50,7 +50,8 @@ import { useAuthStore } from "../../authStore";
 import { SERVER_URI, apiUrl } from "../../configs/api";
 import { paletteForRequest, paletteForTone } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
-import { COIN_COST, coinLabel } from "../../constants/pricing";
+import { COIN_COST, FREE_DESIGNS, coinLabel } from "../../constants/pricing";
+import useRewardedCoins from "../../lib/useRewardedCoins";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
   COLOR_MOODS,
@@ -75,6 +76,11 @@ import {
   saveLocally,
   syncProject,
 } from "../../lib/walkthroughProjects";
+import {
+  forgetScene as forgetStoredScene,
+  readScene as readStoredScene,
+  writeScene as writeStoredScene,
+} from "../../lib/walkthroughSceneStore";
 
 /**
  * The four things a person actually does, in the order they do them.
@@ -190,6 +196,89 @@ const BUILD_STEPS = [
   "Lighting the rooms",
 ];
 
+/** What one AI render on this path costs, from the one table that decides. */
+const RENDER_PRICE = COIN_COST.walkthrough;
+
+/**
+ * This screen's room names, in the words the design engine knows.
+ *
+ * The prompt engine turns the space into a *programme* — "a bedroom contains an
+ * upholstered bed, two nightstands, layered bedding…" — by looking the name up
+ * in a table. A name that misses the table falls through to "the essential
+ * functional elements of a premium Utility", which briefs the model on nothing
+ * and leaves it to fill the room from imagination.
+ *
+ * Only the names that actually differ are listed; everything else this screen
+ * offers is already a word the engine has a programme for, so it passes
+ * through untouched rather than being restated here and drifting out of date.
+ * "Utility" has no programme of its own anywhere in the app, and the nearest
+ * honest one is the laundry: appliances, a folding surface, hard-wearing
+ * surfaces, concealed storage.
+ */
+const INTERIOR_ROOM_TYPES = {
+  Laundry: "Laundry Room",
+  Utility: "Laundry Room",
+};
+
+const interiorRoomType = (roomType) => {
+  const value = String(roomType || "").trim();
+  return INTERIOR_ROOM_TYPES[value] || value || "Living Room";
+};
+
+/**
+ * How many finished renders a plan carries with it.
+ *
+ * A render used to be kept one-per-viewpoint in a map, so the second render of
+ * a living room silently replaced the first and the only way back to it was the
+ * Collection tab — a flat list of every design the account has ever made, with
+ * nothing on a card to say which plan it came from. They are a list now, saved
+ * with the plan, and the plan is where they are looked at.
+ */
+const RENDER_HISTORY_LIMIT = 40;
+
+const createRenderId = () =>
+  `render-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** When a render was made, in the shortest form that is still unambiguous. */
+const renderDay = (value) => {
+  const then = value ? new Date(value) : null;
+  if (!then || Number.isNaN(then.valueOf())) return null;
+  const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).valueOf();
+  const days = Math.round((startOfDay(new Date()) - startOfDay(then)) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return then.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+
+/**
+ * The renders belonging to a saved plan, newest first.
+ *
+ * Plans written before the gallery existed stored `aiRenders` as a map keyed by
+ * viewpoint. Those are read back as a list so nobody's finished work disappears
+ * when they open an old plan.
+ */
+const restoreRenders = (saved = {}) => {
+  if (Array.isArray(saved.renderGallery)) {
+    return saved.renderGallery
+      .filter((entry) => entry?.image)
+      .map((entry) => ({ ...entry, id: entry.id || createRenderId() }))
+      .slice(0, RENDER_HISTORY_LIMIT);
+  }
+  const legacy = saved.aiRenders && typeof saved.aiRenders === "object" ? saved.aiRenders : {};
+  return Object.entries(legacy)
+    .filter(([, entry]) => entry?.image)
+    .map(([key, entry]) => ({
+      id: `legacy-${key}`,
+      image: entry.image,
+      label: entry.label || "AI render",
+      view: key === "bird" ? "plan" : "walk",
+      createdAt: entry.createdAt || null,
+    }))
+    .sort((one, two) => String(two.createdAt || "").localeCompare(String(one.createdAt || "")))
+    .slice(0, RENDER_HISTORY_LIMIT);
+};
+
 const clonePoints = (points = []) => points.map((point) => [...point]);
 const clonePlanSnapshot = ({ rooms, openings, roomConfigs, selectedRoom }) => ({
   rooms: rooms.map(clonePoints),
@@ -260,9 +349,19 @@ export default function WalkthroughScreen() {
   const [night, setNight] = useState(false);
   const [inspected, setInspected] = useState(null);
   const [sceneInfo, setSceneInfo] = useState(null);
-  const [panel, setPanel] = useState(null); // null | 'ai'
-  const [cameraSource, setCameraSource] = useState("designer"); // 'designer' | 'current'
-  const [aiRenders, setAiRenders] = useState({});
+  const [panel, setPanel] = useState(null); // null | 'ai' | 'renders'
+  /**
+   * Every AI render this plan has produced, newest first, saved with the plan.
+   *
+   * There is no camera choice beside it any more. The sheet used to offer
+   * "Designer" or "My view", defaulted to Designer, and moved the camera out
+   * from under the person the moment they opened it — so the picture they paid
+   * for was framed from somewhere they had not chosen and could not see. A
+   * render is now always the view on screen, which is the one thing about it
+   * nobody has to be told.
+   */
+  const [renderGallery, setRenderGallery] = useState([]);
+  const [activeRenderId, setActiveRenderId] = useState(null);
   const [outputMode, setOutputMode] = useState("live"); // 'live' | 'ai'
   const [rendering, setRendering] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
@@ -285,6 +384,72 @@ export default function WalkthroughScreen() {
   // The style step asks seven questions. Four of them decide how a home reads;
   // the rest are refinements, so they stay folded away until asked for.
   const [styleExpanded, setStyleExpanded] = useState(false);
+
+  // ── What a render costs this account ─────────────────────────────────────
+  /**
+   * The same allowance the Interior path reads, read here too.
+   *
+   * This screen used to know nothing about it. It fired the render, spent the
+   * GPU time to capture and upload a frame, and found out the account could not
+   * pay from a 403 — after which the person was dropped onto the paywall with
+   * no idea what they had been short of. The server is still the authority on
+   * whether a charge happens; these numbers only let the screen say the price
+   * up front and stop a render that is going to be refused.
+   */
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+  const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
+  const [renderBlocked, setRenderBlocked] = useState(false);
+  const {
+    coins,
+    setCoins,
+    watchAd,
+    status: adStatus,
+    message: adMessage,
+    clearMessage: clearAdMessage,
+  } = useRewardedCoins(token);
+
+  // The ad hook reports what happened — a coin added, a daily cap reached, no
+  // ad available. Interior drops that on the floor; here it goes through the
+  // screen's own notice, because somebody who watched an ad in order to afford
+  // the render in front of them needs to know whether it worked.
+  useEffect(() => {
+    if (!adMessage) return;
+    setNotice(adMessage);
+    clearAdMessage();
+  }, [adMessage, clearAdMessage]);
+
+  const unlimited = isSubscribed || isPremium;
+  const freeRendersLeft = Math.max(0, FREE_DESIGNS - freeDesignsUsed);
+  const canAffordRender = unlimited || freeRendersLeft > 0 || coins >= RENDER_PRICE;
+
+  const refreshAccount = useCallback(async () => {
+    if (!token) return;
+    try {
+      const response = await fetch(apiUrl("/api/users/me"), {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const account = data.user || {};
+      setIsSubscribed(!!account.isSubscribed);
+      setIsPremium(!!account.isPremium);
+      setFreeDesignsUsed(Number(account.freeDesignsUsed || 0));
+      setRenderBlocked(!!account.manualDisabled);
+      setCoins(Number(account.adCoins || 0));
+    } catch {
+      // A balance that could not be fetched must not block a render: the server
+      // decides, and it will answer 403 if this account cannot pay.
+    }
+  }, [setCoins, token]);
+
+  // Coins can be bought or earned on another screen, so the balance is re-read
+  // every time this one comes back into view rather than once on mount.
+  useFocusEffect(
+    useCallback(() => {
+      refreshAccount();
+    }, [refreshAccount]),
+  );
 
   // ── Leaving ──────────────────────────────────────────────────────────────
   /**
@@ -357,8 +522,10 @@ export default function WalkthroughScreen() {
     [roomConfigs, settings.style],
   );
 
-  const aiKey = viewMode === "plan" ? "bird" : `room-${selectedRoom}`;
-  const currentRender = aiRenders[aiKey];
+  const activeRender = useMemo(
+    () => renderGallery.find((entry) => entry.id === activeRenderId) || null,
+    [activeRenderId, renderGallery],
+  );
 
   // Clearing the plan while a door was armed left the canvas with a tool that
   // cannot do anything — every tap looking for a wall that no longer exists.
@@ -406,19 +573,34 @@ export default function WalkthroughScreen() {
   /**
    * Scenes this session has already been handed, by signature.
    *
-   * The server remembers built scenes too, so a miss here still usually costs
-   * one lookup rather than a build. This exists for the case that lookup cannot
-   * improve on: leaving Explore and coming straight back, which should be
-   * instant and should not touch the network at all. Holding the same object
-   * identity also keeps the WebView's memoised document stable, so the whole GPU
-   * scene is not thrown away and rebuilt on the way back in.
+   * The in-memory half of a two-level store. This one answers "leave Explore,
+   * come straight back", which has to be instant and must not throw away the
+   * GPU scene: holding the same object identity keeps the WebView's memoised
+   * document stable, so nothing is rebuilt on the way back in.
+   *
+   * The other half is `lib/walkthroughSceneStore.js`, which survives the app
+   * being closed. Between them, a plan that has not been edited never asks the
+   * server for a session again.
    */
   const sceneCache = useRef(new Map());
+
+  /**
+   * Set by Retry, cleared by the build that answers it.
+   *
+   * The stored copy is cleared asynchronously, and the effect below re-runs
+   * immediately — so without this the retry could read the entry it is in the
+   * middle of deleting and hand back the very scene that just failed.
+   */
+  const forceRebuild = useRef(false);
 
   // Build the scene with the canonical Livinai_web exporter. Rendering a
   // second, approximate room programme on-device was the source of mismatched
   // dimensions, furniture families, placement and finishes. The exporter owns
   // all of those decisions and returns one textured GLB for the phone to view.
+  //
+  // Three places are asked before it comes to that, cheapest first: this
+  // session's memory, then the device's store, then the network. Reopening an
+  // untouched plan stops at the second and costs one AsyncStorage read.
   useEffect(() => {
     if (view !== "editor" || stage !== STAGES.length - 1 || !layout.rooms.length) return undefined;
 
@@ -444,6 +626,19 @@ export default function WalkthroughScreen() {
 
     (async () => {
       try {
+        // The device's copy of this exact scene. `rebuildScene` is what clears
+        // it, so pressing Retry after a dead model still goes to the network.
+        const stored = forceRebuild.current ? null : await readStoredScene(sceneSignature);
+        if (controller.signal.aborted) return;
+        if (stored) {
+          const origin = stored.origin || rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
+          sceneCache.current.set(sceneSignature, { scene: stored.scene, origin });
+          setExactScene(stored.scene);
+          setExactSceneBaseUrl(origin);
+          return;
+        }
+        forceRebuild.current = false;
+
         const response = await fetch(`${rendererRoot}/api/walkthrough/realtime/session`, {
           method: "POST",
           headers: {
@@ -486,6 +681,9 @@ export default function WalkthroughScreen() {
         if (controller.signal.aborted) return;
         const origin = rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
         sceneCache.current.set(sceneSignature, { scene: data, origin });
+        // Written, not awaited: the scene is already on screen, and a store
+        // that is slow or full must not hold up the walkthrough.
+        writeStoredScene(sceneSignature, { scene: data, origin }).catch(() => {});
         setExactScene(data);
         setExactSceneBaseUrl(origin);
       } catch (error) {
@@ -513,13 +711,18 @@ export default function WalkthroughScreen() {
   /**
    * Try again, and mean it.
    *
-   * Retry has to be the one path that bypasses both caches, because the reason
+   * Retry has to be the one path that bypasses every cache, because the reason
    * someone presses it is that what they were handed did not work — a scene
    * whose GLB has been evicted, most often. The server drops its own row when it
-   * serves the 404 that produced this state, so this only has to forget ours.
+   * serves the 404 that produced this state, so this has to forget both of ours:
+   * the session's, and the device's. `forceRebuild` (declared above the build
+   * effect) covers the gap between clearing the stored copy and the effect
+   * re-running, which is asynchronous.
    */
   const rebuildScene = useCallback(() => {
+    forceRebuild.current = true;
     sceneCache.current.delete(sceneSignature);
+    forgetStoredScene(sceneSignature).catch(() => {});
     setExactSceneRetry((value) => value + 1);
   }, [sceneSignature]);
 
@@ -592,7 +795,8 @@ export default function WalkthroughScreen() {
     }
     setSelectedRoom(Number(saved.selectedRoom) || 0);
     setStage(Math.max(0, Math.min(STAGES.length - 1, Number(saved.stage) || 0)));
-    setAiRenders(saved.aiRenders || {});
+    setRenderGallery(restoreRenders(saved));
+    setActiveRenderId(null);
     setDraft([]);
     setSelection(null);
     setCurveControl(null);
@@ -619,10 +823,12 @@ export default function WalkthroughScreen() {
       furnitureRevision: LIVINAI_WEB_RENDERER_REVISION,
       selectedRoom,
       stage,
-      aiRenders,
+      // The plan's own renders travel with it, so opening a plan on another
+      // phone opens the pictures it produced too.
+      renderGallery,
       savedAt: new Date().toISOString(),
     };
-  }, [aiRenders, canvasAspect, furnitureEdits, openings, pixelsPerMeter, planImage, roomConfigs, rooms, selectedRoom, settings, sheetHeight, sheetWidth, stage]);
+  }, [canvasAspect, furnitureEdits, openings, pixelsPerMeter, planImage, renderGallery, roomConfigs, rooms, selectedRoom, settings, sheetHeight, sheetWidth, stage]);
 
   /** The library row for the plan currently open in the editor. */
   const projectRecord = useCallback(() => ({
@@ -1022,7 +1228,8 @@ export default function WalkthroughScreen() {
     setDetectedPixelsPerMeter(null);
     setHistory([]);
     setFuture([]);
-    setAiRenders({});
+    setRenderGallery([]);
+    setActiveRenderId(null);
     setViewMode("walk");
     setOutputMode("live");
     setPanel(null);
@@ -1254,19 +1461,6 @@ export default function WalkthroughScreen() {
     viewerRef.current?.setNight(next);
   };
 
-  /**
-   * Show the designer viewpoint rather than only promising it.
-   *
-   * Choosing "Designer" used to change a caption and nothing else — the renderer
-   * captured whatever the user was already looking at, because the scene ignored
-   * the flag. Selecting it now moves the camera immediately, and the sheet is
-   * short enough that the move happens in plain sight above it.
-   */
-  const changeCameraSource = (source) => {
-    setCameraSource(source);
-    viewerRef.current?.setDesignerView(source === "designer");
-  };
-
   const focusRoom = (index) => {
     setSelectedRoom(index);
     setOutputMode("live");
@@ -1274,45 +1468,98 @@ export default function WalkthroughScreen() {
   };
 
   // ── AI render (mirrors the web studio's generateAiRender) ────────────────
-  const pendingPurpose = useRef("photo");
+  // The purpose comes back from the viewer with the frame, so there is nothing
+  // for this side to remember about it. What does have to survive the round
+  // trip is the brief, because the sheet that made it is closed by the time the
+  // capture arrives.
   const pendingRenderBrief = useRef(null);
 
   const requestCapture = (purpose, renderBrief = null) => {
-    pendingPurpose.current = purpose;
-    if (purpose === "ai") {
-      // The canvas capture returns asynchronously. Keep the choices made in the
-      // sheet with that capture instead of reading a later UI selection.
-      pendingRenderBrief.current = renderBrief;
-      setRendering(true);
-      viewerRef.current?.capture("ai", cameraSource === "designer" && viewMode !== "plan");
-    } else {
+    if (purpose !== "ai") {
       setBusy("capture");
       viewerRef.current?.capture("photo", false);
+      return;
     }
+
+    if (renderBlocked) {
+      setPanel(null);
+      setNotice(
+        "This account cannot generate designs at the moment. Please contact support if that is a mistake.",
+      );
+      return;
+    }
+
+    /**
+     * Stop here rather than at the 403, and say the same thing Interior says.
+     *
+     * Everything past this line costs something before the server ever refuses
+     * it: a full-resolution frame is grabbed off the GPU and uploaded. Checking
+     * the allowance first is what turns "your render failed" into "you are out
+     * of coins, here is where to get more" — and, for a subscriber, into
+     * nothing at all, because `unlimited` short-circuits the whole test.
+     */
+    if (!canAffordRender) {
+      setPanel(null);
+      setNotice(
+        `A render costs ${coinLabel(RENDER_PRICE)}. You have ${coinLabel(coins)} — `
+        + "watch an ad for one more, or go unlimited with Livinai Pro.",
+      );
+      router.push("/profile/upgrade");
+      return;
+    }
+
+    // The canvas capture returns asynchronously. Keep the choices made in the
+    // sheet with that capture instead of reading a later UI selection.
+    pendingRenderBrief.current = renderBrief;
+    // The sheet closes on submit so the progress overlay is over the room being
+    // rendered. It used to stay up, which left a spinner on a button as the only
+    // sign anything was happening and hid the "your geometry is preserved"
+    // reassurance behind it for the whole wait.
+    setPanel(null);
+    setRendering(true);
+    // Never a designer camera: the render is the view on screen. See the note
+    // on `renderGallery` for why the alternative is gone.
+    viewerRef.current?.capture("ai", false);
   };
 
   /**
-   * Render the captured frame through the same brief the Interior path uses.
+   * Render the captured frame through the brief the Interior path uses —
+   * the same request, field for field, with this view's answers in it.
    *
-   * This used to send a hand-built `customPrompt` that recited the contents of
-   * the whole flat — every door, window and balcony count, and a comma list of
-   * furniture labels — into a request whose image already showed all of it.
-   * Naming a hundred pieces of furniture does not preserve them; it competes
-   * with the picture, and the model spends its budget reconciling a wall of text
-   * with a view of one room. It also became the design's caption everywhere the
-   * collection shows `customPrompt`, so people were reading the renderer's
-   * bookkeeping back as a description of their own home.
+   * It used to be *almost* Interior's, and the three places it differed were
+   * the three places the picture went wrong. The engine builds one prompt for
+   * every path in the app, so a field that carries a word the engine does not
+   * recognise, or a word Interior never sends, changes the brief for the whole
+   * render:
    *
-   * The room's geometry and its furniture are already in the frame, and
-   * `preserveGeometry` is what tells the engine to leave them alone. So the
-   * payload is exactly Interior's: what the room is, how it should look, and
-   * nothing the picture already says.
+   *  - **`material` carried the floor finish.** The engine reads that field as
+   *    "make this the *hero material*", so choosing Polished concrete on the
+   *    Style step did not floor the room in concrete — it briefed the whole
+   *    space around concrete. Interior always sends `Natural oak`; so does this
+   *    now, and the floor finish keeps doing its real job, which is telling the
+   *    3D exporter what to lay on the floor.
+   *  - **`lighting` carried the day/night toggle.** "Warm ambient evening
+   *    light" over an interior invites the model to put a lit opening in a wall
+   *    to justify the glow — which is exactly the window that was appearing
+   *    where the plan has none. The toggle is a property of the 3D viewer, not
+   *    of the design brief. Interior always sends `Natural daylight`.
+   *  - **`roomType` used this screen's own room names.** The engine looks the
+   *    space up in a table of room programmes to write "a bedroom contains…".
+   *    "Laundry" and "Utility" are not in that table, so those rooms got the
+   *    generic fallback — no programme, and a model with nothing to furnish
+   *    from invents architecture instead. They are translated below.
+   *
+   * Everything else already matched and is left alone: `mode`, the 60/30/10
+   * palette, `preserveGeometry`, `creativity`, and the notes field, which is
+   * the same optional client note Interior sends. `product` names the price
+   * list row and never reaches the prompt.
    */
   const runAiRender = async (image, renderBrief = null) => {
     const room = roomConfigs[selectedRoom] || {};
-    const roomType = viewMode === "plan"
+    const chosenRoom = viewMode === "plan"
       ? "Floor Plan"
       : renderBrief?.roomType || room.roomType || "Living Room";
+    const roomType = interiorRoomType(chosenRoom);
     const designStyle = renderBrief?.designStyle || settings.style || "Modern";
     const colorTone = renderBrief?.colorTone || settings.colorMood || "Warm neutral";
     try {
@@ -1326,14 +1573,14 @@ export default function WalkthroughScreen() {
           designStyle,
           colorTone,
           colorPalette: paletteForRequest(colorTone),
-          material: settings.floorFinish === "Auto by style" ? "Natural oak" : settings.floorFinish,
-          lighting: night ? "Warm ambient evening light" : "Natural daylight",
+          // Interior's two constants, verbatim. See the note above.
+          material: "Natural oak",
+          lighting: "Natural daylight",
           preserveGeometry: true,
           creativity: 42,
           // Billed against the walkthrough line of the price list, not the flat
-          // design one. This render costs more to produce — it has already held
-          // a GPU to build the scene before the image pass starts — and until
-          // this field existed the two were charged the same.
+          // design one. Naming the row is all this does — the price attached to
+          // the name is decided by the server, and the prompt never sees it.
           product: "walkthrough",
           // The one piece of text that is the user's own — the Notes field on
           // the Style step — exactly as Interior sends its optional prompt.
@@ -1341,13 +1588,19 @@ export default function WalkthroughScreen() {
         }),
       });
       const data = await response.json().catch(() => ({}));
+      // Whatever the outcome, the server's numbers replace the local ones.
+      // Subtracting a coin here instead is how the balance on screen drifts
+      // away from the balance that gets charged.
+      if (typeof data.adCoins === "number") setCoins(data.adCoins);
+      if (typeof data.freeDesignsUsed === "number") setFreeDesignsUsed(data.freeDesignsUsed);
+
       if (response.status === 403) {
         // Say what was short before the paywall opens. The screen that comes
         // next sells coins; arriving there without being told the number is how
         // "not enough coins" reads as "pay us" rather than as an answer.
         setNotice(
           data.reason
-            || `A walkthrough render costs ${coinLabel(COIN_COST.walkthrough)}, and you do not have enough.`,
+            || `A walkthrough render costs ${coinLabel(RENDER_PRICE)}, and you do not have enough.`,
         );
         router.push("/profile/upgrade");
         return;
@@ -1355,17 +1608,22 @@ export default function WalkthroughScreen() {
       if (!response.ok) throw new Error(data.message || "The AI render could not be generated.");
       const result = data.generatedImage || data.image;
       if (!result) throw new Error("The AI service returned no image.");
-      setAiRenders((current) => ({
-        ...current,
-        [aiKey]: {
-          image: result,
-          label:
-            viewMode === "plan"
-              ? "Whole-home bird view"
-              : `${room.name || `Room ${selectedRoom + 1}`} · ${roomType}`,
-          createdAt: new Date().toISOString(),
-        },
-      }));
+
+      const entry = {
+        id: createRenderId(),
+        image: result,
+        label:
+          viewMode === "plan"
+            ? "Whole floor, from above"
+            : room.name || roomType || `Room ${selectedRoom + 1}`,
+        roomType,
+        designStyle,
+        colorTone,
+        view: viewMode === "plan" ? "plan" : "walk",
+        createdAt: new Date().toISOString(),
+      };
+      setRenderGallery((current) => [entry, ...current].slice(0, RENDER_HISTORY_LIMIT));
+      setActiveRenderId(entry.id);
       setOutputMode("ai");
     } catch (error) {
       setNotice(error.message || "The AI render could not be generated.");
@@ -1386,9 +1644,34 @@ export default function WalkthroughScreen() {
       }
     },
     // runAiRender closes over the current room/settings, which is what we want.
+    // `night` is not among them any more: it moves the 3D lighting and nothing
+    // else, and the brief this sends is daylight whichever way the toggle sits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [aiKey, cameraSource, night, roomConfigs, selectedRoom, settings, token, viewMode],
+    [roomConfigs, selectedRoom, settings, token, viewMode],
   );
+
+  /** Open one of this plan's renders over the 3D view. */
+  const showRender = useCallback((id) => {
+    setPanel(null);
+    setActiveRenderId(id);
+    setOutputMode("ai");
+  }, []);
+
+  /**
+   * Forget a render, in the plan only.
+   *
+   * The design itself stays in the account's collection — /api/designs made it
+   * and owns it — so this removes the copy filed against this plan rather than
+   * deleting something the person may have paid for from under them.
+   */
+  const removeRender = useCallback((id) => {
+    setRenderGallery((current) => current.filter((entry) => entry.id !== id));
+    setActiveRenderId((current) => {
+      if (current !== id) return current;
+      setOutputMode("live");
+      return null;
+    });
+  }, []);
 
   // ── Saving ───────────────────────────────────────────────────────────────
   /**
@@ -1507,11 +1790,20 @@ export default function WalkthroughScreen() {
   }, [openings.length, pushToCloud, rooms.length, view]);
 
   // The pop, one commit after the 3D view has left the tree.
+  //
+  // `dismissTo` rather than `back()`: the hub can push more than one copy of a
+  // create screen when a tap lands while it is busy, and a single `back()` then
+  // lands on an identical screen instead of on Create. This collapses however
+  // many are stacked, and puts Create there if it is somehow not in the stack
+  // at all — which is what `canGoBack()` was guarding against.
   useEffect(() => {
     if (!closing) return undefined;
     const timer = setTimeout(() => {
-      if (router.canGoBack()) router.back();
-      else router.replace("/create");
+      try {
+        router.dismissTo("/create");
+      } catch {
+        router.replace("/create");
+      }
     }, 0);
     return () => clearTimeout(timer);
   }, [closing, router]);
@@ -1521,16 +1813,23 @@ export default function WalkthroughScreen() {
    *
    * Without this it popped the navigator directly, which is how a plan could be
    * left behind unsaved and how a second press raced the header's own exit.
+   *
+   * Bound to focus, not to mount. `BackHandler` subscriptions are global and the
+   * most recent one wins, so a handler still listening from behind the paywall
+   * this screen can push would swallow *that* screen's back press and quietly
+   * step the walkthrough back a stage instead.
    */
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (closing) return true;
-      if (view === "editor") goBack();
-      else leaveWalkthrough();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [closing, goBack, leaveWalkthrough, view]);
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (closing) return true;
+        if (view === "editor") goBack();
+        else leaveWalkthrough();
+        return true;
+      });
+      return () => subscription.remove();
+    }, [closing, goBack, leaveWalkthrough, view]),
+  );
 
   const current = STAGES[stage];
   const activeTool = TOOLS.find((item) => item.key === tool);
@@ -1646,7 +1945,11 @@ export default function WalkthroughScreen() {
                 </Pressable>
               </View>
 
-              <View style={styles.headerDivider} />
+              {/* No rule between the title row and the step bar. The header is
+                  already one tinted surface closed by its own bottom border, so
+                  a second full-bleed hairline inside it cut the bar in two and
+                  drew the eye to a divider instead of to the progress it sits
+                  above. Space separates them now. */}
               <View style={styles.stageBar}>
                 <View style={styles.stageBarRow}>
                   <LinearGradient colors={COLORS.gradientBrandDeep} style={styles.stageBarMark}>
@@ -1707,11 +2010,21 @@ export default function WalkthroughScreen() {
               inspected={inspected}
               sceneInfo={sceneInfo}
               panel={panel}
-              cameraSource={cameraSource}
-              currentRender={currentRender}
+              renders={renderGallery}
+              activeRender={activeRender}
               outputMode={outputMode}
               rendering={rendering}
               busy={busy}
+              renderPrice={RENDER_PRICE}
+              unlimited={unlimited}
+              freeRendersLeft={freeRendersLeft}
+              coins={coins}
+              adStatus={adStatus}
+              onWatchAd={watchAd}
+              onUpgrade={() => {
+                setPanel(null);
+                router.push("/profile/upgrade");
+              }}
               onReady={setSceneInfo}
               onSceneUpdate={setSceneInfo}
               onSelect={setInspected}
@@ -1719,6 +2032,13 @@ export default function WalkthroughScreen() {
               onFurnitureChange={updateFurnitureEdit}
               onDiagnostic={setNotice}
               onExactError={(message) => {
+                // A scene that will not open must not be served from the device
+                // again. Most often this is a model URL whose GLB has been
+                // evicted, and holding on to it would mean this plan never
+                // worked again — the stored copy would keep answering before
+                // the network ever got the chance to rebuild it.
+                sceneCache.current.delete(sceneSignature);
+                forgetStoredScene(sceneSignature).catch(() => {});
                 setExactScene(null);
                 setExactSceneError("Your home was built, but it could not be opened here.");
                 setExactSceneDetail(message);
@@ -1730,8 +2050,9 @@ export default function WalkthroughScreen() {
               onFocusRoom={focusRoom}
               onRender={(renderBrief) => requestCapture("ai", renderBrief)}
               onSetPanel={setPanel}
-              onSetCameraSource={changeCameraSource}
               onSetOutputMode={setOutputMode}
+              onShowRender={showRender}
+              onRemoveRender={removeRender}
               onSaveRender={(image) => {
                 setSnapshotKind("ai");
                 setSnapshot(image);
@@ -1796,7 +2117,12 @@ export default function WalkthroughScreen() {
                       loose grey text that read as page furniture. */}
                   <View style={styles.canvasCard}>
                     <View style={styles.canvasHint} accessibilityLiveRegion="polite">
-                      <Ionicons name={activeTool?.icon || "grid-outline"} size={14} color={COLORS.primaryDark} />
+                      <Ionicons
+                        name={activeTool?.icon || "grid-outline"}
+                        size={14}
+                        color={COLORS.primaryDark}
+                        style={styles.canvasHintIcon}
+                      />
                       <Text style={styles.canvasHintText}>
                         <Text style={styles.canvasHintTool}>{activeTool?.label} · </Text>
                         {TOOL_HINTS[tool]}
@@ -1882,54 +2208,65 @@ export default function WalkthroughScreen() {
                     </View>
                   )}
 
+                  {/* One selected thing, one card.
+                      Selecting a door used to produce two stacked cards — a bar
+                      naming it with a Delete button, and immediately under it a
+                      second bordered card holding its type and width. Two
+                      surfaces, two borders and a gap, for one object. The name
+                      row is now the card's header and the controls are its
+                      body, so a selected room is a one-row card and a selected
+                      opening is the same card with its settings inside. */}
                   {selection && (
-                    <View style={styles.selectionBar}>
-                      <View style={[
-                        styles.roomSwatch,
-                        { backgroundColor: selection.kind === "room"
-                          ? ROOM_TINTS[selection.index % ROOM_TINTS.length].stroke
-                          : (OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).color },
-                      ]} />
-                      <Text style={styles.selectionName} numberOfLines={1}>
-                        {selection.kind === "room"
-                          ? roomConfigs[selection.index]?.name || `Room ${selection.index + 1}`
-                          : `${(OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).label} · ${(
-                              Math.hypot(
-                                (openings[selection.index]?.points?.[1]?.[0] || 0) - (openings[selection.index]?.points?.[0]?.[0] || 0),
-                                (openings[selection.index]?.points?.[1]?.[1] || 0) - (openings[selection.index]?.points?.[0]?.[1] || 0),
-                              ) / pixelsPerMeter
-                            ).toFixed(1)} m`}
-                      </Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Delete the selected shape"
-                        android_ripple={{ color: "rgba(190,58,47,0.16)" }}
-                        style={({ pressed }) => [styles.selectionAction, pressed && styles.pressedSurface]}
-                        onPress={deleteSelection}
-                      >
-                        <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
-                        <Text style={styles.selectionActionText}>Delete</Text>
-                      </Pressable>
-                    </View>
-                  )}
+                    <View style={styles.selectionCard}>
+                      <View style={styles.selectionBar}>
+                        <View style={[
+                          styles.roomSwatch,
+                          { backgroundColor: selection.kind === "room"
+                            ? ROOM_TINTS[selection.index % ROOM_TINTS.length].stroke
+                            : (OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).color },
+                        ]} />
+                        <Text style={styles.selectionName} numberOfLines={1}>
+                          {selection.kind === "room"
+                            ? roomConfigs[selection.index]?.name || `Room ${selection.index + 1}`
+                            : `${(OPENING_SPECS[openings[selection.index]?.kind] || OPENING_SPECS.door).label} · ${(
+                                Math.hypot(
+                                  (openings[selection.index]?.points?.[1]?.[0] || 0) - (openings[selection.index]?.points?.[0]?.[0] || 0),
+                                  (openings[selection.index]?.points?.[1]?.[1] || 0) - (openings[selection.index]?.points?.[0]?.[1] || 0),
+                                ) / pixelsPerMeter
+                              ).toFixed(1)} m`}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete the selected shape"
+                          android_ripple={{ color: "rgba(190,58,47,0.16)" }}
+                          style={({ pressed }) => [styles.selectionAction, pressed && styles.pressedSurface]}
+                          onPress={deleteSelection}
+                        >
+                          <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
+                          <Text style={styles.selectionActionText}>Delete</Text>
+                        </Pressable>
+                      </View>
 
-                  {/* Type and width, and nothing else. A "Presets" row of named
-                      widths sat under the width field and set the same number a
-                      second way, so the two controls could disagree on screen. */}
-                  {selection?.kind === "opening" && openings[selection.index] && (
-                    <View style={styles.openingEditor}>
-                      <ChipRow
-                        label="Type"
-                        options={["door", "window", "balcony"]}
-                        value={openings[selection.index].kind}
-                        formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
-                        onChange={(kind) => editOpening(selection.index, { kind })}
-                      />
-                      <OpeningWidthControl
-                        widthMeters={openingWidthMeters(openings[selection.index], pixelsPerMeter)}
-                        maxMeters={maxOpeningMeters(openings[selection.index], rooms, pixelsPerMeter)}
-                        onChange={(meters) => editOpening(selection.index, { meters })}
-                      />
+                      {/* Type and width, and nothing else. A "Presets" row of
+                          named widths sat under the width field and set the
+                          same number a second way, so the two controls could
+                          disagree on screen. */}
+                      {selection.kind === "opening" && openings[selection.index] && (
+                        <View style={styles.openingEditor}>
+                          <ChipRow
+                            label="Type"
+                            options={["door", "window", "balcony"]}
+                            value={openings[selection.index].kind}
+                            formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
+                            onChange={(kind) => editOpening(selection.index, { kind })}
+                          />
+                          <OpeningWidthControl
+                            widthMeters={openingWidthMeters(openings[selection.index], pixelsPerMeter)}
+                            maxMeters={maxOpeningMeters(openings[selection.index], rooms, pixelsPerMeter)}
+                            onChange={(meters) => editOpening(selection.index, { meters })}
+                          />
+                        </View>
+                      )}
                     </View>
                   )}
 
@@ -2350,11 +2687,18 @@ function WalkthroughStage({
   inspected,
   sceneInfo,
   panel,
-  cameraSource,
-  currentRender,
+  renders,
+  activeRender,
   outputMode,
   rendering,
   busy,
+  renderPrice,
+  unlimited,
+  freeRendersLeft,
+  coins,
+  adStatus,
+  onWatchAd,
+  onUpgrade,
   onReady,
   onSceneUpdate,
   onSelect,
@@ -2369,13 +2713,14 @@ function WalkthroughStage({
   onFocusRoom,
   onRender,
   onSetPanel,
-  onSetCameraSource,
   onSetOutputMode,
+  onShowRender,
+  onRemoveRender,
   onSaveRender,
 }) {
   const insets = useSafeAreaInsets();
-  const showingAi = outputMode === "ai" && currentRender;
-  const sheetOpen = !!inspected || panel === "ai";
+  const showingAi = outputMode === "ai" && !!activeRender;
+  const sheetOpen = !!inspected || panel === "ai" || panel === "renders";
   const showStick = viewMode === "walk" && !showingAi && !sheetOpen;
   const showRooms = roomConfigs.length > 1 && !showingAi;
   // Controls only make sense once there is a home to point them at. Showing a
@@ -2432,7 +2777,7 @@ function WalkthroughStage({
         </View>
       )}
 
-      {showingAi && <AiRenderLayer render={currentRender} />}
+      {showingAi && <AiRenderLayer render={activeRender} />}
 
       {rendering && (
         <View style={styles.renderOverlay}>
@@ -2562,8 +2907,8 @@ function WalkthroughStage({
               onDone={() => coached.current.add(viewMode)}
               text={
                 viewMode === "walk"
-                  ? "Drag to look around · Tap any piece to edit it"
-                  : "Drag to turn the plan · Tap any piece to edit it"
+                  ? "Drag to look · Two fingers to move · Tap a piece to edit"
+                  : "Drag to turn · Pinch to zoom · Two fingers to pan"
               }
             />
           )}
@@ -2571,22 +2916,38 @@ function WalkthroughStage({
 
         {/* ── Bottom cluster ─────────────────────────────────────────────── */}
         <View style={styles.overlayBottom} pointerEvents="box-none">
+          {/* Which render is on screen, and the three things anyone wants next:
+              keep it, look at the others this plan has made, or go back to the
+              live room. "All renders" is here because this bar is where a person
+              already is when they finish looking at one. */}
           {showingAi && (
             <View style={styles.aiResultBar}>
               <View style={styles.aiResultCopy}>
                 <Text style={styles.aiResultTag}>AI RENDER</Text>
-                <Text style={styles.aiResultLabel} numberOfLines={1}>{currentRender.label}</Text>
+                <Text style={styles.aiResultLabel} numberOfLines={1}>{activeRender.label}</Text>
               </View>
               <Pressable
+                accessibilityRole="button"
                 accessibilityLabel="Save this render"
-                style={styles.aiResultButton}
-                onPress={() => onSaveRender(currentRender.image)}
+                style={({ pressed }) => [styles.aiResultButton, pressed && styles.pressedSurface]}
+                onPress={() => onSaveRender(activeRender.image)}
               >
                 <Ionicons name="download-outline" size={18} color={COLORS.white} />
               </Pressable>
+              {renders.length > 1 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`All ${renders.length} renders in this plan`}
+                  style={({ pressed }) => [styles.aiResultButton, pressed && styles.pressedSurface]}
+                  onPress={() => onSetPanel("renders")}
+                >
+                  <Ionicons name="images-outline" size={18} color={COLORS.white} />
+                </Pressable>
+              )}
               <Pressable
+                accessibilityRole="button"
                 accessibilityLabel="Back to the live 3D view"
-                style={styles.aiResultButton}
+                style={({ pressed }) => [styles.aiResultButton, pressed && styles.pressedSurface]}
                 onPress={() => onSetOutputMode("live")}
               >
                 <Ionicons name="cube-outline" size={18} color={COLORS.white} />
@@ -2672,11 +3033,10 @@ function WalkthroughStage({
 
           {showStick && <MoveStick onChange={drive} />}
 
-          {/* The dock as it originally was: the status chip taking the width,
-              and the Render pill beside it. The camera button that used to sit
-              at the far end is gone — it was a bare circle with no label, under
-              the thumb steering the walk, as easy to hit by accident as on
-              purpose. */}
+          {/* The status chip taking the width, then the two things this step
+              offers: the renders this plan already has, and making another.
+              The gallery button only exists once there is something in it, so
+              the dock is never wider than it has reason to be. */}
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
               <View
@@ -2691,9 +3051,31 @@ function WalkthroughStage({
                 <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
               </View>
 
+              {renders.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    renders.length === 1
+                      ? "1 render in this plan"
+                      : `${renders.length} renders in this plan`
+                  }
+                  accessibilityState={{ expanded: panel === "renders" }}
+                  android_ripple={{ color: "rgba(30,36,31,0.14)" }}
+                  style={({ pressed }) => [
+                    styles.dockSecondary,
+                    panel === "renders" && styles.dockSecondaryActive,
+                    pressed && styles.pressedSurface,
+                  ]}
+                  onPress={() => onSetPanel(panel === "renders" ? null : "renders")}
+                >
+                  <Ionicons name="images-outline" size={17} color={COLORS.primaryDark} />
+                  <Text style={styles.dockSecondaryText}>{renders.length}</Text>
+                </Pressable>
+              )}
+
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="AI render options"
+                accessibilityLabel="Render this view with AI"
                 accessibilityState={{ expanded: panel === "ai" }}
                 android_ripple={{ color: "rgba(255,255,255,0.18)", borderless: false }}
                 style={({ pressed }) => [
@@ -2723,19 +3105,50 @@ function WalkthroughStage({
       <RenderSheet
         visible={panel === "ai" && !showingAi}
         viewMode={viewMode}
-        cameraSource={cameraSource}
+        night={night}
         defaultRoomType={roomConfigs[selectedRoom]?.roomType || "Living Room"}
         defaultDesignStyle={settings.style || "Modern"}
         defaultColorTone={settings.colorMood || "Warm neutral"}
-        hasRender={!!currentRender}
+        renderCount={renders.length}
         rendering={rendering}
+        price={renderPrice}
+        unlimited={unlimited}
+        freeRendersLeft={freeRendersLeft}
+        coins={coins}
+        adStatus={adStatus}
+        onWatchAd={onWatchAd}
+        onUpgrade={onUpgrade}
         onClose={() => onSetPanel(null)}
-        onSetCameraSource={onSetCameraSource}
-        onShowLast={() => {
-          onSetPanel(null);
-          onSetOutputMode("ai");
-        }}
+        onOpenGallery={() => onSetPanel("renders")}
         onRender={onRender}
+      />
+
+      {/* The plan's own renders, in the plan. Before this the only way back to
+          a finished render was the Collection tab, which lists every design the
+          account has ever made with nothing on a card to say which plan it came
+          from — so the picture of your kitchen was findable, but not from the
+          home it belongs to. */}
+      <RenderGallerySheet
+        visible={panel === "renders"}
+        renders={renders}
+        activeId={activeRender?.id || null}
+        onClose={() => onSetPanel(null)}
+        onOpen={onShowRender}
+        onRemove={onRemoveRender}
+        // Close this sheet before the save sheet opens. Presenting one modal
+        // from inside another's hierarchy is the sort of thing that works on
+        // one platform and silently does nothing on the other.
+        onSave={(image) => {
+          onSetPanel(null);
+          onSaveRender(image);
+        }}
+        onRenderMore={() => {
+          // Back to the live room first. The brief renders the view on screen,
+          // so opening it over a finished picture would offer to re-render
+          // something the camera is not pointing at.
+          onSetOutputMode("live");
+          onSetPanel("ai");
+        }}
       />
     </View>
   );
@@ -2794,24 +3207,42 @@ function AiRenderLayer({ render }) {
 }
 
 /**
- * "Render with AI" — the one action in the walkthrough that spends a credit.
+ * "Render with AI" — the one action in the walkthrough that spends a coin.
  *
- * A compact render brief and one button. It reuses the Rooms and Style choices
- * so the last step does not introduce a second design language just before a
- * person spends a credit.
+ * Three things changed here, and all three were about the same thing: a person
+ * pressing a paid button should know what they are buying and what it costs.
+ *
+ *  - **The camera choice is gone.** It offered "Designer" or "My view",
+ *    defaulted to Designer, and moved the camera the moment it was opened — so
+ *    the picture someone paid for was framed from a corner they had not chosen,
+ *    of a room they were no longer looking at. A render is the view on screen.
+ *    That needs no control and no explanatory sentence underneath it.
+ *  - **The price is on the button.** It was nowhere on this sheet. The first
+ *    time anybody learned a render costs a coin was a 403 after the frame had
+ *    already been captured and uploaded.
+ *  - **"Show the last render" is gone**, replaced by the whole gallery. It could
+ *    only ever reach one picture — the most recent one for this exact
+ *    viewpoint — and it sat under the primary action as a second, competing
+ *    button on a sheet whose job is to make one.
  */
 function RenderSheet({
   visible,
   viewMode,
-  cameraSource,
+  night,
   defaultRoomType,
   defaultDesignStyle,
   defaultColorTone,
-  hasRender,
+  renderCount,
   rendering,
+  price,
+  unlimited,
+  freeRendersLeft,
+  coins,
+  adStatus,
+  onWatchAd,
+  onUpgrade,
   onClose,
-  onSetCameraSource,
-  onShowLast,
+  onOpenGallery,
   onRender,
 }) {
   const insets = useSafeAreaInsets();
@@ -2837,6 +3268,8 @@ function RenderSheet({
       colorTone,
     });
   };
+
+  const affordable = unlimited || freeRendersLeft > 0 || coins >= price;
 
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -2868,6 +3301,20 @@ function RenderSheet({
               <Ionicons name="close" size={18} color={COLORS.textSecondary} />
             </Pressable>
           </View>
+
+          {/* What this will cost, before the brief rather than after it — the
+              same three states the Interior screen has: included, free-trial
+              renders remaining, or a coin balance with a way to add to it. */}
+          <RenderCostBar
+            price={price}
+            unlimited={unlimited}
+            freeRendersLeft={freeRendersLeft}
+            coins={coins}
+            affordable={affordable}
+            adStatus={adStatus}
+            onWatchAd={onWatchAd}
+            onUpgrade={onUpgrade}
+          />
 
           <ScrollView
             style={styles.renderBriefScroll}
@@ -2905,54 +3352,39 @@ function RenderSheet({
               <PalettePreview tone={colorTone} />
             </View>
 
-            {!bird && (
-              <View style={styles.sheetField}>
-                <Text style={styles.fieldLabel}>Camera</Text>
-                <View style={styles.toggleGroup} accessibilityRole="tablist">
-                  {[
-                    { key: "designer", label: "Designer" },
-                    { key: "current", label: "My view" },
-                  ].map((option) => {
-                    const active = cameraSource === option.key;
-                    return (
-                      <Pressable
-                        key={option.key}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: active }}
-                        android_ripple={{ color: "rgba(30,36,31,0.10)" }}
-                        style={({ pressed }) => [
-                          styles.toggleOption,
-                          active && styles.toggleOptionActive,
-                          pressed && !active && styles.pressedSurface,
-                        ]}
-                        onPress={() => onSetCameraSource(option.key)}
-                      >
-                        <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{option.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+            {/* One line, and only the line that answers "what will I get?". */}
+            <View style={styles.sheetNoteRow}>
+              <Ionicons name="information-circle-outline" size={15} color={COLORS.textTertiary} />
+              <Text style={styles.sheetNoteText}>
+                {bird
+                  ? "Rendered from above with the roof open, exactly as you see it."
+                  : "Rendered from exactly the view you are looking at. Your walls, openings and furniture stay where they are."}
+              </Text>
+            </View>
+
+            {/* Said before the coin is spent, not discovered afterwards.
+                Every Livinai design is briefed as daylight — an evening brief
+                is what had the model adding a lit window to a wall that has
+                none — so the night toggle moves the 3D lighting and stops
+                there. */}
+            {night && (
+              <View style={styles.sheetNoteRow}>
+                <Ionicons name="sunny-outline" size={15} color={COLORS.textTertiary} />
+                <Text style={styles.sheetNoteText}>
+                  Renders are always lit as daylight, whichever way the Day/Night
+                  toggle sits.
+                </Text>
               </View>
             )}
-
-          {/* One line, and only the line that answers "what will I get?". This
-              used to report how many furniture pieces the camera had framed and
-              how many doors and windows were preserved — the renderer's
-              bookkeeping, not the picture about to be handed over. */}
-          <View style={styles.sheetNoteRow}>
-            <Ionicons name="information-circle-outline" size={15} color={COLORS.textTertiary} />
-            <Text style={styles.sheetNoteText}>
-              {bird
-                ? "Rendered from above with the roof open."
-                : cameraSource === "designer"
-                  ? "The camera moves to the corner that shows the most of this room."
-                  : "Rendered from exactly the view you are looking at."}
-            </Text>
-          </View>
           </ScrollView>
 
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={
+              unlimited
+                ? "Generate this render"
+                : `Generate this render for ${coinLabel(price)}`
+            }
             accessibilityState={{ busy: rendering, disabled: rendering }}
             android_ripple={{ color: "rgba(255,255,255,0.20)" }}
             style={({ pressed }) => [
@@ -2969,19 +3401,239 @@ function RenderSheet({
             <Text style={styles.sheetPrimaryText}>
               {rendering ? "Generating…" : bird ? "Render the floor" : "Render this room"}
             </Text>
+            {!rendering && !unlimited && freeRendersLeft === 0 && (
+              <View style={styles.sheetPrimaryPrice}>
+                <Text style={styles.sheetPrimaryPriceText}>{coinLabel(price)}</Text>
+              </View>
+            )}
           </Pressable>
 
-          {hasRender && (
+          {renderCount > 0 && (
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={
+                renderCount === 1
+                  ? "See the 1 render in this plan"
+                  : `See all ${renderCount} renders in this plan`
+              }
               android_ripple={{ color: "rgba(51,96,74,0.12)" }}
               style={({ pressed }) => [styles.sheetSecondary, pressed && styles.pressedSurface]}
-              onPress={onShowLast}
+              onPress={onOpenGallery}
             >
-              <Ionicons name="image-outline" size={17} color={COLORS.primaryDark} />
-              <Text style={styles.sheetSecondaryText}>Show the last render</Text>
+              <Ionicons name="images-outline" size={17} color={COLORS.primaryDark} />
+              <Text style={styles.sheetSecondaryText}>
+                {renderCount === 1 ? "See this plan's 1 render" : `See this plan's ${renderCount} renders`}
+              </Text>
             </Pressable>
           )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/**
+ * The price of the button below it, and the way to afford it.
+ *
+ * Three states, and never more than one of them at a time: a subscriber is told
+ * it is included and offered nothing; an account still inside its free
+ * allowance is told how many are left; everyone else sees their balance beside
+ * the price, and a way to add to it that does not cost money.
+ */
+function RenderCostBar({
+  price,
+  unlimited,
+  freeRendersLeft,
+  coins,
+  affordable,
+  adStatus,
+  onWatchAd,
+  onUpgrade,
+}) {
+  if (unlimited) {
+    return (
+      <View style={[styles.costBar, styles.costBarIncluded]} accessibilityRole="text">
+        <Ionicons name="checkmark-circle" size={17} color={COLORS.success} />
+        <Text style={styles.costBarText} numberOfLines={1}>
+          Included with your plan — render as often as you like.
+        </Text>
+      </View>
+    );
+  }
+
+  if (freeRendersLeft > 0) {
+    return (
+      <View style={styles.costBar} accessibilityRole="text">
+        <Ionicons name="gift-outline" size={17} color={COLORS.primaryDark} />
+        <Text style={styles.costBarText} numberOfLines={1}>
+          {freeRendersLeft === 1 ? "1 free render left" : `${freeRendersLeft} free renders left`}
+          {" · then "}
+          {coinLabel(price)} each
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.costBar, !affordable && styles.costBarShort]}>
+      <Ionicons
+        name={affordable ? "ellipse-outline" : "alert-circle-outline"}
+        size={17}
+        color={affordable ? COLORS.primaryDark : COLORS.warning}
+      />
+      <Text style={styles.costBarText} numberOfLines={1}>
+        {coinLabel(price)} per render · you have {coins}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={affordable ? "Watch an ad to earn a coin" : "Get more coins"}
+        accessibilityState={{ busy: adStatus === "showing", disabled: adStatus === "showing" }}
+        android_ripple={{ color: "rgba(51,96,74,0.16)" }}
+        style={({ pressed }) => [styles.costBarAction, pressed && styles.pressedSurface]}
+        disabled={adStatus === "showing"}
+        onPress={affordable ? onWatchAd : onUpgrade}
+      >
+        {adStatus === "showing" ? (
+          <ActivityIndicator size="small" color={COLORS.primaryDark} />
+        ) : (
+          <>
+            <Ionicons
+              name={affordable ? "play" : "add"}
+              size={13}
+              color={COLORS.primaryDark}
+            />
+            <Text style={styles.costBarActionText}>{affordable ? "Watch ad" : "Get coins"}</Text>
+          </>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Every render this plan has made, inside the plan that made them.
+ *
+ * A render is saved to the account's collection the moment it is generated, and
+ * for a long time that was the only place to find one again — a single reverse
+ * chronological list of every design across every path, with nothing on a card
+ * tying it back to the home it came from. So the pictures produced *by a plan*
+ * were unreachable *from* that plan, which is the one place a person looks.
+ *
+ * Two columns of thumbnails, tapping one opens it over the 3D view, and each
+ * carries its own remove — which unfiles it from the plan and leaves the design
+ * itself untouched in the collection.
+ */
+function RenderGallerySheet({ visible, renders, activeId, onClose, onOpen, onRemove, onSave, onRenderMore }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable
+          style={[styles.sheet, styles.renderSheet, { paddingBottom: Math.max(insets.bottom, SPACING.lg) }]}
+          onPress={() => {}}
+        >
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHead}>
+            <View style={[styles.sheetIcon, styles.sheetIconAccent]}>
+              <Ionicons name="images-outline" size={18} color={COLORS.primaryDark} />
+            </View>
+            <View style={styles.sheetHeadCopy}>
+              <Text style={styles.sheetTitle}>Renders in this plan</Text>
+              <Text style={styles.sheetSubtitle}>
+                {renders.length === 1 ? "1 picture" : `${renders.length} pictures`}
+                {" · also in your collection"}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              hitSlop={LAYOUT.hitSlop}
+              android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+              style={({ pressed }) => [styles.sheetCloseIcon, pressed && styles.pressedSurface]}
+              onPress={onClose}
+            >
+              <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+            </Pressable>
+          </View>
+
+          {renders.length === 0 ? (
+            <View style={styles.galleryEmpty}>
+              <Ionicons name="sparkles-outline" size={26} color={COLORS.textTertiary} />
+              <Text style={styles.galleryEmptyText}>
+                Renders you make from this plan are kept here.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.renderBriefScroll}
+              contentContainerStyle={styles.galleryGrid}
+              showsVerticalScrollIndicator={false}
+            >
+              {renders.map((entry) => (
+                <View key={entry.id} style={styles.galleryCell}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open the render of ${entry.label}`}
+                    accessibilityState={{ selected: entry.id === activeId }}
+                    android_ripple={{ color: "rgba(30,36,31,0.10)" }}
+                    style={({ pressed }) => [
+                      styles.galleryCard,
+                      entry.id === activeId && styles.galleryCardActive,
+                      pressed && styles.pressedSurface,
+                    ]}
+                    onPress={() => onOpen(entry.id)}
+                  >
+                    <Image
+                      source={{ uri: entry.image }}
+                      style={styles.galleryImage}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.galleryCopy}>
+                      <Text style={styles.galleryLabel} numberOfLines={1}>{entry.label}</Text>
+                      <Text style={styles.galleryMeta} numberOfLines={1}>
+                        {[entry.designStyle, renderDay(entry.createdAt)].filter(Boolean).join(" · ")}
+                      </Text>
+                    </View>
+                  </Pressable>
+
+                  <View style={styles.galleryActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Save the render of ${entry.label}`}
+                      hitSlop={LAYOUT.hitSlop}
+                      android_ripple={{ color: "rgba(51,96,74,0.16)", borderless: true }}
+                      style={({ pressed }) => [styles.galleryAction, pressed && styles.pressedSurface]}
+                      onPress={() => onSave(entry.image)}
+                    >
+                      <Ionicons name="download-outline" size={16} color={COLORS.primaryDark} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove the render of ${entry.label} from this plan`}
+                      hitSlop={LAYOUT.hitSlop}
+                      android_ripple={{ color: "rgba(190,58,47,0.16)", borderless: true }}
+                      style={({ pressed }) => [styles.galleryAction, pressed && styles.pressedSurface]}
+                      onPress={() => onRemove(entry.id)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            android_ripple={{ color: "rgba(255,255,255,0.20)" }}
+            style={({ pressed }) => [styles.sheetPrimary, pressed && styles.pressedSurface]}
+            onPress={onRenderMore}
+          >
+            <Ionicons name="sparkles" size={18} color={COLORS.white} />
+            <Text style={styles.sheetPrimaryText}>Render another view</Text>
+          </Pressable>
         </Pressable>
       </Pressable>
     </Modal>
@@ -3288,14 +3940,36 @@ function describeScene(sceneInfo) {
  */
 function MoveStick({ onChange }) {
   const travel = ms(34); // how far the knob can leave centre
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  /**
+   * The knob moves natively, not through React.
+   *
+   * It was a `useState` written on every `onPanResponderMove`, so walking meant
+   * re-rendering the whole overlay — the room strip, the status chip, the dock —
+   * sixty times a second, on the one screen already holding a live WebGL
+   * context. Two `Animated.Value`s write the transform straight to the view and
+   * React never hears about the drag at all.
+   */
+  const knobX = useRef(new Animated.Value(0)).current;
+  const knobY = useRef(new Animated.Value(0)).current;
   const latest = useRef(onChange);
   latest.current = onChange;
 
   const responder = useMemo(
     () => {
+      /**
+       * Under this the stick reads as held, not pushed.
+       *
+       * There was no dead zone, so a thumb resting on the knob crept the camera
+       * across the room, and the smallest deliberate nudge jumped straight to a
+       * real walking speed. Past the threshold the remaining travel is
+       * re-scaled from zero, so the first millimetre of push is a slow step
+       * rather than an instant lurch to 14%.
+       */
+      const deadZone = 0.14;
+
       const release = () => {
-        setKnob({ x: 0, y: 0 });
+        Animated.spring(knobX, { toValue: 0, useNativeDriver: true, ...MOTION.spring }).start();
+        Animated.spring(knobY, { toValue: 0, useNativeDriver: true, ...MOTION.spring }).start();
         latest.current(0, 0);
       };
       const apply = (dx, dy) => {
@@ -3303,8 +3977,15 @@ function MoveStick({ onChange }) {
         const reach = Math.min(distance, travel);
         const x = (dx / distance) * reach;
         const y = (dy / distance) * reach;
-        setKnob({ x, y });
-        latest.current(x / travel, y / travel);
+        knobX.setValue(x);
+        knobY.setValue(y);
+        const magnitude = reach / travel;
+        if (magnitude < deadZone) {
+          latest.current(0, 0);
+          return;
+        }
+        const scaled = (magnitude - deadZone) / (1 - deadZone);
+        latest.current((x / reach) * scaled, (y / reach) * scaled);
       };
       return PanResponder.create({
         onStartShouldSetPanResponder: () => true,
@@ -3315,7 +3996,7 @@ function MoveStick({ onChange }) {
         onPanResponderTerminate: release,
       });
     },
-    [travel],
+    [knobX, knobY, travel],
   );
 
   // A finger lifted outside the stick, or a mode change mid-gesture, would
@@ -3328,9 +4009,11 @@ function MoveStick({ onChange }) {
       <Ionicons name="chevron-down" size={13} color={COLORS.textTertiary} style={styles.stickDown} />
       <Ionicons name="chevron-back" size={13} color={COLORS.textTertiary} style={styles.stickLeft} />
       <Ionicons name="chevron-forward" size={13} color={COLORS.textTertiary} style={styles.stickRight} />
-      <View style={[styles.stickKnob, { transform: [{ translateX: knob.x }, { translateY: knob.y }] }]}>
+      <Animated.View
+        style={[styles.stickKnob, { transform: [{ translateX: knobX }, { translateY: knobY }] }]}
+      >
         <Ionicons name="walk" size={20} color={COLORS.white} />
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -3982,9 +4665,10 @@ function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
             accessibilityLabel="Remove the uploaded plan"
             onPress={onClear}
             hitSlop={LAYOUT.hitSlop}
-            style={({ pressed }) => pressed && styles.pressedSurface}
+            android_ripple={{ color: "rgba(30,36,31,0.14)", borderless: true }}
+            style={({ pressed }) => [styles.sourceBarClear, pressed && styles.pressedSurface]}
           >
-            <Ionicons name="close-circle" size={18} color={COLORS.textTertiary} />
+            <Ionicons name="close" size={17} color={COLORS.textSecondary} />
           </Pressable>
         )}
       </View>
@@ -4431,17 +5115,11 @@ const styles = StyleSheet.create({
   headerButtonSaved: { backgroundColor: COLORS.successSoft, borderColor: COLORS.successSoft },
   headerCopy: { flex: 1, minWidth: 0, gap: 1 },
   headerEyebrow: { ...TYPE.caption, color: COLORS.textTertiary },
-  headerDivider: {
-    height: 1,
-    marginTop: SPACING.sm,
-    marginHorizontal: -SPACING.base,
-    backgroundColor: COLORS.brand200,
-  },
   stageBar: {
     marginHorizontal: -SPACING.base,
     paddingHorizontal: SPACING.base,
-    paddingTop: SPACING.sm,
-    paddingBottom: SPACING.sm,
+    paddingTop: SPACING.base,
+    paddingBottom: SPACING.md,
   },
   stageBarRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   stageBarMark: {
@@ -4623,18 +5301,32 @@ const styles = StyleSheet.create({
   // walkthrough overlay on the last step all line up with each other.
   body: { paddingHorizontal: SPACING.base, paddingTop: SPACING.sm, paddingBottom: SPACING.xxxl },
 
+  // Padded on all four sides. It used to set a horizontal padding and a
+  // `minHeight` and nothing else, so its row sat pinned to the top of a taller
+  // box with the dead space underneath, and the error line — the one thing on
+  // this bar that has to be read — ran flush into the bottom border.
   sourceBar: {
-    marginBottom: SPACING.md, paddingHorizontal: SPACING.sm, minHeight: ms(40),
+    marginBottom: SPACING.md,
+    paddingHorizontal: SPACING.sm, paddingVertical: SPACING.sm,
+    justifyContent: "center",
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
   sourceBarRow: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   sourceBarTitle: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
   sourceBarButton: {
-    paddingHorizontal: SPACING.md, height: ms(32), justifyContent: "center",
+    paddingHorizontal: SPACING.md, height: ms(36), justifyContent: "center",
     borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryTint,
   },
   sourceBarButtonText: { ...TYPE.caption, color: COLORS.primaryDark },
+  // The same 36pt square the rest of the flow gives an icon-only control. It
+  // was a bare 18pt glyph with no surface, sitting next to a filled button —
+  // half the size of every other target on the step, and the one that throws
+  // away an uploaded plan.
+  sourceBarClear: {
+    width: ms(36), height: ms(36), borderRadius: RADIUS.sm,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  },
   sourceBarError: {
     ...TYPE.caption, color: COLORS.danger, lineHeight: 17,
     marginTop: SPACING.sm, paddingTop: SPACING.sm,
@@ -4653,10 +5345,17 @@ const styles = StyleSheet.create({
   // Says why the row below it is grey, on the row itself. A disabled control
   // that does not explain itself is indistinguishable from a broken one.
   paletteGroupLocked: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
-  // Cells flex within their own group, so each row fills the card whether it
-  // holds three tools or four and no label's length can change a button's size.
-  paletteRow: { flexDirection: "row", marginHorizontal: -3 },
-  toolCell: { flex: 1, paddingHorizontal: 3 },
+  // One four-column grid, not one grid per group.
+  //
+  // Every cell used to be `flex: 1` within its own row, so the three wall tools
+  // stretched to fill the width the four shape tools shared — a third wider
+  // each, with none of the seven buttons lining up with the one above it. Two
+  // rows of the same kind of control at two different sizes reads as a layout
+  // fault before it reads as a grouping. A fixed quarter-width cell keeps the
+  // columns true and leaves the short row short, which is what says "there are
+  // three of these" without saying it.
+  paletteRow: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: -3 },
+  toolCell: { width: "25%", paddingHorizontal: 3 },
   tool: {
     height: ms(50), alignItems: "center", justifyContent: "center", gap: 3,
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
@@ -4668,9 +5367,12 @@ const styles = StyleSheet.create({
   toolLabelActive: { color: COLORS.primaryDark },
   toolLabelLocked: { color: COLORS.textTertiary },
 
+  // Two lines of copy in a 42pt box with no vertical padding put the second
+  // line against the border on a small phone.
   snapRow: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    marginTop: SPACING.sm, paddingHorizontal: SPACING.sm, minHeight: ms(42),
+    marginTop: SPACING.sm,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, minHeight: ms(48),
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
@@ -4688,6 +5390,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryTint,
     borderBottomWidth: 1, borderBottomColor: COLORS.primarySoft,
   },
+  // The hint wraps, so the icon is top-aligned with the block — and nudged down
+  // to sit on the optical centre of the first line rather than above its cap
+  // height, which is where a 14pt glyph next to 11.5/17 text lands by default.
+  canvasHintIcon: { marginTop: 1.5 },
   canvasHintText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 17 },
   canvasHintTool: { color: COLORS.primaryDark },
 
@@ -4697,7 +5403,10 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md, backgroundColor: COLORS.primaryTint,
     borderWidth: 1, borderColor: COLORS.primarySoft,
   },
-  drawingBarText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: 15 },
+  // 15pt of leading on 11.5pt type over two lines clipped descenders on
+  // Android. The caption ramp's own 16 is the floor, and this text is the only
+  // thing telling someone how to finish the room they are drawing.
+  drawingBarText: { flex: 1, ...TYPE.caption, color: COLORS.textSecondary, lineHeight: ms(16) },
   // "Finish" and "discard" 8pt apart at 32pt each: the two most consequential
   // buttons on the Draw step were also the smallest.
   drawingBarGhost: {
@@ -4711,11 +5420,15 @@ const styles = StyleSheet.create({
   drawingBarPrimaryDisabled: { opacity: 0.4 },
   drawingBarPrimaryText: { ...TYPE.caption, color: COLORS.white },
 
+  // The card the selected shape lives in: its name row, and — for an opening —
+  // its settings, inside one border instead of two.
+  selectionCard: {
+    marginTop: SPACING.sm, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+  },
   selectionBar: {
-    flexDirection: "row", alignItems: "center", gap: SPACING.md, marginTop: SPACING.sm,
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
     padding: SPACING.sm, paddingHorizontal: SPACING.md,
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.md,
-    borderWidth: 1, borderColor: COLORS.border,
   },
   selectionName: { flex: 1, ...TYPE.bodyStrong, color: COLORS.textPrimary },
   selectionAction: {
@@ -4725,8 +5438,8 @@ const styles = StyleSheet.create({
   },
   selectionActionText: { ...TYPE.caption, color: COLORS.danger },
   openingEditor: {
-    marginTop: SPACING.sm, padding: SPACING.base, borderRadius: RADIUS.lg,
-    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border,
+    paddingHorizontal: SPACING.md, paddingBottom: SPACING.md,
+    borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
   },
 
 
@@ -5201,15 +5914,6 @@ const styles = StyleSheet.create({
   },
   panelGhostText: { ...TYPE.caption, color: COLORS.textSecondary },
 
-  toggleGroup: {
-    flexDirection: "row", gap: SPACING.xs, padding: 4,
-    backgroundColor: COLORS.surfaceSunken, borderRadius: RADIUS.lg,
-  },
-  toggleOption: { flex: 1, alignItems: "center", justifyContent: "center", height: ms(38), borderRadius: RADIUS.md },
-  toggleOptionActive: { backgroundColor: COLORS.primaryDark },
-  toggleText: { ...TYPE.caption, color: COLORS.textSecondary },
-  toggleTextActive: { color: COLORS.white },
-
   // ── AI result ────────────────────────────────────────────────────────────
   // The app's sunken surface, not black. A near-black slab under an image that
   // has not arrived yet reads as a render that produced nothing.
@@ -5280,6 +5984,17 @@ const styles = StyleSheet.create({
   },
   dockPrimaryActive: { backgroundColor: COLORS.brand800 },
   dockPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  // The way back into this plan's finished pictures. Same height as the primary
+  // beside it, on the app's surface rather than its brand fill, so the two read
+  // as "look at what you have" and "make another" rather than as two primaries.
+  dockSecondary: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.xs,
+    height: ms(42), minWidth: ms(52), paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.sm, backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.border,
+  },
+  dockSecondaryActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.brand300 },
+  dockSecondaryText: { ...TYPE.bodyStrong, color: COLORS.primaryDark },
 
   // ── Sheets ───────────────────────────────────────────────────────────────
   // One shape for everything that slides up in this flow — the render brief, the
@@ -5309,6 +6024,59 @@ const styles = StyleSheet.create({
     width: ms(36), height: ms(36), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
   },
+  // ── What a render costs ──────────────────────────────────────────────────
+  // One line above the brief, in the app's own tinted-card language: an icon,
+  // the price in plain words, and — only when there is something to do about
+  // it — one action on the right.
+  costBar: {
+    flexDirection: "row", alignItems: "center", gap: SPACING.sm,
+    minHeight: ms(48), paddingLeft: SPACING.md, paddingRight: SPACING.xs,
+    marginBottom: SPACING.base, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.primarySoft,
+  },
+  costBarIncluded: { backgroundColor: COLORS.successSoft, borderColor: COLORS.successSoft },
+  costBarShort: { backgroundColor: COLORS.warningSoft, borderColor: COLORS.warningSoft },
+  costBarText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
+  costBarAction: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
+    height: ms(36), minWidth: ms(84), paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.sm, backgroundColor: COLORS.surface,
+  },
+  costBarActionText: { ...TYPE.caption, color: COLORS.primaryDark },
+
+  // ── This plan's renders ──────────────────────────────────────────────────
+  // The scroll it lives in already pulls 4pt out on each side (see
+  // `renderBriefScroll`, so a chip row can bleed to the edge), and the cell's
+  // own 4pt of padding puts it back — so the cards land exactly on the sheet's
+  // gutter, in line with the title above them.
+  galleryGrid: {
+    flexDirection: "row", flexWrap: "wrap",
+    paddingBottom: SPACING.base,
+  },
+  galleryCell: { width: "50%", paddingHorizontal: SPACING.xs, paddingBottom: SPACING.md },
+  galleryCard: {
+    borderRadius: RADIUS.md, overflow: "hidden", backgroundColor: COLORS.surface,
+    borderWidth: 1, borderColor: COLORS.borderSubtle,
+  },
+  galleryCardActive: { borderColor: COLORS.brand500, borderWidth: 2 },
+  galleryImage: { width: "100%", height: ms(104), backgroundColor: COLORS.surfaceSunken },
+  galleryCopy: { paddingHorizontal: SPACING.sm, paddingVertical: SPACING.sm, gap: 1 },
+  galleryLabel: { ...TYPE.caption, color: COLORS.textPrimary },
+  galleryMeta: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
+  galleryActions: {
+    flexDirection: "row", justifyContent: "flex-end", gap: SPACING.xs, marginTop: SPACING.xs,
+  },
+  galleryAction: {
+    width: ms(36), height: ms(36), borderRadius: RADIUS.sm,
+    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surfaceSunken,
+  },
+  galleryEmpty: {
+    alignItems: "center", justifyContent: "center", gap: SPACING.sm,
+    paddingVertical: SPACING.xxl, paddingHorizontal: SPACING.lg,
+  },
+  galleryEmptyText: { ...TYPE.small, color: COLORS.textSecondary, textAlign: "center" },
+
   renderScopeBlock: { gap: SPACING.xs },
   renderScopeValue: {
     minHeight: ms(48), flexDirection: "row", alignItems: "center", gap: SPACING.sm,
@@ -5318,7 +6086,6 @@ const styles = StyleSheet.create({
   renderScopeText: { flex: 1, ...TYPE.bodyStrong, color: COLORS.primaryDark },
   renderFieldHint: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
   renderToneBlock: { gap: SPACING.sm },
-  sheetField: { marginBottom: SPACING.base },
   sheetNoteRow: {
     flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
     marginBottom: SPACING.lg, paddingHorizontal: SPACING.xs,
@@ -5332,6 +6099,13 @@ const styles = StyleSheet.create({
   },
   sheetPrimaryBusy: { backgroundColor: COLORS.disabled },
   sheetPrimaryText: { ...TYPE.bodyStrong, color: COLORS.white },
+  // The price, on the button that charges it. Same shape the upgrade screen's
+  // primary uses, so "this button costs something" looks the same in both places.
+  sheetPrimaryPrice: {
+    paddingHorizontal: SPACING.sm, paddingVertical: 3,
+    borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.20)",
+  },
+  sheetPrimaryPriceText: { ...TYPE.caption, fontSize: 10.5, color: COLORS.white },
   sheetSecondary: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.sm,
     height: ms(48), marginTop: SPACING.sm,
@@ -5372,10 +6146,13 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
+  // The transparent border is what makes the active state below visible: it set
+  // a `borderColor` on a cell that had no `borderWidth`, so selecting one
+  // changed nothing but its fill and the row jumped by a pixel if it ever did.
   actionCell: {
-    flex: 1, minHeight: ms(40), flexDirection: "row",
+    flex: 1, minHeight: ms(44), flexDirection: "row",
     alignItems: "center", justifyContent: "center", gap: 5,
-    borderRadius: RADIUS.sm,
+    borderRadius: RADIUS.sm, borderWidth: 1, borderColor: "transparent",
   },
   actionActive: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.primarySoft },
   actionDisabled: { opacity: 0.45 },

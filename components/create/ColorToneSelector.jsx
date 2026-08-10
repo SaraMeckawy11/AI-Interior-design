@@ -12,8 +12,8 @@ import React, { useMemo, useState } from 'react';
 import styles from '../../assets/styles/create/colorTone.styles';
 import { Ionicons } from '@expo/vector-icons';
 import ColorPicker from 'react-native-wheel-color-picker';
-import namer from 'color-namer';
-import { buildPalette } from '../../lib/colorPalettes';
+
+import { buildPalette, nameOf } from '../../lib/colorPalettes';
 import COLORS from '../../constants/colors';
 
 const baseColorTones = [
@@ -148,14 +148,9 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
     }
   };
   
-  const getColorName = (hex) => {
-    try {
-      const names = namer(hex); 
-      return names.ntc[0].name; // e.g. "Tomato"
-    } catch {
-      return hex.toUpperCase(); // fallback
-    }
-  };
+  // Naming lives in lib/colorPalettes.js, where it is memoised and does not
+  // scan six colour lists per call. See the note on its import there.
+  const getColorName = (hex) => nameOf(hex);
 
   return (
     <View style={styles.formGroup}>
@@ -219,8 +214,12 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
         )}
       </View>
 
-      {/* The visible scheme always matches the number of colors sent. */}
-      {!!selectedPalette && (
+      {/* The visible scheme always matches the number of colors sent.
+          A one-color path — Exterior asks for a single facade color — has no
+          scheme to explain, so the legend is not drawn: "100% Neutral" under a
+          row of single swatches restates the swatch the user just tapped and
+          reads as a leftover from the 60/30/10 interior version. */}
+      {!!selectedPalette && normalizedColorCount > 1 && (
         <View style={styles.paletteLegend}>
           {schemeEntries(selectedPalette, normalizedColorCount).map((entry, index) => (
             <View key={entry.role} style={styles.legendItem}>

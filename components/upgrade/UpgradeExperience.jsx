@@ -123,13 +123,11 @@ export default function UpgradeExperience({
           style={styles.hero}
         >
           <View style={styles.heroOrb} />
+          {/* The eyebrow and the Active tag, and nothing else. A gradient tile
+              holding a diamond (or, on the coin tab, a plain filled circle) sat
+              in front of the eyebrow saying only "this is the paid screen" —
+              which the title, the tabs and the price footer all say already. */}
           <View style={styles.heroMetaRow}>
-            <LinearGradient
-              colors={COLORS.gradientBrandDeep}
-              style={styles.proMark}
-            >
-              <Ionicons name={buyingPlan ? 'diamond' : 'ellipse'} size={18} color={COLORS.white} />
-            </LinearGradient>
             <View style={styles.heroEyebrow}>
               <Ionicons name="sparkles" size={12} color={COLORS.primaryDark} />
               <Text style={styles.heroEyebrowText}>{heroContent.eyebrow}</Text>

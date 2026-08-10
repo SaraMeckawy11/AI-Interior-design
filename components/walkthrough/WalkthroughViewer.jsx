@@ -203,6 +203,14 @@ const WalkthroughViewer = forwardRef(function WalkthroughViewer(
         onMessage={handleMessage}
         javaScriptEnabled
         domStorageEnabled
+        /* The scene metadata is kept by the app (see lib/walkthroughSceneStore.js),
+           but the GLB is tens of megabytes and belongs in an HTTP cache, not in
+           AsyncStorage. Model URLs are content-addressed and served
+           `immutable` for a week, so reopening a plan re-reads the same file
+           from disk instead of downloading it again — as long as this is on. It
+           was only ever on by default, which is not the same as being decided. */
+        cacheEnabled
+        cacheMode="LOAD_DEFAULT"
         allowFileAccess={false}
         androidLayerType="hardware"
         scrollEnabled={false}

@@ -61,14 +61,6 @@ export default StyleSheet.create({
     justifyContent: 'space-between',
     gap: SPACING.sm,
   },
-  proMark: {
-    width: ms(36),
-    height: ms(36),
-    borderRadius: RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOW.xs,
-  },
   heroEyebrow: {
     flex: 1,
     minWidth: 0,

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   View,
   Text,
   Image,
@@ -32,9 +33,34 @@ export default function OutputScreen() {
   // it reads the insets directly.
   const insets = useSafeAreaInsets();
 
+  const screenWidth = Dimensions.get('window').width - 32;
+
   const [imageHeight, setImageHeight] = useState(240);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
+  /**
+   * Where the reveal sits, in pixels, held outside React.
+   *
+   * Dragging the slider used to call `setSliderValue` on every event, and the
+   * clipping layer's width was the string `${value * 100}%`. That is a full
+   * React render plus a percentage-to-pixels layout pass per frame, and two
+   * things went wrong with it. A percentage of the frame width lands on a
+   * fraction of a pixel at almost every position, so the rounded width flipped
+   * between two values as the finger moved — and the community slider keeps
+   * emitting tiny value changes after the finger stops, so a thumb left in the
+   * middle kept toggling it, which is the flicker. On top of that the layer
+   * carried its own `borderRadius` with `overflow: hidden`, so every one of
+   * those width changes rebuilt an Android outline clip.
+   *
+   * An `Animated.Value` writes the width straight to the native view: no
+   * render, no reconciliation, whole pixels, and one clip that never changes.
+   */
+  // Starts fully revealed, matching the slider's own initial value — otherwise
+  // the very first frame is the "before" photo under a thumb pushed to "after".
+  const split = useRef(new Animated.Value(screenWidth)).current;
+  // Kept only so the slider can be put back to "after" when the screen is
+  // reused for a different design. It is deliberately *not* written during a
+  // drag — that is the whole point of `split`.
   const [sliderValue, setSliderValue] = useState(1);
   // Whether the *generated* file has actually arrived. A design is generated on
   // the server and returned as a Cloudinary URL, so this screen opens before the
@@ -43,8 +69,6 @@ export default function OutputScreen() {
   // having handed back the original room unchanged.
   const [generatedReady, setGeneratedReady] = useState(false);
 
-  const screenWidth = Dimensions.get('window').width - 32;
-
   useEffect(() => {
     // Reset per image, not per mount: opening a second design from the
     // collection reuses this component, and without this the new one inherited
@@ -52,6 +76,7 @@ export default function OutputScreen() {
     // the wrong aspect ratio until the new file decoded.
     setGeneratedReady(false);
     setSliderValue(1);
+    split.setValue(screenWidth);
     const uri = generatedImage || image;
     if (!uri) return;
     Image.getSize(
@@ -64,7 +89,7 @@ export default function OutputScreen() {
       // user is looking at; the 4:3 fallback below keeps the layout sane.
       () => setImageHeight(screenWidth * 0.75),
     );
-  }, [generatedImage, image, screenWidth]);
+  }, [generatedImage, image, screenWidth, split]);
 
   const handleShare = async () => {
     if (!generatedImage) return;
@@ -161,23 +186,36 @@ export default function OutputScreen() {
       >
         <Text style={styles.title}>Your Design</Text>
 
-        {/* Image Compare */}
-        <View style={{ width: screenWidth, height: imageHeight, marginVertical: 16 }}>
+        {/* Image Compare
+            The rounding and the clipping live on this wrapper, which never
+            changes size. They used to be on the sliding layer instead, which is
+            most of why it flickered — see `split` above. */}
+        <View
+          style={{
+            width: screenWidth,
+            height: imageHeight,
+            marginVertical: 16,
+            borderRadius: 12,
+            overflow: 'hidden',
+          }}
+        >
           <Image
             source={{ uri: image }}
-            style={{ width: '100%', height: '100%', borderRadius: 12 }}
+            style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
           />
 
-          <View
+          {/* The "after" picture, revealed left-to-right. The inner image keeps
+              the full frame width so the two halves line up at every position
+              instead of the design rescaling as the reveal narrows. */}
+          <Animated.View
             style={{
-              width: `${sliderValue * 100}%`,
-              overflow: 'hidden',
               position: 'absolute',
               top: 0,
               left: 0,
-              height: '100%',
-              borderRadius: 12,
+              bottom: 0,
+              width: split,
+              overflow: 'hidden',
             }}
           >
             <Image
@@ -188,13 +226,36 @@ export default function OutputScreen() {
               onLoad={() => setGeneratedReady(true)}
               onError={() => setGeneratedReady(true)}
             />
-          </View>
+          </Animated.View>
+
+          {/* The seam, so the split is a visible edge rather than something you
+              infer from where the picture changes — and so the clip's own edge
+              always has a drawn line over it. */}
+          {generatedReady && (
+            <Animated.View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: -1,
+                width: 2,
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                // Faded out at either end, where there is no longer a split to
+                // mark — done by interpolating the same animated value rather
+                // than by reading it back into React.
+                opacity: split.interpolate({
+                  inputRange: [0, 3, Math.max(4, screenWidth - 3), Math.max(5, screenWidth)],
+                  outputRange: [0, 1, 1, 0],
+                  extrapolate: 'clamp',
+                }),
+                transform: [{ translateX: split }],
+              }}
+            />
+          )}
 
           {/* Held over the compare view until the design is really on screen,
-              so the wait is legible as a wait. The inner image is also pinned to
-              the full screen width rather than 100% of its clipping window —
-              otherwise every slider position rescaled the "after" picture, and
-              the two halves of a comparison never lined up. */}
+              so the wait is legible as a wait. */}
           {!generatedReady && (
             <View
               style={{
@@ -221,7 +282,14 @@ export default function OutputScreen() {
             minimumValue={0}
             maximumValue={1}
             value={sliderValue}
-            onValueChange={setSliderValue}
+            // Straight to the native view during the drag, and to state only
+            // once the finger lifts. Setting state here instead is what made
+            // every frame a React render.
+            onValueChange={(value) => split.setValue(Math.round(value * screenWidth))}
+            onSlidingComplete={(value) => {
+              split.setValue(Math.round(value * screenWidth));
+              setSliderValue(value);
+            }}
             disabled={!generatedReady}
             minimumTrackTintColor={COLORS.primaryDark}
             maximumTrackTintColor="#d0d0d0"

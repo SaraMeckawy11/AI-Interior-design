@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -102,6 +102,31 @@ export default function Create() {
       ),
     ).start();
   }, [cardReveals, reveal]);
+
+  /**
+   * One card, one push.
+   *
+   * This screen loads an app-open ad on mount, and a tap that lands while the
+   * ad SDK has the JS thread looks like it did nothing — so it gets repeated,
+   * and each repeat pushed another copy of the same create screen onto the
+   * stack. That is what made Back appear broken over there: it was popping
+   * correctly, onto an identical screen. The guard clears as soon as this
+   * screen is focused again, which is exactly when a second visit is genuine.
+   */
+  const navigating = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      navigating.current = false;
+    }, []),
+  );
+  const openCard = useCallback(
+    (route) => {
+      if (navigating.current) return;
+      navigating.current = true;
+      router.push(route);
+    },
+    [router],
+  );
 
   const pressScales = useRef(CARDS.map(() => new Animated.Value(1))).current;
   const pressIn = (index) =>
@@ -214,7 +239,7 @@ export default function Create() {
                   pressIn(index);
                 }}
                 onPressOut={() => pressOut(index)}
-                onPress={() => router.push(card.route)}
+                onPress={() => openCard(card.route)}
                 accessibilityRole="button"
                 accessibilityLabel={`${card.title}. ${card.description}`}
               >

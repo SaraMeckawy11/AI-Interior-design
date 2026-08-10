@@ -33,6 +33,7 @@ import CreateBannerAd from "../../components/create/CreateBannerAd";
 import { useFocusEffect } from 'expo-router';
 import { apiUrl } from '../../configs/api';
 import { FREE_DESIGNS, coinCost } from '../../constants/pricing';
+import useCreateFlowExit from '../../lib/useCreateFlowExit';
 import useRewardedCoins from '../../lib/useRewardedCoins';
 
 import { paletteForRequest } from '../../lib/colorPalettes';
@@ -53,6 +54,9 @@ const moderateScale = (size, factor = 0.5) =>
 
 export default function Interior() {
   const router = useRouter();
+  // Back means "return to Create", in one press, however many copies of this
+  // screen the hub happened to push. See lib/useCreateFlowExit.js.
+  const exitToCreate = useCreateFlowExit();
   const scrollRef = useRef(null);
   const revealFocusedInput = useCallback((nodeHandle) => {
     setTimeout(() => {
@@ -360,7 +364,13 @@ export default function Interior() {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         {/* 🔙 Floating Back Button */}
         <SafeAreaView style={styles.backButtonContainer}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backArrow} hitSlop={10}>
+        <TouchableOpacity
+          onPress={exitToCreate}
+          style={styles.backArrow}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Create"
+        >
             <Ionicons name="chevron-back" size={26} color={COLORS.textPrimary} />
         </TouchableOpacity>
         </SafeAreaView>
