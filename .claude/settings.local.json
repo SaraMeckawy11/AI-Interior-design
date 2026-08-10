@@ -8,7 +8,12 @@
       "Bash(git pull:*)",
       "Bash(git stash:*)",
       "Bash(ls -la \"D:/App_Development/Livinai\" 2>/dev/null | head -50; echo \"---PARENT---\"; ls -la \"D:/App_Development\" 2>/dev/null | head -50)",
-      "Bash(ls -la /c/Sara/Livinai && echo \"---WEB---\" && ls -la /c/Sara/Livinai_web)"
+      "Bash(ls -la /c/Sara/Livinai && echo \"---WEB---\" && ls -la /c/Sara/Livinai_web)",
+      "Read(//c/Sara/**)",
+      "Read(//c/Users/sara1/**)",
+      "PowerShell(Test-Path \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"; Test-Path \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\emulator\\\\emulator.exe\"; $env:ANDROID_HOME; $env:ANDROID_SDK_ROOT)",
+      "Bash(npx eslint *)",
+      "Bash(grep -n \"const \\\\[notice, setNotice\\\\]\\\\|const \\\\[styleExpanded\\\\|const { *$\\\\|clearMessage: clearAdMessage\" app/create/walkthrough.jsx)"
     ]
   }
 }
