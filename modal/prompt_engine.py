@@ -25,51 +25,51 @@ from __future__ import annotations
 STYLE_SPECS = {
     "modern": {
         "interior": "sculptural furniture, warm oak, honed travertine, boucle, linen, restrained brushed brass",
-        "exterior": "warm limestone cladding, timber accents, charcoal metal detailing, integrated lighting, restrained planting",
+        "exterior": "clean volumes, large framed openings, warm limestone, timber fins, charcoal metal, restrained planting",
     },
     "japandi": {
         "interior": "low natural-linen furniture, pale oak, dark timber accents, handmade ceramics, paper lighting, quiet negative space",
-        "exterior": "pale mineral render, vertical timber accents, dark frame finishes, stone paths, sculptural planting",
+        "exterior": "calm asymmetrical volumes, pale mineral render, vertical timber, dark slim frames, stone paths, sculptural planting",
     },
     "scandinavian": {
         "interior": "clean-lined furniture, pale matte oak, wool, linen, soft white walls, simple black details",
-        "exterior": "pale timber cladding, warm white render, black frame finishes, native low-maintenance planting",
+        "exterior": "simple pitched or crisp volumes, pale timber, warm white render, black frames, native low-maintenance planting",
     },
     "minimalist": {
         "interior": "low straight-lined furniture, seamless pale oak, smooth plaster, tonal textiles, concealed storage, very few objects",
-        "exterior": "seamless mineral finishes, concealed surface details, a limited material palette, precise linear landscaping",
+        "exterior": "monolithic volumes, seamless mineral surfaces, concealed details, limited material palette, precise linear landscaping",
     },
     "modern minimalist": {
         "interior": "low straight-lined furniture, seamless pale oak, smooth plaster, tonal textiles, concealed storage, very few objects",
-        "exterior": "seamless mineral finishes, concealed surface details, a limited material palette, precise linear landscaping",
+        "exterior": "monolithic volumes, seamless mineral surfaces, concealed details, limited material palette, precise linear landscaping",
     },
     "classic": {
         "interior": "tailored furniture, herringbone oak, marble, silk and velvet, subtle moulding, antique brass",
-        "exterior": "natural limestone, restrained applied trim within existing profiles, dark bronze frame finishes, clipped formal planting",
+        "exterior": "balanced classical proportions, natural limestone, refined cornices, dark bronze frames, clipped formal planting",
     },
     "traditional": {
         "interior": "tailored furniture, herringbone oak, marble, silk and velvet, subtle moulding, antique brass",
-        "exterior": "natural limestone, restrained applied trim within existing profiles, dark bronze frame finishes, clipped formal planting",
+        "exterior": "balanced classical proportions, natural limestone, refined cornices, dark bronze frames, clipped formal planting",
     },
     "industrial": {
         "interior": "cognac leather, reclaimed timber, blackened steel, textured plaster, aged brass, worn neutral textiles",
-        "exterior": "dark steel detailing, brick or board-formed concrete finishes, weathered timber, architectural grasses",
+        "exterior": "dark steel frames, brick or board-formed concrete, large industrial glazing, weathered timber, architectural grasses",
     },
     "bohemian": {
         "interior": "relaxed low seating, rattan, layered natural textiles, jute, terracotta, vintage objects, abundant plants",
-        "exterior": "limewashed surfaces, handmade tile, timber finish accents, terracotta, layered drought-tolerant planting",
+        "exterior": "limewashed surfaces, handmade tile, timber pergolas, woven shade, terracotta, layered drought-tolerant planting",
     },
     "mediterranean": {
         "interior": "limewashed plaster, warm stone, aged oak, linen, handmade tile, softly curved forms, aged bronze",
-        "exterior": "warm limewashed masonry, natural stone, timber, terracotta, aged metal details, olive planting",
+        "exterior": "warm limewashed masonry, natural stone, arched accents only where architecture allows, timber, terracotta, olive planting",
     },
     "mid-century modern": {
         "interior": "walnut casegoods, tapered legs, low-slung seating, wool boucle, ceramic and glass accents, warm ochre and olive",
-        "exterior": "warm timber cladding, post-and-beam finish details only where already present, gravel and architectural grasses",
+        "exterior": "low horizontal volumes, post-and-beam expression, warm timber cladding, clerestory glazing, gravel and grasses",
     },
     "contemporary": {
         "interior": "soft-edged furniture, layered neutral textiles, warm timber, matte stone, sculptural lighting",
-        "exterior": "mixed render and timber finishes, slim dark frame finishes, integrated lighting, structured contemporary planting",
+        "exterior": "crisp contemporary massing, mixed render and timber, slim dark frames, structured contemporary planting",
     },
 }
 
@@ -95,7 +95,7 @@ ROOM_PROGRAMS = {
 }
 
 EXTERIOR_PROGRAMS = {
-    "building": "refinish the existing facade hierarchy, entrance, openings, base and roofline with coherent material transitions and integrated exterior light",
+    "building": "resolve the full facade hierarchy, entrance, openings, base, roofline, material transitions and integrated exterior light",
     "balcony": "weather-safe floor finish, compact seating, privacy where useful, planters that do not block doors or drainage",
     "terrace": "outdoor lounge and dining zones, shade structure where structurally plausible, weather-safe lighting and planting",
     "garden": "clear paths, layered planting, a focal seating moment, practical edges and believable local horticulture",
@@ -191,34 +191,15 @@ def build_prompt(
     program = _program_text(space_type, mode)
     creativity = max(10, min(80, int(creativity or 42)))
 
-    if mode == "exterior" and preserve_geometry:
-        geometry = (
-            "THE SOURCE PHOTO IS THE IMMUTABLE GEOMETRY MAP. Keep the building pixel-aligned to it: "
-            "preserve the exact footprint, silhouette, massing, story count, floor-to-floor heights, "
-            "facade width, roof type and pitch, ridges, eaves, parapets, setbacks and projections. "
-            "Preserve the facade bay rhythm and the exact count, position, size, aspect ratio, sill and "
-            "head height of every window, door and opening. Preserve the entrance, stairs, balconies, "
-            "railings, columns, beams, slabs, boundary walls, driveway and all visible neighbouring context. "
-            "Keep the original camera position, crop, lens, perspective, horizon, vanishing points and "
-            "foreground occlusion. Do not add, remove, move, enlarge, shrink, cover or merge any "
-            "architectural element or change its type; do not add a floor, extension, canopy, balcony, arch or new opening."
-        )
-    elif mode == "exterior":
-        geometry = (
-            "Keep the source footprint, silhouette, massing, story count, roof form, facade grid, opening "
-            "locations and camera perspective. Allow only shallow, buildable finish-level detailing inside "
-            "the existing facade profile; never add floors, extensions, balconies or openings."
-        )
-    else:
-        geometry = (
-            "KEEP THE INPUT GEOMETRY EXACT: preserve every wall, window, door, opening, column, "
-            "ceiling or roof edge, level, sill height, camera position, focal length and perspective. "
-            "Never add, remove, move, resize, cover or convert an architectural opening. "
-            "Change finishes and movable design elements only."
-            if preserve_geometry
-            else "Keep the same camera and recognisable structure. Small plausible finish-level "
-            "architectural refinements are allowed, but do not invent impossible structure."
-        )
+    geometry = (
+        "KEEP THE INPUT GEOMETRY EXACT: preserve every wall, window, door, opening, column, "
+        "ceiling or roof edge, level, sill height, camera position, focal length and perspective. "
+        "Never add, remove, move, resize, cover or convert an architectural opening. "
+        "Change finishes and movable design elements only."
+        if preserve_geometry
+        else "Keep the same camera and recognisable structure. Small plausible finish-level "
+        "architectural refinements are allowed, but do not invent impossible structure."
+    )
     freedom = (
         "highly restrained and spatially conservative"
         if creativity < 30
@@ -226,11 +207,7 @@ def build_prompt(
         if creativity < 60
         else "expressive but architecturally credible"
     )
-    personal = (
-        f"\nCLIENT NOTE (apply only when compatible with the immutable source geometry): {custom_prompt.strip()}"
-        if (custom_prompt or "").strip()
-        else ""
-    )
+    personal = f"\nCLIENT NOTE: {custom_prompt.strip()}" if (custom_prompt or "").strip() else ""
 
     if mode == "interior":
         placement = (
@@ -243,13 +220,6 @@ def build_prompt(
             "Keep entrances, windows, vehicle paths, drainage, steps and circulation fully usable. "
             "Planting must not cover architecture. All outdoor furniture, finishes and lights must be "
             "weather-credible and correctly scaled."
-        )
-        scope = (
-            "PERMITTED CHANGES ONLY: repaint or reclad existing opaque surfaces; change material, colour, "
-            "frame finish and exterior fixtures without changing their geometry; add surface-mounted lighting; "
-            "and refine paving, loose furniture and planting where they do not hide the facade. Treat the style "
-            "vocabulary purely as a finish palette, never as permission to remodel the building. If any design "
-            "instruction or client note conflicts with the source layout, follow the source image."
         )
         finish = "credible daylight, accurate facade shadows, realistic sky reflections, 35mm architectural photography"
 
@@ -264,7 +234,6 @@ DESIGN DIRECTION:
 - {_color_clause(color_tone, color_palette)}
 - Lighting: {lighting}. Preserve believable light direction from the source photograph.
 - Creative character: {freedom}.
-{f'- Exterior edit scope: {scope}' if mode == 'exterior' else ''}
 
 PLACEMENT AND QUALITY:
 - {placement}
