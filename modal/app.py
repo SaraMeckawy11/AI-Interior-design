@@ -384,10 +384,21 @@ class GenKlein:
                 pass
 
     @staticmethod
-    def _target_size(image):
-        """FLUX likes multiples of 16; keep the source aspect, cap the long edge."""
-        landscape = image.width >= image.height
-        return (1024, 768) if landscape else (768, 1024)
+    def _target_size(image, preserve_aspect=False):
+        """Return FLUX-compatible dimensions without cropping the source.
+
+        Exterior photos often use wide architectural framing. Forcing every
+        one into 4:3 stretches its facade grid before the model sees it, which
+        no prompt can undo. Keep that source ratio (to the nearest 16 px) for
+        exteriors; retain the established 4:3 delivery size for interiors.
+        """
+        if not preserve_aspect:
+            return (1024, 768) if image.width >= image.height else (768, 1024)
+
+        scale = 1024 / max(image.width, image.height)
+        width = max(16, round(image.width * scale / 16) * 16)
+        height = max(16, round(image.height * scale / 16) * 16)
+        return width, height
 
     @modal.method()
     def run(
@@ -409,9 +420,11 @@ class GenKlein:
         source = ImageOps.exif_transpose(
             Image.open(io.BytesIO(_decode_base64_image_bytes(image)))
         ).convert("RGB")
-        width, height = self._target_size(source)
-
         resolved_mode = resolve_mode(mode, room_type)
+        width, height = self._target_size(
+            source,
+            preserve_aspect=resolved_mode == "exterior",
+        )
         prompt = build_prompt(
             mode=resolved_mode,
             space_type=room_type or ("Building" if resolved_mode == "exterior" else "Living Room"),
@@ -1104,7 +1117,7 @@ def health():
     return {
         "status": "ok",
         "engines": {"default": FLUX_MODEL_ID, "guided": "Lykon/dreamshaper-8 + depth/seg ControlNet"},
-        "promptEngine": "gen-klein-v1",
+        "promptEngine": "gen-klein-v2-exterior-geometry-lock",
     }
 
 
