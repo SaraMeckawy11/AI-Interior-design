@@ -6,12 +6,22 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Android Gradle Plugin
-        classpath("com.android.tools.build:gradle:8.1.0")
-        // Kotlin Gradle Plugin
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10")
-        // React Native Gradle Plugin
-        classpath("com.facebook.react:react-native-gradle-plugin:0.72.0")
+        // Deliberately version-less.
+        //
+        // These used to be pinned to AGP 8.1.0, Kotlin 1.9.10 and react-native-gradle-plugin
+        // 0.72.0 — all left over from an older React Native. None of them were what the build
+        // actually used: settings.gradle includes @react-native/gradle-plugin and Expo's gradle
+        // plugins as composite builds, those carry AGP 8.8.2 and Kotlin 2.0.21 (react-native
+        // 0.79.6 / Expo SDK 53), and Gradle's highest-version-wins conflict resolution quietly
+        // dropped the pins here on the floor.
+        //
+        // The stale numbers mattered anyway: AGP 8.1 predates compileSdk 36, so anyone reading
+        // this file would conclude the Android 16 target could not build. Letting the composite
+        // builds name the versions keeps the file honest and keeps the toolchain in step with
+        // whatever react-native the package.json resolves to.
+        classpath("com.android.tools.build:gradle")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("com.facebook.react:react-native-gradle-plugin")
     }
 }
 

@@ -1,0 +1,64 @@
+# Dependencies and local Expo state
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build outputs and local signing credentials
+.kotlin/
+**/build/
+/android/.gradle
+/android/build
+/android/app/build
+/android/.cxx
+/android/app/.cxx
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+credentials.json
+credentials/
+android/keystore.properties
+
+# Environment and local tooling files
+.env
+.env*.local
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+
+# Server-side services and assets are deployed separately and are not used by
+# the Expo Android build.
+backend/
+interio/
+interiorAI/
+Interior/
+Interior.worktrees/
+modal/
+render.yaml
+.dockerignore
+DEPLOYMENT.md
+livinai-privacy-policy.docx
+livinai-privacy-policy.pdf
+
+# Editor and assistant metadata
+.git/
+/.git
+.vscode/
+.claude/
+.agents/
+.codex/
+.eas-submit.*.log
+/.eas-archive-inspect-*
+
+# Legacy/reset-project output
+app-example/
