@@ -48,6 +48,25 @@ export const COIN_PACKS = {
 };
 
 /**
+ * Which pack a store product identifier refers to, or null for anything else.
+ *
+ * The app names a pack by its own id; RevenueCat's webhook names it by the Play
+ * product, and Play now appends a purchase option — `livinai_coins_10:10-coins`
+ * for a product whose option is named `10-coins`, the same `product:option`
+ * shape subscriptions use. Everything before the colon is the product, so that
+ * is what gets compared. Anything unrecognised returns null and is left alone:
+ * a subscription arriving here must not be mistaken for coins.
+ */
+export function packForProductId(productId) {
+  if (!productId) return null;
+  const base = String(productId).split(":")[0];
+  const found = Object.entries(COIN_PACKS).find(
+    ([, pack]) => pack.productId === base,
+  );
+  return found ? { id: found[0], ...found[1] } : null;
+}
+
+/**
  * How many rewarded ads one account may cash in per day.
  *
  * Not a punishment — a floor under the ad network's own fraud checks. Watching

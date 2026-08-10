@@ -11,40 +11,13 @@ import {
   FREE_DESIGNS,
   MAX_AD_COINS_PER_DAY,
 } from '../config/pricing.js';
+import { grantCoins, purchaseReference } from '../services/coins.js';
+import {
+  hasNonSubscriptionPurchase,
+  sameStoreProduct,
+} from '../services/revenuecat.js';
 
 const router = express.Router();
-
-/** Duplicate-key, from either the unique index or a racing upsert. */
-const isDuplicate = (error) => error?.code === 11000;
-
-/**
- * Add coins to an account exactly once.
- *
- * The grant row is written *first*. If it collides with the unique index this
- * is a replay — the same ad reported twice, or a purchase the app retried after
- * a dropped response — and the balance is returned untouched rather than
- * incremented a second time. That ordering is the whole mechanism: crediting
- * first and recording afterwards leaves a window in which a crash pays twice.
- */
-async function grantCoins(userId, { kind, reference, coins, meta }) {
-  try {
-    await CoinGrant.create({ user: userId, kind, reference, coins, meta });
-  } catch (error) {
-    if (isDuplicate(error)) {
-      const user = await User.findById(userId).select('adCoins adsWatched');
-      return { credited: false, adCoins: user?.adCoins || 0, adsWatched: user?.adsWatched || 0 };
-    }
-    throw error;
-  }
-
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $inc: { adCoins: coins, ...(kind === 'ad' ? { adsWatched: 1 } : {}) } },
-    { new: true },
-  ).select('adCoins adsWatched');
-
-  return { credited: true, adCoins: user?.adCoins || 0, adsWatched: user?.adsWatched || 0 };
-}
 
 // ✅ GET /api/users/me
 router.get('/me', isAuthenticated, async (req, res) => {
@@ -56,8 +29,15 @@ router.get('/me', isAuthenticated, async (req, res) => {
       user: user._id,
     }).sort({ createdAt: -1 });
 
-    const isExpired = latestOrder ? new Date(latestOrder.endDate) < new Date() : true;
-    const isSubscribed = latestOrder && !isExpired;
+    const isExpired = latestOrder?.endDate
+      ? new Date(latestOrder.endDate) <= new Date()
+      : true;
+    const isSubscribed = Boolean(
+      latestOrder
+      && latestOrder.paymentStatus === 'paid'
+      && latestOrder.isActive
+      && !isExpired,
+    );
     const autoRenew = latestOrder?.autoRenew || false;
     const subscriptionEndDate = latestOrder?.endDate || null;
 
@@ -170,10 +150,10 @@ router.post('/watch-ad', isAuthenticated, async (req, res) => {
  * decides what that is worth. The transaction id is the idempotency key, so the
  * app is free to retry after a lost response, and a replayed receipt pays once.
  *
- * This trusts that the purchase itself succeeded, because the store told the app
- * so. The stronger check is the RevenueCat webhook in `orderRoutes`; if coin
- * packs start being abused, this endpoint is where to add a server-side receipt
- * validation call before the grant.
+ * RevenueCat is queried before crediting. Without that check, any authenticated
+ * caller could invent a transaction id and award itself any pack in this table.
+ * The webhook remains the recovery path if this request arrives before
+ * RevenueCat's customer record has caught up.
  */
 router.post('/coins/purchase', isAuthenticated, async (req, res) => {
   try {
@@ -186,10 +166,31 @@ router.post('/coins/purchase', isAuthenticated, async (req, res) => {
     if (!transactionId) {
       return res.status(400).json({ success: false, message: 'Missing purchase reference.' });
     }
+    if (productId && !sameStoreProduct(productId, pack.productId)) {
+      return res.status(400).json({ success: false, message: 'The product does not match this pack.' });
+    }
+
+    const verified = await hasNonSubscriptionPurchase(
+      req.user._id,
+      productId || pack.productId,
+      transactionId,
+    );
+
+    if (!verified) {
+      const user = await User.findById(req.user._id).select('adCoins');
+      return res.status(202).json({
+        success: true,
+        pending: true,
+        adCoins: user?.adCoins || 0,
+        credited: false,
+        coinsAwarded: 0,
+        message: 'Purchase received. Your coins will appear as soon as the store confirms it.',
+      });
+    }
 
     const result = await grantCoins(req.user._id, {
       kind: 'purchase',
-      reference: `purchase-${String(transactionId).slice(0, 110)}`,
+      reference: purchaseReference(transactionId),
       coins: pack.coins,
       meta: { packId, productId: productId || pack.productId, priceUsd: pack.priceUsd },
     });
@@ -205,7 +206,13 @@ router.post('/coins/purchase', isAuthenticated, async (req, res) => {
     });
   } catch (err) {
     console.error('/api/users/coins/purchase error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    const unavailable = err?.code === 'REVENUECAT_NOT_CONFIGURED' || err?.response?.status >= 500;
+    res.status(unavailable ? 503 : 500).json({
+      success: false,
+      message: unavailable
+        ? 'Store verification is temporarily unavailable. If you were charged, your coins will be added automatically.'
+        : 'Server error',
+    });
   }
 });
 

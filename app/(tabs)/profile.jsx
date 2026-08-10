@@ -87,8 +87,8 @@ export default function Profile() {
             <View style={styles.familyCopy}>
               <Text style={styles.familyTitle}>You&apos;re part of the Livinai family</Text>
               <Text style={styles.familyText}>
-                Thank you for supporting Livinai. Every design, walkthrough and render is yours,
-                unlimited, for as long as you are with us.
+                Being part of our family gives you exclusive access! Keep creating and designing
+                freely.
               </Text>
             </View>
           </View>

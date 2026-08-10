@@ -1,8 +1,12 @@
 import express from "express";
+import mongoose from "mongoose";
 import Order from "../models/Order.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import axios from "axios";
+import { packForProductId } from "../config/pricing.js";
+import { grantCoins, purchaseReference, refundReference } from "../services/coins.js";
+import { getActiveSubscription } from "../services/revenuecat.js";
 
 const router = express.Router();
 
@@ -10,81 +14,103 @@ const router = express.Router();
 const REVENUECAT_API_KEY = process.env.REVENUECAT_API_KEY;
 const REVENUECAT_URL = "https://api.revenuecat.com/v1/subscribers";
 
+const billingCycleForProduct = (productId) => {
+  const id = String(productId || "").toLowerCase();
+  if (id.includes("year")) return "yearly";
+  if (id.includes("week")) return "weekly";
+  return "monthly";
+};
+
+async function syncSubscriptionFlag(userId) {
+  const active = await Order.exists({
+    user: userId,
+    paymentStatus: "paid",
+    isActive: true,
+    endDate: { $gt: new Date() },
+  });
+  await User.findByIdAndUpdate(userId, { isSubscribed: Boolean(active) });
+}
+
+async function orderForEvent(userId, event, { allowProductFallback = true } = {}) {
+  if (event.transaction_id) {
+    const byTransaction = await Order.findOne({
+      user: userId,
+      transactionId: event.transaction_id,
+    });
+    if (byTransaction) return byTransaction;
+  }
+
+  if (allowProductFallback && event.product_id) {
+    const byProduct = await Order.findOne({
+      user: userId,
+      plan: event.product_id,
+    }).sort({ createdAt: -1 });
+    if (byProduct) return byProduct;
+  }
+
+  return null;
+}
+
 /**
  * CREATE or UPSERT subscription
  */
 router.post("/", isAuthenticated, async (req, res) => {
   try {
-    const {
-      plan,
-      price,
-      billingCycle,
-      startDate,
-      endDate,
-      paymentStatus,
-      transactionId,
-      entitlementId,
-      autoRenew = true,
-    } = req.body;
+    const { productId, price, transactionId } = req.body || {};
 
-    // 1️⃣ Deactivate all previous active orders for this user
-    await Order.updateMany(
-      { user: req.user._id, isActive: true },
-      { $set: { isActive: false } }
-    );
-
-    // 2️⃣ Create a brand new order for every transaction
-    const newOrder = new Order({
-      user: req.user._id,
-      plan,
-      price,
-      billingCycle,
-      paymentStatus: paymentStatus || "paid",
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      transactionId: transactionId || `tx_${Date.now()}`, // ensure unique ID
-      entitlementId,
-      autoRenew,
-      isActive: paymentStatus === "paid",
-    });
-
-    const order = await newOrder.save();
-
-    // 3️⃣ Update user subscription flag
-    await User.findByIdAndUpdate(req.user._id, {
-      isSubscribed: paymentStatus === "paid",
-    });
-
-    // 4️⃣ Sync to RevenueCat
-    if (entitlementId && transactionId) {
-      try {
-        await axios.post(
-          `${REVENUECAT_URL}/${req.user._id}`,
-          {
-            subscriber_attributes: {
-              plan: { value: plan },
-              transaction_id: { value: transactionId },
-              entitlement_id: { value: entitlementId },
-              auto_renew: { value: autoRenew },
-              payment_status: { value: paymentStatus },
-            },
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${REVENUECAT_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-      } catch (err) {
-        console.error("RevenueCat sync failed:", err.message);
-      }
+    if (!productId || !transactionId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing store product or transaction reference.",
+      });
     }
+
+    const verified = await getActiveSubscription(req.user._id, productId, transactionId);
+    if (!verified) {
+      return res.status(202).json({
+        success: true,
+        pending: true,
+        message: "Purchase received. Pro will activate as soon as the store confirms it.",
+      });
+    }
+
+    let order = await Order.findOne({
+      user: req.user._id,
+      transactionId: verified.transactionId,
+    });
+    if (!order) {
+      await Order.updateMany(
+        { user: req.user._id, isActive: true },
+        { $set: { isActive: false } },
+      );
+      order = new Order({ user: req.user._id });
+    }
+
+    order.plan = verified.productId;
+    order.price = Number.isFinite(Number(price)) ? Number(price) : 0;
+    order.billingCycle = billingCycleForProduct(verified.productId);
+    order.paymentStatus = "paid";
+    order.startDate = new Date(verified.purchaseDate);
+    order.endDate = new Date(verified.expiresDate);
+    order.transactionId = verified.transactionId;
+    order.entitlementId = verified.entitlementId;
+    order.autoRenew = true;
+    order.isActive = true;
+
+    await order.save();
+    await User.findByIdAndUpdate(req.user._id, { isSubscribed: true });
 
     res.status(201).json({ success: true, order });
   } catch (err) {
     console.error("Order creation failed:", err);
-    res.status(500).json({ success: false, message: "Order creation failed." });
+    const unavailable =
+      err?.code === "REVENUECAT_NOT_CONFIGURED" || err?.response?.status >= 500;
+    res.status(unavailable ? 503 : 500).json({
+      success: false,
+      message: unavailable
+        ? "Store verification is temporarily unavailable. Pro will activate automatically if you were charged."
+        : "Order creation failed.",
+    });
   }
 });
 
@@ -231,30 +257,34 @@ router.post("/webhook", async (req, res) => {
   try {
     // Verify webhook secret
     const authHeader = req.headers.authorization;
-    if (authHeader !== `Bearer ${process.env.REVENUECAT_WEBHOOK_SECRET}`) {
+    const webhookSecret = process.env.REVENUECAT_WEBHOOK_SECRET;
+    if (!webhookSecret || authHeader !== `Bearer ${webhookSecret}`) {
       console.warn("Unauthorized RevenueCat webhook attempt:", req.headers);
       return res.status(401).json({ success: false, message: "Unauthorized webhook" });
     }
 
-    const event = req.body;
+    // RevenueCat v1 wraps purchase fields in `event`. Accept the old flat
+    // shape as well so saved dashboard test payloads keep working.
+    const event = req.body?.event || req.body;
     if (!event?.type || !event?.app_user_id) {
       console.warn("Invalid RevenueCat event payload:", event);
       return res.status(400).json({ success: false, message: "Invalid RevenueCat event" });
     }
 
-    const appUserId = event.app_user_id;
+    // RevenueCat recommends checking the original id and aliases as well as
+    // app_user_id because a purchase can move between those ids after login.
+    const customerIds = [
+      event.app_user_id,
+      event.original_app_user_id,
+      ...(Array.isArray(event.aliases) ? event.aliases : []),
+    ].filter((id) => mongoose.isObjectIdOrHexString(id));
 
-    // Ignore anonymous users
-    if (appUserId.startsWith("$RCAnonymousID:")) {
-      console.log("Received anonymous RevenueCat webhook, ignoring:", appUserId);
-      return res.status(200).json({ success: true, message: "Anonymous user ignored." });
-    }
-
-    // Find the user
-    const user = await User.findById(appUserId);
+    const user = customerIds.length
+      ? await User.findOne({ _id: { $in: customerIds } })
+      : null;
     if (!user) {
-      console.warn("RevenueCat webhook received for unknown user:", appUserId);
-      return res.status(404).json({ success: false, message: "User not found" });
+      console.warn("RevenueCat webhook received for unknown user:", event.app_user_id);
+      return res.status(200).json({ success: true, message: "Unknown user ignored." });
     }
 
     console.log("RevenueCat webhook received:", {
@@ -267,33 +297,80 @@ router.post("/webhook", async (req, res) => {
     });
 
     switch (event.type) {
+      /** A completed consumable purchase credits its pack exactly once. */
+      case "NON_RENEWING_PURCHASE": {
+        const pack = packForProductId(event.product_id);
+        if (!pack) {
+          console.warn("Non-renewing purchase of an unknown product:", event.product_id);
+          break;
+        }
+        if (!event.transaction_id) {
+          console.warn("Non-renewing purchase with no transaction id:", event.product_id);
+          break;
+        }
+
+        const result = await grantCoins(user._id, {
+          kind: "purchase",
+          reference: purchaseReference(event.transaction_id),
+          coins: pack.coins,
+          meta: { packId: pack.id, productId: event.product_id, source: "webhook" },
+        });
+
+        console.log(
+          result.credited
+            ? `Credited ${pack.coins} coins to ${user._id} from webhook.`
+            : `Coin purchase ${event.transaction_id} was already credited.`,
+        );
+        break;
+      }
+
       /**
        * INITIAL PURCHASE or RENEWAL — always create new order
        */
       case "INITIAL_PURCHASE":
       case "RENEWAL": {
-        // Deactivate previous active orders
-        await Order.updateMany(
-          { user: user._id, isActive: true },
-          { $set: { isActive: false } }
-        );
+        // A consumable must never be mistaken for a subscription and grant Pro.
+        if (packForProductId(event.product_id)) {
+          console.warn("Coin product arrived as a subscription event, ignoring:", event.product_id);
+          break;
+        }
+        if (!event.entitlement_id) {
+          console.warn("Subscription product has no entitlement, ignoring:", event.product_id);
+          break;
+        }
 
-        const newOrder = new Order({
-          user: user._id,
-          plan: event.product_id || "unknown",
-          price: 0,
-          billingCycle: event.product_id?.toLowerCase().includes("year") ? "yearly" : "weekly",
-          paymentStatus: "paid",
-          startDate: new Date(),
-          endDate: event.expiration_at_ms ? new Date(Number(event.expiration_at_ms)) : null,
-          transactionId: event.transaction_id || `tx_${Date.now()}`,
-          entitlementId: event.entitlement_id || null,
-          autoRenew: true,
-          isActive: true,
-        });
+        const endDate = event.expiration_at_ms
+          ? new Date(Number(event.expiration_at_ms))
+          : null;
+        if (!endDate || Number.isNaN(endDate.getTime())) {
+          console.warn("Subscription purchase has no valid expiration:", event.id);
+          break;
+        }
 
-        await newOrder.save();
-        await User.findByIdAndUpdate(user._id, { isSubscribed: true });
+        let order = await orderForEvent(user._id, event, { allowProductFallback: false });
+        if (!order) {
+          await Order.updateMany(
+            { user: user._id, isActive: true },
+            { $set: { isActive: false } },
+          );
+          order = new Order({ user: user._id });
+        }
+
+        order.plan = event.product_id || "unknown";
+        order.price = Number(event.price_in_purchased_currency ?? event.price ?? 0);
+        order.billingCycle = billingCycleForProduct(event.product_id);
+        order.paymentStatus = "paid";
+        order.startDate = event.purchased_at_ms
+          ? new Date(Number(event.purchased_at_ms))
+          : new Date();
+        order.endDate = endDate;
+        order.transactionId = event.transaction_id || order.transactionId || `tx_${event.id}`;
+        order.entitlementId = event.entitlement_id || null;
+        order.autoRenew = true;
+        order.isActive = endDate > new Date();
+
+        await order.save();
+        await syncSubscriptionFlag(user._id);
 
         console.log("Created new order for user:", user._id);
         break;
@@ -304,7 +381,32 @@ router.post("/webhook", async (req, res) => {
        */
       case "CANCELLATION":
       case "UNCANCELLATION": {
-        const latestOrder = await Order.findOne({ user: user._id }).sort({ createdAt: -1 });
+        // RevenueCat also uses CANCELLATION when a one-time purchase is
+        // refunded. Reverse the pack once without touching subscription state.
+        const pack = packForProductId(event.product_id);
+        if (pack) {
+          if (event.type === "CANCELLATION" && event.transaction_id) {
+            const result = await grantCoins(user._id, {
+              kind: "refund",
+              reference: refundReference(event.transaction_id),
+              coins: -pack.coins,
+              meta: {
+                packId: pack.id,
+                productId: event.product_id,
+                reason: event.cancel_reason || "store_refund",
+                source: "webhook",
+              },
+            });
+            console.log(
+              result.credited
+                ? `Removed ${pack.coins} coins from ${user._id} after a refund.`
+                : `Refund ${event.transaction_id} was already applied.`,
+            );
+          }
+          break;
+        }
+
+        const latestOrder = await orderForEvent(user._id, event);
 
         if (latestOrder) {
           if (event.type === "CANCELLATION") {
@@ -317,10 +419,11 @@ router.post("/webhook", async (req, res) => {
               latestOrder.autoRenew = true;
           }
           await latestOrder.save();
+        } else {
+          console.warn("No matching subscription order for:", event.type, event.product_id);
         }
 
-        const isExpired = new Date(latestOrder.endDate) < new Date();
-        await User.findByIdAndUpdate(user._id, { isSubscribed: latestOrder.isActive && !isExpired });
+        await syncSubscriptionFlag(user._id);
 
         break;
       }
@@ -329,7 +432,7 @@ router.post("/webhook", async (req, res) => {
        * EXPIRATION — mark latest order inactive
        */
       case "EXPIRATION": {
-        const latestOrder = await Order.findOne({ user: user._id }).sort({ createdAt: -1 });
+        const latestOrder = await orderForEvent(user._id, event);
 
         if (latestOrder) {
           latestOrder.isActive = false;
@@ -337,7 +440,8 @@ router.post("/webhook", async (req, res) => {
           await latestOrder.save();
         }
 
-        await User.findByIdAndUpdate(user._id, { isSubscribed: false });
+        // An old weekly expiration must not revoke a newer monthly/yearly plan.
+        await syncSubscriptionFlag(user._id);
         console.log("Subscription expired for user:", user._id);
         break;
       }

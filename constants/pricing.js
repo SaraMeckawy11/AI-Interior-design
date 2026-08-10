@@ -85,6 +85,19 @@ export const COIN_PACKS = [
   },
 ];
 
+/**
+ * RevenueCat may expose a Google product as either `product` or
+ * `product:base-plan`. One-time purchase options are moving through the same
+ * transition, so compare the full identifier first and then the stable Play
+ * product id before the colon.
+ */
+export const sameStoreProduct = (left, right) => {
+  if (!left || !right) return false;
+  const a = String(left);
+  const b = String(right);
+  return a === b || a.split(':')[0] === b.split(':')[0];
+};
+
 /** Per-coin saving against the smallest pack, as a whole percentage. */
 export const packSaving = (pack) => {
   const base = COIN_PACKS[0];
@@ -106,7 +119,7 @@ export const PLANS = [
   {
     id: "monthly",
     packageType: "MONTHLY",
-    productId: "livinai_pro_monthly",
+    productId: "livinai_pro_monthly:monthly",
     title: "Monthly",
     priceUsd: 9.99,
     period: "month",
@@ -115,7 +128,7 @@ export const PLANS = [
   {
     id: "yearly",
     packageType: "ANNUAL",
-    productId: "livinai_pro_yearly",
+    productId: "livinai_yearly:default",
     title: "Yearly",
     priceUsd: 59.99,
     period: "year",

@@ -18,7 +18,9 @@ const orderSchema = new mongoose.Schema(
     },
     billingCycle: {
       type: String,
-      enum: ["weekly", "yearly"],
+      // `weekly` remains valid for existing subscribers even though it is no
+      // longer offered to new customers.
+      enum: ["weekly", "monthly", "yearly"],
       required: true,
     },
     paymentStatus: {
