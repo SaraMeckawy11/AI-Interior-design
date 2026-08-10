@@ -9,6 +9,7 @@ const moderateScale = (size, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
 const styles = StyleSheet.create({
+  keyboardAvoider: { flex: 1 },
   formGroup: {
     marginBottom: verticalScale(8),
   },
@@ -183,7 +184,9 @@ const styles = StyleSheet.create({
   },
 
   modalContainer: {
-    height: "80%",         // fixed height so it doesn’t shrink
+    width: "100%",
+    maxWidth: moderateScale(420),
+    height: "72%",
     backgroundColor: COLORS.white,
     borderRadius: moderateScale(20),
     padding: moderateScale(20),
@@ -227,7 +230,8 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(10),
     padding: moderateScale(10),
     fontSize: moderateScale(14),
-    color: "#333",
+    color: COLORS.textPrimary,
+    minHeight: moderateScale(44),
   },
 
   hexPreview: {

@@ -107,6 +107,8 @@ const styles = StyleSheet.create({
   },
   manualInput: {
     fontSize: moderateScale(14),
+    color: COLORS.textPrimary,
+    minHeight: verticalScale(44),
     marginTop: verticalScale(6),
     backgroundColor: '#f9f9f9',
     paddingVertical: verticalScale(6),
@@ -118,7 +120,8 @@ const styles = StyleSheet.create({
   addButton: {
     marginTop: verticalScale(6),
     backgroundColor: COLORS.primaryDark,
-    paddingVertical: verticalScale(6),
+    minHeight: verticalScale(44),
+    justifyContent: 'center',
     borderRadius: moderateScale(16),
     alignItems: 'center',
   },
@@ -196,7 +199,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 8,
     backgroundColor: COLORS.primaryDark,
-    alignItems: "center",
   },
 
   deleteText: {

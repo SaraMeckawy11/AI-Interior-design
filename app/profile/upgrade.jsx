@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import purchases, { LOG_LEVEL } from 'react-native-purchases';
+import purchases from 'react-native-purchases';
 
 import UpgradeExperience from '../../components/upgrade/UpgradeExperience';
 import { useAuthStore } from '../../authStore';
@@ -13,6 +13,7 @@ import {
   sameStoreProduct,
 } from '../../constants/pricing';
 import useRewardedCoins from '../../lib/useRewardedCoins';
+import { ensureRevenueCatConfigured } from '../../lib/revenueCat';
 
 export default function Upgrade() {
   const { token, fetchUser } = useAuthStore();
@@ -35,8 +36,6 @@ export default function Upgrade() {
 
       const init = async () => {
         try {
-          purchases.setLogLevel(LOG_LEVEL.DEBUG);
-
           let user = null;
           if (token) {
             const response = await fetch(apiUrl('/api/users/me'), {
@@ -53,16 +52,16 @@ export default function Upgrade() {
             setIsSubscribed(user.isSubscribed === true || user.isPremium === true);
             setCoins(Number(user.adCoins || 0));
 
-            await purchases.configure({
-              apiKey: 'goog_uVORiYiVgmggjNiOAHvBLferRyp',
-              appUserID: user._id.toString(),
-            });
+            const storeReady = await ensureRevenueCatConfigured(user._id);
+            if (!storeReady || cancelled) return;
 
             const current = await purchases.getOfferings();
             if (!cancelled && current?.current) setOfferings(current);
           }
         } catch (error) {
-          console.error('Store initialisation error:', error);
+          // Opening pricing should never surface a native-store error. Missing
+          // products simply render as unavailable and can be retried next time.
+          if (__DEV__) console.info('Store is unavailable:', error?.message);
         } finally {
           if (!cancelled) setLoading(false);
         }

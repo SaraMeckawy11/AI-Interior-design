@@ -490,30 +490,63 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
 
-  // ── The welcome a member sees ─────────────────────────────────────────────
-  familyCard: {
-    flexDirection: "row",
+  // ── Manage subscription empty state ───────────────────────────────────────
+  subscriptionContent: {
+    flexGrow: 1,
+    paddingHorizontal: moderateScale(16),
+    paddingBottom: verticalScale(32),
+  },
+  subscriptionEmpty: {
+    flex: 1,
     alignItems: "center",
-    gap: moderateScale(12),
-    borderRadius: RADIUS,
+    justifyContent: "center",
+    paddingHorizontal: moderateScale(20),
+    paddingBottom: verticalScale(44),
+  },
+  subscriptionEmptyIcon: {
+    width: moderateScale(60),
+    height: moderateScale(60),
+    borderRadius: moderateScale(18),
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: COLORS.primaryTint,
     borderWidth: 1,
-    borderColor: COLORS.brand200,
-    padding: moderateScale(16),
-    marginBottom: verticalScale(20),
+    borderColor: COLORS.brand100,
+    marginBottom: verticalScale(16),
   },
-  familyCopy: { flex: 1, minWidth: 0 },
-  familyTitle: {
-    fontSize: moderateScale(14),
+  subscriptionEmptyTitle: {
+    fontSize: moderateScale(18),
     fontFamily: "Poppins_600SemiBold",
     color: COLORS.textPrimary,
+    textAlign: "center",
+    letterSpacing: -0.2,
   },
-  familyText: {
-    fontSize: moderateScale(12.5),
+  subscriptionEmptyText: {
+    maxWidth: moderateScale(320),
+    fontSize: moderateScale(13.5),
     fontFamily: "Poppins_400Regular",
     color: COLORS.textSecondary,
-    lineHeight: moderateScale(18),
-    marginTop: 2,
+    textAlign: "center",
+    lineHeight: moderateScale(20),
+    marginTop: verticalScale(6),
+  },
+  subscriptionEmptyButton: {
+    minWidth: moderateScale(210),
+    minHeight: moderateScale(50),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: moderateScale(8),
+    borderRadius: RADIUS,
+    backgroundColor: COLORS.primaryDark,
+    paddingHorizontal: moderateScale(20),
+    marginTop: verticalScale(22),
+  },
+  subscriptionEmptyButtonPressed: { opacity: 0.82 },
+  subscriptionEmptyButtonText: {
+    fontSize: moderateScale(14),
+    fontFamily: "Poppins_600SemiBold",
+    color: COLORS.white,
   },
 });
 

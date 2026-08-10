@@ -63,6 +63,7 @@ export default function Subscription() {
       return;
     }
     setLoading(true);
+    setNotice('');
     try {
       const response = await fetch(apiUrl('/api/orders/latest'), {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -142,10 +143,10 @@ export default function Subscription() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
+          contentContainerStyle={styles.subscriptionContent}
           showsVerticalScrollIndicator={false}
         >
-          {!!notice && (
+          {!!notice && !!plan && (
             <View style={[styles.section, styles.notice]}>
               <Text style={styles.noticeText}>{notice}</Text>
             </View>
@@ -237,23 +238,34 @@ export default function Subscription() {
               </View>
             </>
           ) : (
-            <View style={styles.section}>
-              <View style={styles.notice}>
-                <View style={styles.noticeIcon}>
-                  <Ionicons name="sparkles-outline" size={24} color={COLORS.primaryDark} />
-                </View>
-                <Text style={styles.noticeTitle}>No active subscription</Text>
-                <Text style={styles.noticeText}>
-                  Go premium for unlimited designs, no ads, and every render in full quality.
-                </Text>
-                <Pressable
-                  style={styles.noticeButton}
-                  accessibilityRole="button"
-                  onPress={() => router.push('/profile/upgrade')}
-                >
-                  <Text style={styles.noticeButtonText}>View plans</Text>
-                </Pressable>
+            <View style={styles.subscriptionEmpty}>
+              <View style={styles.subscriptionEmptyIcon}>
+                <Ionicons
+                  name={notice ? 'cloud-offline-outline' : 'diamond-outline'}
+                  size={27}
+                  color={COLORS.primaryDark}
+                />
               </View>
+              <Text style={styles.subscriptionEmptyTitle}>
+                {notice ? 'Couldn\'t load your subscription' : 'No active subscription'}
+              </Text>
+              <Text style={styles.subscriptionEmptyText}>
+                {notice || 'You are currently using Livinai Free. Explore Pro whenever you are ready for unlimited creating.'}
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.subscriptionEmptyButton,
+                  pressed && styles.subscriptionEmptyButtonPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={notice ? 'Try loading subscription again' : 'Explore Pro plans'}
+                onPress={notice ? load : () => router.push('/profile/upgrade')}
+              >
+                <Text style={styles.subscriptionEmptyButtonText}>
+                  {notice ? 'Try again' : 'Explore Pro plans'}
+                </Text>
+                <Ionicons name="arrow-forward" size={17} color={COLORS.white} />
+              </Pressable>
             </View>
           )}
         </ScrollView>

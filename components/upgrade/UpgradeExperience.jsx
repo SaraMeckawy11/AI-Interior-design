@@ -15,16 +15,21 @@ import styles from '../../assets/styles/upgradeV2.styles';
 import COLORS from '../../constants/colors';
 import {
   AD_COIN_REWARD,
-  COIN_COST,
   YEARLY_SAVING_PERCENT,
   coinLabel,
   packSaving,
 } from '../../constants/pricing';
 
 const PRO_FEATURES = [
-  { icon: 'color-palette-outline', label: 'Unlimited designs' },
+  { icon: 'infinite-outline', label: 'Unlimited renders' },
   { icon: 'cube-outline', label: '3D walkthroughs' },
-  { icon: 'eye-off-outline', label: 'Ad-free creating' },
+  { icon: 'eye-off-outline', label: 'Ad-free' },
+];
+
+const COIN_FEATURES = [
+  { icon: 'time-outline', label: 'Never expires' },
+  { icon: 'sparkles-outline', label: '1 coin per render' },
+  { icon: 'shield-checkmark-outline', label: 'No commitment' },
 ];
 
 export default function UpgradeExperience({
@@ -51,6 +56,22 @@ export default function UpgradeExperience({
   setSelection,
   watchAd,
 }) {
+  const heroContent = buyingPlan
+    ? {
+        eyebrow: 'THE COMPLETE EXPERIENCE',
+        title: isSubscribed ? 'Everything is unlocked' : 'Bring every idea to life',
+        subtitle: isSubscribed
+          ? 'Your full creative toolkit is ready.'
+          : 'Design, refine, and explore without counting renders.',
+        features: PRO_FEATURES,
+      }
+    : {
+        eyebrow: 'FLEXIBLE CREDITS',
+        title: 'Create on your terms',
+        subtitle: 'Buy only what you need, or earn more by watching an ad.',
+        features: COIN_FEATURES,
+      };
+
   const backButton = (
     <Pressable
       accessibilityRole="button"
@@ -69,7 +90,7 @@ export default function UpgradeExperience({
         <View style={[styles.container, styles.loadingContainer]}>
           <View style={styles.topBar}>
             {backButton}
-            <Text style={styles.topBarTitle}>Upgrade</Text>
+            <Text style={styles.topBarTitle}>Livinai Pro</Text>
             <View style={styles.topBarSpacer} />
           </View>
           <View style={styles.centered}>
@@ -84,71 +105,69 @@ export default function UpgradeExperience({
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
         <View style={styles.topBar}>
           {backButton}
-          <Text style={styles.topBarTitle}>Upgrade</Text>
+          <Text style={styles.topBarTitle}>Livinai Pro</Text>
           <View style={styles.topBarSpacer} />
         </View>
 
         <LinearGradient
-          colors={COLORS.gradientBrandDeep}
-          start={{ x: 0, y: 0 }}
+          colors={[COLORS.surface, COLORS.brand100]}
+          start={{ x: 0.08, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.hero}
         >
-          <View style={styles.heroGlowOne} />
-          <View style={styles.heroGlowTwo} />
-          <View style={styles.heroEyebrow}>
-            <Ionicons name="sparkles" size={13} color={COLORS.accentSoft} />
-            <Text style={styles.heroEyebrowText}>LIVINAI PRO</Text>
+          <View style={styles.heroOrb} />
+          <View style={styles.heroMetaRow}>
+            <LinearGradient
+              colors={COLORS.gradientBrandDeep}
+              style={styles.proMark}
+            >
+              <Ionicons name={buyingPlan ? 'diamond' : 'ellipse'} size={18} color={COLORS.white} />
+            </LinearGradient>
+            <View style={styles.heroEyebrow}>
+              <Ionicons name="sparkles" size={12} color={COLORS.primaryDark} />
+              <Text style={styles.heroEyebrowText}>{heroContent.eyebrow}</Text>
+            </View>
+            {buyingPlan && isSubscribed ? (
+              <View style={styles.activeTag} accessibilityRole="text">
+                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
+                <Text style={styles.activeTagText}>Active</Text>
+              </View>
+            ) : null}
           </View>
-          <Text style={styles.heroTitle}>
-            {isSubscribed ? 'Your creativity is unlimited' : 'Design without limits'}
-          </Text>
-          <Text style={styles.heroSubtitle}>
-            {isSubscribed
-              ? 'Your Pro membership is active and every premium tool is ready.'
-              : 'Create every room, exterior, and walkthrough you can imagine.'}
-          </Text>
+          <Text style={styles.heroTitle}>{heroContent.title}</Text>
+          <Text style={styles.heroSubtitle}>{heroContent.subtitle}</Text>
           <View style={styles.featureStrip} accessibilityRole="list">
-            {PRO_FEATURES.map((feature) => (
+            {heroContent.features.map((feature) => (
               <View key={feature.label} style={styles.featureItem} accessibilityRole="text">
-                <View style={styles.featureIconWrap}>
+                <View style={styles.featureIcon}>
                   <Ionicons
                     name={feature.icon}
-                    size={16}
-                    color={COLORS.onSurfaceInverse}
-                    importantForAccessibility="no"
+                    size={13}
+                    color={COLORS.primaryDark}
                   />
                 </View>
                 <Text style={styles.featureText}>{feature.label}</Text>
               </View>
             ))}
           </View>
-          {isSubscribed ? (
-            <View style={styles.activeTag} accessibilityRole="text">
-              <Ionicons name="checkmark-circle" size={14} color={COLORS.successSoft} />
-              <Text style={styles.activeTagText}>Pro is active</Text>
-            </View>
-          ) : null}
         </LinearGradient>
 
         <View style={styles.purchaseToggle} accessibilityRole="tablist">
           <PurchaseTab
             active={buyingPlan}
-            icon="diamond-outline"
-            label="Pro membership"
+            label="Unlimited"
             onPress={() => selectPurchaseType('plan')}
           />
           <PurchaseTab
             active={!buyingPlan}
-            coin
-            icon="ellipse-outline"
-            label="Coin packs"
+            label="Pay as you go"
             onPress={() => selectPurchaseType('pack')}
           />
         </View>
@@ -218,8 +237,7 @@ export default function UpgradeExperience({
   );
 }
 
-function PurchaseTab({ active, coin = false, icon, label, onPress }) {
-  const activeColor = coin ? COLORS.accentStrong : COLORS.primaryDark;
+function PurchaseTab({ active, label, onPress }) {
   return (
     <Pressable
       accessibilityRole="tab"
@@ -231,11 +249,10 @@ function PurchaseTab({ active, coin = false, icon, label, onPress }) {
       ]}
       onPress={onPress}
     >
-      <Ionicons name={icon} size={16} color={active ? activeColor : COLORS.textSecondary} />
       <Text
         style={[
           styles.purchaseToggleText,
-          active && (coin ? styles.purchaseToggleTextCoinActive : styles.purchaseToggleTextActive),
+          active && styles.purchaseToggleTextActive,
         ]}
       >
         {label}
@@ -248,63 +265,34 @@ function PlanOptions({ isSelected, isSubscribed, plans, priceFor, setSelection, 
   return (
     <>
       <View style={styles.sectionHeadingRow}>
-        <View style={styles.sectionHeadingCopy}>
-          <Text style={styles.sectionLabel}>
-            {isSubscribed ? 'Choose another plan' : 'Choose your plan'}
-          </Text>
-          <Text style={styles.sectionHint}>Unlimited access on every plan</Text>
-        </View>
-        <View style={styles.savingPill}>
-          <Text style={styles.savingPillText}>SAVE {YEARLY_SAVING_PERCENT}%</Text>
-        </View>
+        <Text style={styles.sectionLabel}>
+          {isSubscribed ? 'Switch billing cycle' : 'Choose billing cycle'}
+        </Text>
       </View>
 
       <View style={styles.optionList} accessibilityRole="radiogroup">
-        {plans.map((plan) => {
+        {plans.map((plan, index) => {
           const selected = isSelected('plan', plan.id);
           const price = priceFor(plan, plan.storePackage);
           return (
-            <Pressable
+            <PurchaseOptionCard
               key={plan.id}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: selected }}
               accessibilityLabel={`${plan.title} plan, ${price} per ${plan.period}`}
-              android_ripple={{ color: 'rgba(30,36,31,0.06)' }}
-              style={({ pressed }) => [
-                styles.optionCard,
-                selected && styles.optionCardSelected,
-                pressed && styles.pressed,
-              ]}
+              badge={plan.badge ? 'Best value' : null}
+              description={
+                plan.id === 'yearly'
+                  ? `Save ${YEARLY_SAVING_PERCENT}% compared with monthly`
+                  : 'Flexible access, billed every month'
+              }
+              period={`per ${plan.period}`}
+              price={price}
+              selected={selected}
+              title={plan.title}
+              showDivider={index < plans.length - 1}
               onPress={() => setSelection({ kind: 'plan', id: plan.id })}
-            >
-              <Radio selected={selected} />
-              <View style={styles.optionCopy}>
-                <View style={styles.optionTitleRow}>
-                  <Text style={styles.optionTitle}>{plan.title}</Text>
-                  {plan.badge ? (
-                    <View style={styles.recommendedBadge}>
-                      <Text style={styles.recommendedBadgeText}>RECOMMENDED</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text style={styles.optionDescription}>
-                  {plan.id === 'yearly'
-                    ? `Best value · save ${YEARLY_SAVING_PERCENT}%`
-                    : 'Flexible monthly billing'}
-                </Text>
-              </View>
-              <View style={styles.optionPriceWrap}>
-                <Text style={styles.optionPrice}>{price}</Text>
-                <Text style={styles.optionPeriod}>/ {plan.period}</Text>
-              </View>
-            </Pressable>
+            />
           );
         })}
-      </View>
-
-      <View style={styles.assuranceRow}>
-        <Ionicons name="shield-checkmark-outline" size={17} color={COLORS.primaryDark} />
-        <Text style={styles.assuranceText}>Secure Play Store billing · cancel anytime</Text>
       </View>
 
       {isSubscribed ? (
@@ -326,11 +314,8 @@ function CoinOptions({ adMessage, adStatus, coins, isSelected, packs, priceFor, 
   return (
     <>
       <View style={styles.balanceCard}>
-        <View style={styles.balanceIcon}>
-          <Ionicons name="wallet-outline" size={21} color={COLORS.accentStrong} />
-        </View>
         <View style={styles.balanceCopy}>
-          <Text style={styles.balanceLabel}>YOUR BALANCE</Text>
+          <Text style={styles.balanceLabel}>Balance</Text>
           <Text style={styles.balanceValue}>{coinLabel(coins)}</Text>
         </View>
         <Pressable
@@ -346,7 +331,7 @@ function CoinOptions({ adMessage, adStatus, coins, isSelected, packs, priceFor, 
           ) : (
             <>
               <Ionicons name="play" size={13} color={COLORS.accentStrong} />
-              <Text style={styles.watchAdButtonText}>Earn {AD_COIN_REWARD}</Text>
+              <Text style={styles.watchAdButtonText}>Earn +{AD_COIN_REWARD}</Text>
             </>
           )}
         </Pressable>
@@ -354,138 +339,158 @@ function CoinOptions({ adMessage, adStatus, coins, isSelected, packs, priceFor, 
       {adMessage ? <Text style={styles.adStatusText}>{adMessage}</Text> : null}
 
       <View style={styles.sectionHeadingRow}>
-        <View style={styles.sectionHeadingCopy}>
-          <Text style={styles.sectionLabel}>Choose a coin pack</Text>
-          <Text style={styles.sectionHint}>One-off purchase · coins never expire</Text>
-        </View>
+        <Text style={styles.sectionLabel}>Choose a coin pack</Text>
       </View>
 
       <View style={styles.optionList} accessibilityRole="radiogroup">
-        {packs.map((pack) => {
+        {packs.map((pack, index) => {
           const selected = isSelected('pack', pack.id);
           const saving = packSaving(pack);
           return (
-            <Pressable
+            <PurchaseOptionCard
               key={pack.id}
-              accessibilityRole="radio"
-              accessibilityState={{ checked: selected }}
               accessibilityLabel={`${pack.coins} coins for ${priceFor(pack, pack.storePackage)}`}
-              android_ripple={{ color: 'rgba(30,36,31,0.06)' }}
-              style={({ pressed }) => [
-                styles.optionCard,
-                selected && styles.coinOptionCardSelected,
-                pressed && styles.pressed,
-              ]}
+              badge={pack.badge}
+              description={
+                saving > 0 ? `Save ${saving}% per creation` : 'A simple starter pack'
+              }
+              period="one time"
+              price={priceFor(pack, pack.storePackage)}
+              selected={selected}
+              title={coinLabel(pack.coins)}
+              showDivider={index < packs.length - 1}
               onPress={() => setSelection({ kind: 'pack', id: pack.id })}
-            >
-              <Radio selected={selected} coin />
-              <View style={styles.coinAmountIcon}>
-                <Ionicons name="ellipse" size={14} color={COLORS.accent} />
-              </View>
-              <View style={styles.optionCopy}>
-                <View style={styles.optionTitleRow}>
-                  <Text style={styles.optionTitle}>{coinLabel(pack.coins)}</Text>
-                  {pack.badge ? (
-                    <View style={styles.coinBadge}>
-                      <Text style={styles.coinBadgeText}>{pack.badge.toUpperCase()}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text style={styles.optionDescription}>
-                  {saving > 0 ? `Save ${saving}% per coin` : 'A simple starter pack'}
-                </Text>
-              </View>
-              <Text style={styles.optionPrice}>{priceFor(pack, pack.storePackage)}</Text>
-            </Pressable>
+            />
           );
         })}
-      </View>
-
-      <View style={styles.coinUseCard}>
-        <Text style={styles.coinUseTitle}>What can I create?</Text>
-        <CoinUseRow
-          icon="color-palette-outline"
-          label="Interior or exterior design"
-          value={coinLabel(COIN_COST.design)}
-        />
-        <View style={styles.coinUseDivider} />
-        <CoinUseRow
-          icon="cube-outline"
-          label="3D walkthrough render"
-          value={coinLabel(COIN_COST.walkthrough)}
-        />
       </View>
     </>
   );
 }
 
-function Radio({ selected, coin = false }) {
+function PurchaseOptionCard({
+  accessibilityLabel,
+  badge,
+  description,
+  onPress,
+  period,
+  price,
+  selected,
+  showDivider,
+  title,
+}) {
   return (
-    <View style={[styles.radio, selected && (coin ? styles.coinRadioOn : styles.radioOn)]}>
-      {selected ? <View style={coin ? styles.coinRadioDot : styles.radioDot} /> : null}
-    </View>
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
+      accessibilityLabel={accessibilityLabel}
+      android_ripple={{ color: 'rgba(30,36,31,0.06)' }}
+      style={({ pressed }) => [
+        styles.optionCard,
+        showDivider && styles.optionCardDivider,
+        selected && styles.optionCardSelected,
+        pressed && styles.pressed,
+      ]}
+      onPress={onPress}
+    >
+      <Radio selected={selected} />
+      <View style={styles.optionCopy}>
+        <View style={styles.optionTitleRow}>
+          <Text style={styles.optionTitle}>{title}</Text>
+          {badge ? (
+            <View style={styles.optionBadge}>
+              <Text style={styles.optionBadgeText}>
+                {badge.toUpperCase()}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        <Text style={styles.optionDescription} numberOfLines={1}>{description}</Text>
+      </View>
+      <View style={styles.optionPriceWrap}>
+        <Text
+          style={styles.optionPrice}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.76}
+        >
+          {price}
+        </Text>
+        {period ? <Text style={styles.optionPeriod}>{period}</Text> : null}
+      </View>
+    </Pressable>
   );
 }
 
-function CoinUseRow({ icon, label, value }) {
+function Radio({ selected }) {
   return (
-    <View style={styles.coinUseRow}>
-      <Ionicons name={icon} size={17} color={COLORS.textSecondary} />
-      <Text style={styles.coinUseLabel}>{label}</Text>
-      <Text style={styles.coinUseValue}>{value}</Text>
+    <View style={[styles.radio, selected && styles.radioOn]}>
+      {selected ? <Ionicons name="checkmark" size={13} color={COLORS.white} /> : null}
     </View>
   );
 }
 
 function PurchaseFooter({ activePack, activePlan, busy, buyingPlan, insets, isSubscribed, onPress, priceFor }) {
+  const price = buyingPlan
+    ? priceFor(activePlan, activePlan?.storePackage)
+    : priceFor(activePack, activePack?.storePackage);
+  const unavailable = price === 'Unavailable';
+  const disabled = !!busy || unavailable;
+  const actionLabel = buyingPlan
+    ? `${isSubscribed ? 'Switch to' : 'Start'} ${activePlan?.title}`
+    : `Buy ${activePack?.coins ?? 0} coins`;
+
   return (
     <View style={[styles.purchaseFooter, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-      <View style={styles.summary}>
-        <View style={styles.summaryCopy}>
-          <Text style={styles.summaryEyebrow}>YOUR SELECTION</Text>
-          <Text style={styles.summaryLabel} numberOfLines={1}>
-            {buyingPlan ? `${activePlan?.title} Pro plan` : `${activePack?.coins} coins · one-off`}
-          </Text>
-        </View>
-        <Text style={styles.summaryValue}>
-          {buyingPlan
-            ? priceFor(activePlan, activePlan?.storePackage)
-            : priceFor(activePack, activePack?.storePackage)}
+      <View style={styles.footerInner}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            buyingPlan
+              ? `${isSubscribed ? 'Change to' : 'Subscribe to'} the ${activePlan?.title} plan`
+              : `Buy ${activePack?.coins} coins`
+          }
+          accessibilityState={{ busy: !!busy, disabled }}
+          android_ripple={busy ? undefined : { color: 'rgba(255,255,255,0.20)' }}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            disabled && styles.primaryButtonDisabled,
+            pressed && !disabled && styles.primaryButtonPressed,
+          ]}
+          disabled={disabled}
+          onPress={onPress}
+        >
+          <LinearGradient
+            colors={disabled ? [COLORS.surfaceSunken, COLORS.surfaceSunken] : COLORS.gradientBrandDeep}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.primaryButtonFill}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={COLORS.textTertiary} />
+            ) : unavailable ? (
+              <Text style={styles.primaryButtonTextDisabled}>Store unavailable</Text>
+            ) : (
+              <>
+                <Text
+                  style={styles.primaryButtonText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                >
+                  {actionLabel}
+                </Text>
+                <View style={styles.primaryButtonPriceWrap}>
+                  <Text style={styles.primaryButtonPrice}>{price}</Text>
+                </View>
+              </>
+            )}
+          </LinearGradient>
+        </Pressable>
+        <Text style={styles.footerNote}>
+          {buyingPlan ? 'Renews automatically. Cancel anytime.' : 'One-time purchase. Coins never expire.'}
         </Text>
       </View>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={
-          buyingPlan
-            ? `${isSubscribed ? 'Change to' : 'Subscribe to'} the ${activePlan?.title} plan`
-            : `Buy ${activePack?.coins} coins`
-        }
-        accessibilityState={{ busy: !!busy, disabled: !!busy }}
-        android_ripple={busy ? undefined : { color: 'rgba(255,255,255,0.20)' }}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          !!busy && styles.primaryButtonDisabled,
-          pressed && !busy && styles.pressed,
-        ]}
-        disabled={!!busy}
-        onPress={onPress}
-      >
-        {busy ? (
-          <ActivityIndicator size="small" color={COLORS.textTertiary} />
-        ) : (
-          <>
-            <Text style={styles.primaryButtonText}>
-              {buyingPlan
-                ? isSubscribed
-                  ? 'Change plan'
-                  : 'Continue with Pro'
-                : `Buy ${activePack?.coins} coins`}
-            </Text>
-            <Ionicons name="arrow-forward" size={18} color={COLORS.white} />
-          </>
-        )}
-      </Pressable>
     </View>
   );
 }

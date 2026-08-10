@@ -220,6 +220,16 @@ function buildPathFromVertices(
 // ---------------------------------------------------------------------------
 export default function PlanEditor() {
   const router = useRouter();
+  const scrollRef = useRef(null);
+  const revealFocusedInput = useCallback((nodeHandle) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
+        nodeHandle,
+        moderateScale(24),
+        true,
+      );
+    }, 250);
+  }, []);
   const { token } = useAuthStore();
 
   // ── Mode ──
@@ -1382,10 +1392,13 @@ export default function PlanEditor() {
       </SafeAreaView>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.container}
         style={styles.scrollViewStyle}
         scrollEnabled={scrollEnabled}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
       >
         <View>
         <View style={styles.titleHeader}>
@@ -1544,6 +1557,7 @@ export default function PlanEditor() {
             setRoomType={setRoomType}
             showAllOptions
             excludeRoomTypes={PLAN_EXCLUDED_ROOM_TYPES}
+            onInputFocus={revealFocusedInput}
           />
         )}
 
@@ -2183,6 +2197,10 @@ export default function PlanEditor() {
           setCustomRoomInput("");
         }}
       >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
         <TouchableWithoutFeedback
           onPress={() => {
             setShowRoomAssign(false);
@@ -2235,8 +2253,11 @@ export default function PlanEditor() {
                       style={styles.planCustomInput}
                       placeholder="Enter room type..."
                       placeholderTextColor={COLORS.placeholderText}
+                      selectionColor={COLORS.primaryDark}
                       value={customRoomInput}
                       onChangeText={setCustomRoomInput}
+                      onSubmitEditing={handleCustomRoomAdd}
+                      returnKeyType="done"
                       autoFocus
                     />
                     <TouchableOpacity
@@ -2273,6 +2294,7 @@ export default function PlanEditor() {
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ═══════════════════════════════════════════════════════ */}

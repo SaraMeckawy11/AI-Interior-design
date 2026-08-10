@@ -1,9 +1,11 @@
 import { 
   View, 
   Text, 
-  TouchableOpacity, 
-  TextInput, 
-  Modal, 
+  TouchableOpacity,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Modal,
   TouchableWithoutFeedback 
 } from 'react-native';
 import React, { useMemo, useState } from 'react';
@@ -12,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ColorPicker from 'react-native-wheel-color-picker';
 import namer from 'color-namer';
 import { buildPalette } from '../../lib/colorPalettes';
+import COLORS from '../../constants/colors';
 
 const baseColorTones = [
   { name: 'Ivory', color: '#FFFFF0' },
@@ -225,6 +228,10 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
         transparent
         onRequestClose={() => setShowColorPicker(false)}
       >
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoider}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
         <TouchableWithoutFeedback onPress={() => setShowColorPicker(false)}>
           <View style={styles.overlay}>
             <TouchableWithoutFeedback>
@@ -255,6 +262,11 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
                     autoCapitalize="none"
                     autoCorrect={false}
                     placeholder="#FFFFFF"
+                    placeholderTextColor={COLORS.placeholderText}
+                    selectionColor={COLORS.primaryDark}
+                    keyboardType="ascii-capable"
+                    returnKeyType="done"
+                    onSubmitEditing={handleAddCustomTone}
                   />
                   <View
                     style={[styles.hexPreview, { backgroundColor: selectedColor }]}
@@ -280,6 +292,7 @@ export default function ColorToneSelector({ colorTone, setColorTone }) {
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Error Modal */}

@@ -53,6 +53,16 @@ const moderateScale = (size, factor = 0.5) =>
 
 export default function Interior() {
   const router = useRouter();
+  const scrollRef = useRef(null);
+  const revealFocusedInput = useCallback((nodeHandle) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
+        nodeHandle,
+        moderateScale(24),
+        true,
+      );
+    }, 250);
+  }, []);
   const { token } = useAuthStore();
 
   const [prompt, setPrompt] = useState('');
@@ -355,7 +365,14 @@ export default function Interior() {
         </TouchableOpacity>
         </SafeAreaView>
 
-      <ScrollView contentContainerStyle={styles.container} style={styles.scrollViewStyle}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.container}
+        style={styles.scrollViewStyle}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+      >
         <View>
           <View style={styles.titleHeader}>
             <Text style={styles.title}>LIVINAI</Text>
@@ -421,10 +438,15 @@ export default function Interior() {
               roomType={roomType}
               setRoomType={setRoomType}
               excludeRoomTypes={INTERIOR_EXCLUDED_ROOM_TYPES}
+              onInputFocus={revealFocusedInput}
             />
 
             {/* Design Style */}
-            <DesignStyleSelector designStyle={designStyle} setDesignStyle={setDesignStyle} />
+            <DesignStyleSelector
+              designStyle={designStyle}
+              setDesignStyle={setDesignStyle}
+              onInputFocus={revealFocusedInput}
+            />
 
             {/* Color Tone */}
             <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />

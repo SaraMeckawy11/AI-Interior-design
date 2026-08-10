@@ -1,8 +1,8 @@
 import React, { useEffect } from "react";
 import { Stack } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import purchases, { LOG_LEVEL } from "react-native-purchases";
 import { useAuthStore } from "../authStore";
+import { ensureRevenueCatConfigured } from "../lib/revenueCat";
 
 import {
   Poppins_600SemiBold,
@@ -25,51 +25,37 @@ export default function RootLayout() {
     Poppins_500Medium,
   });
 
-  // Step 1: Run checkAuth on first load
   useEffect(() => {
     checkAuth();
-  }, []);
+  }, [checkAuth]);
 
-  // Step 2: Initialize RevenueCat only when auth check is done
   useEffect(() => {
-    const init = async () => {
-      if (isCheckingAuth) {
-        console.log("Still checking auth...");
-        return;
-      }
+    let cancelled = false;
 
-      console.log("Auth store user before fetch:", user);
-      console.log("Token:", token ? " token loaded" : " no token");
+    const init = async () => {
+      if (isCheckingAuth) return;
 
       let currentUser = user;
       if ((!user || !user._id) && token) {
-        console.log("Fetching user from DB...");
         currentUser = await fetchUser();
       }
 
-      if (!currentUser || !currentUser._id) {
-        console.log("User not ready yet, skipping RevenueCat init.");
-        return;
-      }
-
-      console.log("Initializing RevenueCat with user ID:", currentUser._id);
+      if (cancelled || !currentUser?._id) return;
 
       try {
-        purchases.setLogLevel(LOG_LEVEL.DEBUG);
-        await purchases.configure({
-          apiKey: "goog_uVORiYiVgmggjNiOAHvBLferRyp",
-          appUserID: currentUser._id,
-        });
-
-        const info = await purchases.getCustomerInfo();
-        console.log("RevenueCat customer info:", info);
+        await ensureRevenueCatConfigured(currentUser._id);
       } catch (error) {
-        console.error("RevenueCat setup failed:", error);
+        // Store access is optional during app startup. The pricing screen gives
+        // a calm unavailable state if Play/App Store cannot be reached.
+        if (__DEV__) console.info('RevenueCat is unavailable:', error?.message);
       }
     };
 
     init();
-  }, [isCheckingAuth, user, token]);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchUser, isCheckingAuth, token, user]);
 
   return (
     <SafeAreaProvider>

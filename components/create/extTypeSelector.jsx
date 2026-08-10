@@ -9,11 +9,12 @@ import {
 import React, { useState } from 'react';
 import styles from '../../assets/styles/create/room.styles';
 import { Ionicons } from '@expo/vector-icons';
+import COLORS from '../../constants/colors';
 
 const MAX_VISIBLE_ICONS = 4;
 const MAX_CUSTOM_ROOMS = 1;
 
-const ExtTypeSelector = ({ roomType, setRoomType }) => {
+const ExtTypeSelector = ({ roomType, setRoomType, onInputFocus }) => {
   const [showAllRooms, setShowAllRooms] = useState(false);
   const [customRoomTypes, setCustomRoomTypes] = useState([]);
   const [manualRoomInput, setManualRoomInput] = useState('');
@@ -160,8 +161,14 @@ const ExtTypeSelector = ({ roomType, setRoomType }) => {
           <TextInput
             style={styles.manualInput}
             placeholder="Enter exterior type"
+            placeholderTextColor={COLORS.placeholderText}
+            selectionColor={COLORS.primaryDark}
             value={manualRoomInput}
             onChangeText={setManualRoomInput}
+            onFocus={(event) => onInputFocus?.(event.target)}
+            onSubmitEditing={handleAddRoom}
+            returnKeyType="done"
+            autoFocus
           />
           <TouchableOpacity style={styles.addButton} onPress={handleAddRoom}>
             <Text style={styles.addButtonText}>Add</Text>
@@ -208,7 +215,7 @@ const ExtTypeSelector = ({ roomType, setRoomType }) => {
               <View style={styles.errorModalContainer}>
                 <Text style={styles.modalTitle}>Delete Type</Text>
                 <Text style={styles.modalMessage}>
-                  Are you sure you want to delete "{roomToDelete}"?
+                  Are you sure you want to delete &ldquo;{roomToDelete}&rdquo;?
                 </Text>
                 <View style={styles.modalButtonRow}>
                   <TouchableOpacity

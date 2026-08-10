@@ -22,6 +22,7 @@ const RoomTypeSelector = ({
   setRoomType,
   label = 'Room type',
   excludeRoomTypes = NO_EXCLUDED_ROOMS,
+  onInputFocus,
   /** When true, every option is shown and the See All control is hidden (e.g. plan “Space options”). */
   showAllOptions = false,
 }) => {
@@ -210,8 +211,14 @@ const RoomTypeSelector = ({
           <TextInput
             style={styles.manualInput}
             placeholder="Enter room type"
+            placeholderTextColor={COLORS.placeholderText}
+            selectionColor={COLORS.primaryDark}
             value={manualRoomInput}
             onChangeText={setManualRoomInput}
+            onFocus={(event) => onInputFocus?.(event.target)}
+            onSubmitEditing={handleAddRoom}
+            returnKeyType="done"
+            autoFocus
           />
           <TouchableOpacity style={styles.addButton} onPress={handleAddRoom}>
             <Text style={styles.addButtonText}>Add</Text>
@@ -258,7 +265,7 @@ const RoomTypeSelector = ({
               <View style={styles.errorModalContainer}>
                 <Text style={styles.modalTitle}>Delete Room</Text>
                 <Text style={styles.modalMessage}>
-                  Are you sure you want to delete "{roomToDelete}"?
+                  Are you sure you want to delete &ldquo;{roomToDelete}&rdquo;?
                 </Text>
                 <View style={styles.modalButtonRow}>
                   <TouchableOpacity

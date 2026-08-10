@@ -10,6 +10,7 @@ import {
 import React, { useState } from "react";
 import styles from "../../assets/styles/create/design.styles";
 import { Ionicons } from "@expo/vector-icons";
+import COLORS from "../../constants/colors";
 
 const INITIAL_STYLES = ["Modern", "Rustic", "Bohemian"];
 
@@ -45,7 +46,7 @@ const STYLE_IMAGE_MAP = {
   tropical: require("../../assets/images/designStyles/tropical.jpg"),
 };
 
-export default function DesignStyleSelector({ designStyle, setDesignStyle }) {
+export default function DesignStyleSelector({ designStyle, setDesignStyle, onInputFocus }) {
   const [showAll, setShowAll] = useState(false);
   const [manualInput, setManualInput] = useState("");
   const [customStyles, setCustomStyles] = useState([]);
@@ -193,8 +194,14 @@ export default function DesignStyleSelector({ designStyle, setDesignStyle }) {
           <TextInput
             style={styles.manualInput}
             placeholder="Enter design style"
+            placeholderTextColor={COLORS.placeholderText}
+            selectionColor={COLORS.primaryDark}
             value={manualInput}
             onChangeText={setManualInput}
+            onFocus={(event) => onInputFocus?.(event.target)}
+            onSubmitEditing={handleAddCustomStyle}
+            returnKeyType="done"
+            autoFocus
           />
           <TouchableOpacity style={styles.addButton} onPress={handleAddCustomStyle}>
             <Text style={styles.addButtonText}>Add</Text>
@@ -215,7 +222,7 @@ export default function DesignStyleSelector({ designStyle, setDesignStyle }) {
               <View style={styles.errorModalContainer}>
                 <Text style={styles.modalTitle}>Delete Custom Style</Text>
                 <Text style={styles.modalMessage}>
-                  Are you sure you want to delete "{styleToDelete}"?
+                  Are you sure you want to delete &ldquo;{styleToDelete}&rdquo;?
                 </Text>
 
                 <View style={styles.modalButtonRow}>
