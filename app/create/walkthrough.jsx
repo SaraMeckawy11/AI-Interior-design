@@ -4497,9 +4497,12 @@ function PlanLibrary({ projects, loading, synced, signedIn, onBack, onRefresh, o
             {[0, 1, 2].map((row) => (
               <View key={row} style={styles.skeletonCard}>
                 <View style={styles.skeletonTile} />
+                {/* Three bars for the row's three lines, so the list does not
+                    change height when the real plans arrive. */}
                 <View style={styles.skeletonCopy}>
                   <View style={[styles.skeletonLine, { width: "58%" }]} />
-                  <View style={[styles.skeletonLine, styles.skeletonLineSmall, { width: "34%" }]} />
+                  <View style={[styles.skeletonLine, styles.skeletonLineSmall, { width: "40%" }]} />
+                  <View style={[styles.skeletonLine, styles.skeletonLineSmall, { width: "28%" }]} />
                 </View>
               </View>
             ))}
@@ -4621,44 +4624,50 @@ function ProjectCard({ project, onOpen, onMore }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${project.title}, ${rooms}${area ? `, ${area}` : ""}${edited ? `, ${edited.toLowerCase()}` : ""}`}
+      accessibilityLabel={
+        `${project.title}, ${[rooms, area, openings].filter(Boolean).join(", ")}`
+        + `, ${traced ? "traced from a photo" : "drawn"}${edited ? `, ${edited.toLowerCase()}` : ""}`
+      }
       accessibilityHint="Opens this plan in the editor"
       android_ripple={{ color: "rgba(30,36,31,0.08)" }}
       style={({ pressed }) => [styles.projectCard, pressed && styles.projectCardPressed]}
       onPress={onOpen}
     >
-      {/* Traced from a photo, or drawn from nothing. It is the one thing about a
-          plan a glyph can say faster than a word, and it is the difference
-          between two plans of the same flat. */}
+      {/* How big the home is, in the leading tile.
+          This was a generic grid glyph, which meant every drawn plan opened its
+          row with the same picture — a leading element that took the eye first
+          and then told it nothing. Floor area is the one number that is
+          comparable between plans and the one people describe a home by, so it
+          takes the position instead, and the glyph stays for a plan too new to
+          have been measured. */}
       <View style={styles.projectTile}>
-        <Ionicons
-          name={traced ? "image-outline" : "grid-outline"}
-          size={22}
-          color={COLORS.primaryDark}
-        />
+        {area ? (
+          <>
+            <Text style={styles.projectTileValue}>{Math.round(project.areaMeters)}</Text>
+            <Text style={styles.projectTileUnit}>m²</Text>
+          </>
+        ) : (
+          <Ionicons
+            name={traced ? "image-outline" : "grid-outline"}
+            size={22}
+            color={COLORS.primaryDark}
+          />
+        )}
       </View>
 
+      {/* Three lines, in the order the questions get asked: which plan, how big
+          is it, and how recently did I touch it. The measurements used to be
+          three tinted chips — three boxes of equal weight for three short facts,
+          none of them more important than the others, so the emphasis went
+          nowhere and the row read as busier than it is. */}
       <View style={styles.projectCardCopy}>
         <Text style={styles.projectCardTitle} numberOfLines={1}>{project.title}</Text>
-        {!!edited && <Text style={styles.projectCardTime} numberOfLines={1}>{edited}</Text>}
-        <View style={styles.projectStats}>
-          <View style={styles.projectStat}>
-            <Ionicons name="cube-outline" size={12} color={COLORS.primaryDark} />
-            <Text style={styles.projectStatText}>{rooms}</Text>
-          </View>
-          {!!area && (
-            <View style={styles.projectStat}>
-              <Ionicons name="resize-outline" size={12} color={COLORS.primaryDark} />
-              <Text style={styles.projectStatText}>{area}</Text>
-            </View>
-          )}
-          {!!openings && (
-            <View style={styles.projectStat}>
-              <Ionicons name="log-in-outline" size={12} color={COLORS.primaryDark} />
-              <Text style={styles.projectStatText}>{openings}</Text>
-            </View>
-          )}
-        </View>
+        <Text style={styles.projectCardMeta} numberOfLines={1}>
+          {[rooms, openings].filter(Boolean).join("  ·  ")}
+        </Text>
+        <Text style={styles.projectCardTime} numberOfLines={1}>
+          {[traced ? "Traced" : "Drawn", edited].filter(Boolean).join("  ·  ")}
+        </Text>
       </View>
 
       <Pressable
@@ -5304,14 +5313,14 @@ const styles = StyleSheet.create({
   librarySkeleton: { gap: SPACING.md },
   skeletonCard: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
-    padding: SPACING.md, minHeight: ms(78),
+    padding: SPACING.md, minHeight: ms(85),
     borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.border,
   },
   skeletonTile: {
-    width: ms(46), height: ms(46), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
+    width: ms(52), height: ms(52), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
   },
-  skeletonCopy: { flex: 1, gap: SPACING.sm },
+  skeletonCopy: { flex: 1, gap: SPACING.xs + 2 },
   skeletonLine: { height: ms(12), borderRadius: RADIUS.xs, backgroundColor: COLORS.surfaceSunken },
   skeletonLineSmall: { height: ms(9) },
 
@@ -5343,22 +5352,26 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.border,
   },
   projectCardPressed: { borderColor: COLORS.brand300, backgroundColor: COLORS.primaryTint },
+  // The hairline is what makes this read as a tile rather than a tinted patch:
+  // primaryTint is pale enough on the card's own white that without an edge it
+  // dissolves into it.
   projectTile: {
-    width: ms(46), height: ms(46), borderRadius: RADIUS.md,
-    alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
+    width: ms(52), height: ms(52), borderRadius: RADIUS.md,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: COLORS.primaryTint,
+    borderWidth: 1, borderColor: COLORS.primarySoft,
   },
-  projectCardCopy: { flex: 1, minWidth: 0, gap: SPACING.xs },
+  // Tabular figures so a column of areas lines up on its digits rather than
+  // wandering with the width of a 1.
+  projectTileValue: {
+    ...TYPE.bodyStrong, fontSize: ms(17), lineHeight: ms(20),
+    color: COLORS.primaryDark, fontVariant: ["tabular-nums"],
+  },
+  projectTileUnit: { ...TYPE.caption, fontSize: 9.5, lineHeight: 12, color: COLORS.brand400 },
+  projectCardCopy: { flex: 1, minWidth: 0, gap: 3 },
   projectCardTitle: { ...TYPE.h3, color: COLORS.textPrimary },
+  projectCardMeta: { ...TYPE.caption, color: COLORS.textSecondary },
   projectCardTime: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
-  // Two facts worth comparing down a column, so they are given a shape that
-  // scans rather than being run together into one grey sentence.
-  projectStats: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm, marginTop: 2 },
-  projectStat: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: SPACING.sm, paddingVertical: 4,
-    borderRadius: RADIUS.xs, backgroundColor: COLORS.primaryTint,
-  },
-  projectStatText: { ...TYPE.caption, fontSize: 10.5, color: COLORS.primaryDark },
   projectAction: {
     width: ms(40), height: ms(40), borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
