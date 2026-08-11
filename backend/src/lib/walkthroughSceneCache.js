@@ -23,7 +23,18 @@ import { createHash } from "node:crypto";
  * shipping an app release.
  */
 
-const CACHE_VERSION = (process.env.WALKTHROUGH_SCENE_CACHE_VERSION || "1").trim();
+/**
+ * Bumped to 2 for the style-kit furniture catalogue.
+ *
+ * `rendererRevision` is sent by the *app*, so it only invalidates for someone
+ * running a build new enough to send the new value. Every phone with the
+ * previous release installed keeps asking under the old key and keeps being
+ * handed the scene its old renderer produced — which is exactly what happened
+ * when the eight style kits shipped: the exporter had new furniture and nobody
+ * saw it. This constant is the half of the key the server owns, so bumping it
+ * rebuilds for every client at once, old builds included.
+ */
+const CACHE_VERSION = (process.env.WALKTHROUGH_SCENE_CACHE_VERSION || "2").trim();
 
 /**
  * The settings that reach the exporter, and only those.

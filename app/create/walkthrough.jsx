@@ -341,6 +341,9 @@ export default function WalkthroughScreen() {
   // about what it would bring back; deleting a room happens on the Rooms step,
   // where there is no Undo control on screen at all.
   const [confirmClear, setConfirmClear] = useState(false);
+  // Asked before rebuilding, because a rebuild throws away hand-placed
+  // furniture and costs a real export.
+  const [confirmRebuild, setConfirmRebuild] = useState(false);
   const [pendingRoomDelete, setPendingRoomDelete] = useState(null);
   const draftStepsRef = useRef([]);
 
@@ -2076,6 +2079,7 @@ export default function WalkthroughScreen() {
                 setExactSceneDetail(message);
               }}
               onRetryExact={rebuildScene}
+              onConfirmRebuild={() => setConfirmRebuild(true)}
               onBackToDesign={goBack}
               onChangeMode={changeViewMode}
               onToggleNight={toggleNight}
@@ -2657,6 +2661,28 @@ export default function WalkthroughScreen() {
         }}
       />
 
+      {/* Furnishing is deterministic, so a rebuild of an unchanged plan under an
+          unchanged renderer returns the same home — this is only worth pressing
+          when the furniture is a renderer behind, and the copy says so rather
+          than promising a different result. */}
+      <ConfirmDialog
+        visible={confirmRebuild}
+        title="Rebuild this home?"
+        message={
+          "Livinai will furnish your rooms again from scratch, with the latest furniture."
+          + (Object.keys(furnitureEdits).length
+            ? " Any pieces you moved yourself go back where Livinai placed them."
+            : "")
+        }
+        confirmLabel="Rebuild"
+        onCancel={() => setConfirmRebuild(false)}
+        onConfirm={() => {
+          setConfirmRebuild(false);
+          setFurnitureEdits({});
+          rebuildScene();
+        }}
+      />
+
       <ConfirmDialog
         visible={pendingRoomDelete !== null}
         title="Delete this room?"
@@ -2745,6 +2771,7 @@ function WalkthroughStage({
   onDiagnostic,
   onExactError,
   onRetryExact,
+  onConfirmRebuild,
   onBackToDesign,
   onChangeMode,
   onToggleNight,
@@ -3077,17 +3104,30 @@ function WalkthroughStage({
               the dock is never wider than it has reason to be. */}
           {!showingAi && (
             <View style={styles.dock} pointerEvents="box-none">
-              <View
-                style={styles.statusChip}
-                accessibilityRole="text"
+              {/* The chip reports what is in the room, and is also the way to
+                  say "this is not what I should be seeing".
+
+                  A built scene is remembered in three places, and until now the
+                  only control that could clear them was the Retry button on the
+                  error screen — which never appears for a scene that opens
+                  perfectly well and is merely out of date. Anyone whose home was
+                  furnished under an older renderer had no way to ask for it
+                  again, and no reason to suspect a cache was why. */}
+              <Pressable
+                style={({ pressed }) => [styles.statusChip, pressed && styles.pressedSurface]}
+                accessibilityRole="button"
                 accessibilityLiveRegion="polite"
                 accessibilityLabel={status.label}
+                accessibilityHint="Rebuilds this home in 3D"
+                android_ripple={{ color: "rgba(255,255,255,0.18)" }}
+                onPress={() => onConfirmRebuild()}
               >
                 {status.busy
                   ? <ActivityIndicator size="small" color={COLORS.white} />
                   : <View style={styles.statusDot} />}
                 <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
-              </View>
+                <Ionicons name="refresh-outline" size={14} color="rgba(255,255,255,0.72)" />
+              </Pressable>
 
               {renders.length > 0 && (
                 <Pressable
