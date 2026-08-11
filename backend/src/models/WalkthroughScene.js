@@ -48,6 +48,27 @@ const walkthroughSceneSchema = new mongoose.Schema(
       required: true,
     },
 
+    /**
+     * The exporter that produced this row, by its own content hash.
+     *
+     * Every other part of the key describes the *request*: the geometry, the
+     * room programme, the finishes, and a revision string the app sends. None
+     * of them move when the renderer does, so a new exporter — new furniture,
+     * new layout rules, a bug fixed — kept being answered with scenes the old
+     * one had built. Invalidating that meant bumping a constant by hand and
+     * hoping every client had been updated to send it, which is how the style
+     * kits shipped to nobody.
+     *
+     * The renderer already reports this hash on its health endpoint, and it
+     * covers the exporter's Python *and* its catalog assets. Storing it here
+     * means a scene can only be served by the renderer that built it, and the
+     * cache empties itself the moment one is deployed.
+     */
+    rendererSource: {
+      type: String,
+      default: "",
+    },
+
     // Touched on every hit. A scene nobody has opened in three months is a scene
     // whose GLB has almost certainly been evicted from the Modal volume anyway,
     // so keeping the row would only produce a 404 the app has to recover from.

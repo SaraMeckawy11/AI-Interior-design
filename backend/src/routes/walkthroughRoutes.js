@@ -235,6 +235,17 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
    */
   const forceRebuild = payload.forceRebuild === true;
 
+  /**
+   * Which exporter is live, before deciding whether a stored scene may answer.
+   *
+   * The readiness probe is memoised per process, so this costs one call to the
+   * renderer's health endpoint for the life of the server rather than one per
+   * request — and it is the only way this handler can know that the thing which
+   * built its cached rows has since been replaced.
+   */
+  const renderer = await rendererReadiness();
+  const rendererSource = typeof renderer.source === "string" ? renderer.source : "";
+
   // `findOneAndUpdate` rather than `findOne`, so reading a scene is also what
   // keeps it alive: the TTL index drops rows nobody has opened in 90 days.
   try {
@@ -243,13 +254,34 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
       { $set: { lastUsedAt: new Date() } },
       { new: true },
     );
-    if (cached) {
+    // A row built by a different exporter is not this plan's scene any more.
+    //
+    // Rows written before this field existed carry no source, and they are
+    // stale by the same test rather than by exception: we cannot say which
+    // renderer built them, a new one has demonstrably shipped, and guessing in
+    // their favour is precisely how a catalogue of new furniture reached
+    // nobody. They rebuild once, and then answer for themselves.
+    //
+    // When the *current* source is unknown — a locally spawned renderer, which
+    // reports none — there is nothing to compare and the row is trusted exactly
+    // as before, so local development does not rebuild on every request.
+    const staleRenderer = !!cached
+      && !!rendererSource
+      && cached.rendererSource !== rendererSource;
+    if (cached && !staleRenderer) {
       return res.json({
         ...cached.data,
         modelUrl: `/api/walkthrough/realtime/model/${cached.modelName}`,
         sceneKey: key,
+        rendererSource: cached.rendererSource || undefined,
         cached: true,
       });
+    }
+    if (staleRenderer) {
+      console.log(
+        `[walkthrough] rebuilding ${key.slice(0, 12)}: built by ${cached.rendererSource}, `
+        + `renderer is now ${rendererSource}`,
+      );
     }
   } catch (error) {
     // A cache that cannot be read is a slow request, not a failed one.
@@ -258,7 +290,6 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
 
   // A server that cannot import the exporter will spend four minutes failing
   // the same way for every request. Answer immediately, and say why.
-  const renderer = await rendererReadiness();
   if (!renderer.ready) {
     return res.status(503).json({
       message: "The 3D walkthrough service is not available right now.",
@@ -275,7 +306,7 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
     try {
       await WalkthroughScene.updateOne(
         { key },
-        { $set: { modelName, data, lastUsedAt: new Date() } },
+        { $set: { modelName, data, rendererSource, lastUsedAt: new Date() } },
         { upsert: true },
       );
     } catch (error) {
@@ -286,6 +317,7 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
       ...data,
       modelUrl: `/api/walkthrough/realtime/model/${modelName}`,
       sceneKey: key,
+      rendererSource: rendererSource || undefined,
       cached: false,
     });
   } catch (error) {
