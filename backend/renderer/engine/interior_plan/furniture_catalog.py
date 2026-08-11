@@ -246,7 +246,7 @@ STYLE_MODELS = {
         "wardrobe": _pro("GothicCabinet_01"),
         "bed": _pro("GothicBed_01"),
         "dining_table": _pro("gallinera_table"),
-        "dining_chair": _pro("dining_chair_02"),
+        "dining_chair": _pro("gallinera_chair"),  # 11.6k not 22k, placed 4-6x
         "bookshelf": _pro("Shelf_01"),
     },
 }
