@@ -10,16 +10,10 @@ same language. The important properties, in order of impact on output quality:
    constraint, not a preference.
 2. **Explicit programme.** "Redesign this bedroom" produces a mood board;
    naming the furniture a bedroom must contain produces a room.
-3. **Named colours, with their hex.** Interiors and exteriors both get exactly
-   the one, two or three colours the user picked, each named *and* specified —
-   `color-namer` returns things like "Quarter Spanish White", which no image
-   model has a reliable idea about, so the hex is the only unambiguous half.
-   Which surfaces each share lands on is written in the vocabulary of the mode:
-   a room's 30% is its soft furnishings, a facade's is its base course and trim.
-4. **Craft rules, then quality rules.** What a senior designer actually decides
-   — circulation clearances, light in layers, where a material may change — sits
-   between the brief and the photographic finish, so it filters the programme
-   above it and is filtered by the quality bar below.
+3. **Explicit colour count.** Interiors use a named 60/30/10 scheme; exteriors
+   use exactly the one, two or three facade colors the user selected.
+4. **Placement and quality rules last**, so they act as a final filter over
+   everything above.
 
 `build_prompt` is model-agnostic and returns the long-form brief used by
 FLUX.2 [klein]. `build_short_prompt` compresses the same brief into CLIP's
@@ -27,25 +21,6 @@ FLUX.2 [klein]. `build_short_prompt` compresses the same brief into CLIP's
 """
 
 from __future__ import annotations
-
-#: What the long brief is written to fit inside, in text-encoder tokens.
-#:
-#: FLUX.2 [klein] reads its prompt with a Qwen3 causal encoder, whose context is
-#: far larger than this — but diffusers pipelines have historically defaulted
-#: `max_sequence_length` to 512 and silently truncate past it, and a clause that
-#: is cut is a clause that was never sent. So the brief is written to fit, with
-#: the two things the user actually chose — their colours and their own note —
-#: placed high enough that boilerplate is what goes if anything ever does.
-#:
-#: `estimate_tokens` is a word-count heuristic, not a tokenizer: the point is to
-#: keep whoever edits these strings honest, not to be exact.
-PROMPT_TOKEN_BUDGET = 512
-
-
-def estimate_tokens(text: str) -> int:
-    """Roughly how many tokens a prompt costs. English prose runs ~1.35/word."""
-    return int(len(str(text or "").split()) * 1.35)
-
 
 STYLE_SPECS = {
     "modern": {
@@ -120,7 +95,7 @@ ROOM_PROGRAMS = {
 }
 
 EXTERIOR_PROGRAMS = {
-    "building": "resolve the facade hierarchy, entrance, base, roofline, material transitions and integrated exterior light",
+    "building": "resolve the full facade hierarchy, entrance, openings, base, roofline, material transitions and integrated exterior light",
     "balcony": "weather-safe floor finish, compact seating, privacy where useful, planters that do not block doors or drainage",
     "terrace": "outdoor lounge and dining zones, shade structure where structurally plausible, weather-safe lighting and planting",
     "garden": "clear paths, layered planting, a focal seating moment, practical edges and believable local horticulture",
@@ -163,28 +138,8 @@ def _program_text(space_type: str, mode: str) -> str:
     return table.get(key, f"the essential functional elements of a premium {space_type or mode}")
 
 
-def _hex(value) -> str:
-    """A #RRGGBB string, or "" for anything that is not one."""
-    text = str(value or "").strip().upper()
-    if not text:
-        return ""
-    if not text.startswith("#"):
-        text = "#" + text
-    if len(text) == 4 and all(c in "0123456789ABCDEF" for c in text[1:]):
-        return "#" + "".join(c * 2 for c in text[1:])
-    if len(text) == 7 and all(c in "0123456789ABCDEF" for c in text[1:]):
-        return text
-    return ""
-
-
-def _palette_entries(color_palette) -> tuple[tuple[str, str], ...] | None:
-    """The ordered colors the client selected, as (name, hex) pairs, or None.
-
-    Both halves earn their place. The name carries meaning a model already knows
-    how to render — "Sage" is a colour *and* a material world — while the hex is
-    the only unambiguous part: `color-namer` returns entries like "Quarter
-    Spanish White" and "Pale Oyster", which no image model has a reliable idea
-    about, and those names were until now the whole of what the palette said.
+def _palette_names(color_palette) -> tuple[str, ...] | None:
+    """The exact ordered colors selected by the client, or None.
 
     New clients send an explicit ``colors`` list and count. Legacy clients send
     dominant/secondary/accent fields, which remain a three-color scheme.
@@ -193,111 +148,72 @@ def _palette_entries(color_palette) -> tuple[tuple[str, str], ...] | None:
         return None
     explicit = color_palette.get("colors")
     if isinstance(explicit, list):
-        entries = []
+        names = []
         for entry in explicit[:3]:
-            if isinstance(entry, dict):
-                name = str(entry.get("name") or "").strip()
-                code = _hex(entry.get("hex"))
-            else:
-                name, code = str(entry or "").strip(), ""
-            if name or code:
-                entries.append((name or code, code))
-        if entries:
-            return tuple(entries)
+            value = entry.get("name") if isinstance(entry, dict) else entry
+            name = str(value or "").strip()
+            if name:
+                names.append(name)
+        if names:
+            return tuple(names)
 
     legacy = tuple(
-        (
-            str(color_palette.get(key) or "").strip(),
-            _hex(color_palette.get(key + "Hex")),
-        )
+        str(color_palette.get(key) or "").strip()
         for key in ("dominant", "secondary", "accent")
     )
-    return legacy if all(name for name, _ in legacy) else None
+    return legacy if all(legacy) else None
 
 
-def _palette_names(color_palette) -> tuple[str, ...] | None:
-    """Just the names, for the CLIP-budget prompt where a hex is not worth it."""
-    entries = _palette_entries(color_palette)
-    return tuple(name for name, _ in entries) if entries else None
-
-
-def _swatch(entry: tuple[str, str]) -> str:
-    """One colour, named and specified: ``Sage (#9DC183)``."""
-    name, code = entry
-    return f"{name} ({code})" if code else name
-
-
-def _exterior_palette_entries(color_tone: str, color_palette) -> tuple[tuple[str, str], ...]:
+def _exterior_palette_names(color_tone: str, color_palette) -> tuple[str, ...]:
     """Exterior colors, treating legacy auto-expanded palettes as one choice."""
-    entries = _palette_entries(color_palette)
+    names = _palette_names(color_palette)
     if isinstance(color_palette, dict):
-        if isinstance(color_palette.get("colors"), list) and entries:
-            return entries
+        if isinstance(color_palette.get("colors"), list) and names:
+            return names
         try:
             count = int(color_palette.get("colorCount"))
         except (TypeError, ValueError):
             count = 0
-        if entries and 1 <= count <= 3:
-            return entries[:count]
+        if names and 1 <= count <= 3:
+            return names[:count]
     # Old exterior clients selected one tone but sent three automatically
     # derived fields. The user's actual choice is color_tone, not those extras.
-    return ((str(color_tone or "Neutral").strip(), ""),)
-
-
-def _exterior_palette_names(color_tone: str, color_palette) -> tuple[str, ...]:
-    return tuple(name for name, _ in _exterior_palette_entries(color_tone, color_palette))
+    return (str(color_tone or "Neutral").strip(),)
 
 
 def _color_clause(color_tone: str, color_palette, mode: str) -> str:
-    """Write a mode-appropriate rule for exactly the selected color count.
-
-    Both modes get the same discipline and different vocabulary, because the
-    surfaces are not the same surfaces. A room's 30% is its soft furnishings; a
-    facade's 30% is its base course, its trim and its frames. Naming the wrong
-    ones is how an exterior brief ends up asking for cushions.
-    """
-    natural = "Natural stone, timber, glazing, sky and planting keep their real colors."
+    """Write a mode-appropriate rule for exactly the selected color count."""
+    names = _palette_names(color_palette)
     if mode == "exterior":
-        selected = _exterior_palette_entries(color_tone, color_palette)
+        selected = _exterior_palette_names(color_tone, color_palette)
         if len(selected) == 1:
             return (
-                f"FACADE COLOR — one pigmented color only, {_swatch(selected[0])}, on the whole "
-                f"rendered body. Invent no second paint color. {natural}"
+                f"Exterior color rule: use exactly one user-selected facade color, {selected[0]}, "
+                "as the only painted or pigmented architectural color. Do not invent a secondary "
+                "or accent paint color. Natural stone, timber, metal, glass, sky and planting keep "
+                "their physically realistic material colors and do not count as extra palette colors."
             )
         if len(selected) == 2:
             return (
-                f"FACADE COLOR — exactly two, matched to the hex: 70% {_swatch(selected[0])} on the "
-                f"body, 30% {_swatch(selected[1])} on base course, trim, fascia and frames. {natural}"
+                f"Exterior color rule: use exactly two user-selected facade colors and no others: "
+                f"70% {selected[0]} and 30% {selected[1]}. Natural material, glazing and landscape "
+                "colors remain physically realistic."
             )
         return (
-            f"FACADE COLOR 60/30/10 — these three only, matched to the hex: "
-            f"60% {_swatch(selected[0])} on the body and largest wall planes; "
-            f"30% {_swatch(selected[1])} on base course, trim, fascia and frames; "
-            f"10% {_swatch(selected[2])} on the front door and one deliberate detail. {natural}"
+            f"Exterior color 60/30/10: use exactly these three selected facade colors and no others: "
+            f"60% {selected[0]}, 30% {selected[1]}, 10% {selected[2]}. Natural material, glazing "
+            "and landscape colors remain physically realistic."
         )
 
-    entries = _palette_entries(color_palette)
-    if entries and len(entries) == 3:
-        dominant, secondary, accent = entries
+    if names and len(names) == 3:
+        dominant, secondary, accent = names
         return (
-            f"COLOR 60/30/10 — these three only, matched to the hex: "
-            f"60% {_swatch(dominant)} on walls and the largest surfaces; "
-            f"30% {_swatch(secondary)} on upholstery, curtains, rug and joinery; "
-            f"10% {_swatch(accent)} on cushions, art, ceramics and one considered object. {natural}"
-        )
-    if entries and len(entries) == 2:
-        dominant, secondary = entries
-        return (
-            f"COLOR — exactly two, matched to the hex: 70% {_swatch(dominant)} on walls and the "
-            f"largest surfaces, 30% {_swatch(secondary)} on textiles and secondary joinery. {natural}"
-        )
-    if entries:
-        return (
-            f"COLOR — one pigmented colour only, {_swatch(entries[0])}, across walls and the largest "
-            f"surfaces. Invent no second colour family. {natural}"
+            f"Color 60/30/10: 60% {dominant} on the largest surfaces, "
+            f"30% {secondary} on the secondary surfaces and soft furnishings, "
+            f"10% {accent} as the single controlled accent. Use no other colour family."
         )
     return (
-        f"COLOR 60/30/10: 60% {color_tone} dominant field, 30% one harmonizing "
+        f"Color 60/30/10: 60% {color_tone} dominant field, 30% one harmonizing "
         f"secondary tone, 10% one controlled contrasting accent."
     )
 
@@ -323,11 +239,15 @@ def build_prompt(
 
     is_building = mode == "exterior" and (space_type or "").strip().lower() == "building"
     geometry = (
-        "THE INPUT BUILDING IS AN IMMUTABLE STRUCTURAL TEMPLATE. Keep its footprint, silhouette, "
-        "massing, storey count, roof form, facade proportions, projections, balconies, stairs and "
-        "railings exactly as they are; every window and door at the same count, shape, size and sill "
-        "height; the camera, crop, perspective and surroundings unchanged. Style it through color, "
-        "finish, lighting and non-obscuring landscaping only."
+        "THE INPUT BUILDING IS AN IMMUTABLE STRUCTURAL TEMPLATE. Preserve 100% of its visible "
+        "architecture and pixel layout: identical footprint, silhouette, massing, story count, "
+        "floor heights, roof form and roofline, facade proportions, setbacks, projections, balconies, "
+        "columns, beams, slabs, stairs, railings and boundary walls. Keep the exact count, shape, size "
+        "and position of every window, door and opening, including sill and head heights. Keep the "
+        "camera position, crop, focal length, perspective, horizon and surrounding context unchanged. "
+        "Do not add, remove, move, resize, cover, merge or reinterpret any architectural element. "
+        "Apply the requested style only through color, surface finish, material finish, lighting and "
+        "non-obscuring landscaping; ignore any style or client instruction that would change structure."
         if is_building and preserve_geometry
         else
         "KEEP THE INPUT GEOMETRY EXACT: preserve every wall, window, door, opening, column, "
@@ -350,86 +270,39 @@ def build_prompt(
         if is_building
         else "CLIENT NOTE"
     )
-    # High in the brief, not at the end of it. See PROMPT_TOKEN_BUDGET: if
-    # anything is ever cut it should be the boilerplate, not the two things the
-    # person actually chose — their colours and their own words.
-    note = (custom_prompt or "").strip()
-    personal = f"\n{personal_label}: {note}\n" if note else ""
+    personal = f"\n{personal_label}: {custom_prompt.strip()}" if (custom_prompt or "").strip() else ""
 
-    # ── The craft rules ──────────────────────────────────────────────────────
-    # What a senior designer actually decides, rather than what a room or a
-    # facade contains. The programme clause above says a living room needs a
-    # sofa; this is the difference between a sofa in a picture and a sofa a
-    # photographer would shoot. Both blocks are deliberately short: they replace
-    # the old one-line placement rule rather than adding to it, because the
-    # image encoder's budget is finite and a clause that gets truncated is a
-    # clause that was never sent.
     if mode == "interior":
-        author = "senior interior designer"
-        craft = (
-            "- Scale: 90 cm walkways, seating close enough to talk across, a rug under the front legs"
-            " of every seat, art centred at eye level, a pendant one hand-span above its table.\n"
-            "- Light in three layers — ambient, task, accent — never one ceiling flood.\n"
-            "- One hero material, two supporting, one metal, each repeated at least twice; mix matte,"
-            " soft and reflective.\n"
-            "- One focal point. Style in odd-numbered groups, leave surfaces breathing, and give every"
-            " piece credible joinery and weight."
+        placement = (
+            "Keep all doors, windows and walkways clear. Furniture must be correctly scaled and square to the room. "
+            "Use generous negative space; never overlap plants and furniture; keep decor off the floor; one clear focal point."
         )
-        finish = "soft global illumination, realistic contact shadows, subtle reflections"
+        finish = "soft global illumination, realistic contact shadows, subtle reflections, 35mm architectural photography"
     else:
-        author = "senior residential architect and landscape designer"
-        craft = (
-            "- Read the facade as base, body and crown. Change material only at structural lines —"
-            " floor levels, corners, reveals — never mid-panel, heavier material low.\n"
-            "- Emphasise the entrance. Frames slim and identical throughout, reveals deep enough to"
-            " shadow, glazing reflecting sky. Consistent fascia, coping and downpipes that drain.\n"
-            "- Landscape in layers — tree, shrub, groundcover — credible for this climate, defined"
-            " bed edges, correct paving module and falls, nothing covering architecture.\n"
-            "- Light only from real fittings: step lights, wall grazers, one entrance light. Keep"
-            " paths, steps and vehicle routes usable."
+        placement = (
+            "Keep entrances, windows, vehicle paths, drainage, steps and circulation fully usable. "
+            "Planting must not cover architecture. All outdoor furniture, finishes and lights must be "
+            "weather-credible and correctly scaled."
         )
-        finish = "credible daylight, accurate facade shadows, realistic sky reflections"
+        finish = "credible daylight, accurate facade shadows, realistic sky reflections, 35mm architectural photography"
 
-    def assemble(personal_block: str) -> str:
-        return _ASSEMBLED.format(
-            space_type=space_type, design_style=design_style, mode=mode, author=author,
-            geometry=geometry, program=program, style_text=style_text, material=material,
-            color=_color_clause(color_tone, color_palette, mode), lighting=lighting,
-            freedom=freedom, personal=personal_block, craft=craft, finish=finish,
-        ).strip()
-
-    brief = assemble(personal)
-    # The one case that can run over: the longest space brief plus a client note
-    # at its full length. Trimming whole words off the end of the note is a
-    # defined loss; letting the encoder cut wherever 512 lands is not — it would
-    # take the quality bar or a craft rule and leave no trace that it had.
-    while note and estimate_tokens(brief) > PROMPT_TOKEN_BUDGET:
-        words = note.split()
-        if len(words) <= 8:
-            break
-        note = " ".join(words[:-4])
-        brief = assemble(f"\n{personal_label}: {note}\n")
-    return brief
-
-
-#: The shape of the long brief. Kept as a template rather than an f-string so it
-#: can be assembled more than once — see the budget trim in `build_prompt`.
-_ASSEMBLED = """Redesign this real {space_type} as a {design_style} {mode}, to the standard of a {author}. Photorealistic architectural photograph, not a collage or illustration.
+    return f"""Redesign this real {space_type} as a {design_style} {mode} concept. Produce a photorealistic architecture magazine image, not a collage or illustration.
 
 NON-NEGOTIABLE SPATIAL CONSTRAINT:
 {geometry}
 
 DESIGN DIRECTION:
 - Program: {program}.
-- Style: {style_text}; {material} is the hero material.
-- {color}
-- Lighting: {lighting}; keep the source photograph's light direction.
+- Style vocabulary: {style_text}; make {material} the hero material.
+- {_color_clause(color_tone, color_palette, mode)}
+- Lighting: {lighting}. Preserve believable light direction from the source photograph.
 - Creative character: {freedom}.
-{personal}
-DESIGN CRAFT:
-{craft}
 
-QUALITY: resolve every surface — no unfinished patches, warped, duplicated or floating objects, text, people, logos, watermark. Editorial 35mm photograph: {finish}, crisp microtexture, balanced color grading."""
+PLACEMENT AND QUALITY:
+- {placement}
+- Fully resolve every visible surface. No unfinished patches, warped furniture, repeated objects, floating objects, illegible text, people, logos or watermark.
+- Finish as a high-end editorial photograph with {finish}, crisp material microtexture and balanced professional color grading.{personal}
+""".strip()
 
 
 def build_short_prompt(
@@ -469,12 +342,8 @@ def build_short_prompt(
         palette = f"{names[0].lower()} 60 {names[1].lower()} 30 {names[2].lower()} 10 palette"
     else:
         palette = f"{color_tone.lower()} 60/30/10 palette"
-    # No hex codes and no craft rules here: CLIP truncates at 77 tokens, a hex is
-    # four of them for something the encoder cannot read as a colour anyway, and
-    # a rule that arrives after the cut is worse than one that was never written.
-    # "professionally designed" is two tokens and buys the same register.
     return (
-        f"photorealistic professionally designed {design_style.lower()} {space_type.lower()} {mode}, "
-        f"{program}, {materials}{hero}, {palette}, {light}, "
+        f"photorealistic {design_style.lower()} {space_type.lower()} {mode}, {program}, "
+        f"{materials}{hero}, {palette}, {light}, "
         f"{lock}architectural photography, 8k, sharp material detail"
     )

@@ -342,12 +342,15 @@ export default function Interior() {
         setModalVisible(true);
       }
 
-      setPrompt('');
-      setImage(null);
-      setImageBase64(null);
-      // setRoomType('Living Room');
-      // setDesignStyle('Modern');
-      // setColorTone('Neutral');
+      // The brief stays exactly as it was.
+      //
+      // Generating used to clear the photo, the note and nothing else — so
+      // coming back from the result to try the same room in a different style
+      // meant finding and re-uploading the photo you had just used, while the
+      // room type and style you did *not* want to keep were still sitting there.
+      // Trying a second variation is the normal next thing to do, and it now
+      // costs one tap on the style you want. The screen is reset by leaving it,
+      // which is what "start a new design" already means.
     } catch (error) {
       console.error('Error generating design:', error);
       setModalData({

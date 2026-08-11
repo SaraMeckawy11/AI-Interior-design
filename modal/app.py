@@ -1119,10 +1119,8 @@ def health():
         "engines": {"default": FLUX_MODEL_ID, "guided": "Lykon/dreamshaper-8 + depth/seg ControlNet"},
         # Bump whenever prompt_engine.py changes what the model is asked for, so
         # a deployed service can be told apart from the one before it without
-        # reading a build log. "exact-colors" described the era when an exterior
-        # got one facade colour; both modes now get the full named-and-hexed
-        # scheme plus the senior-designer craft rules.
-        "promptEngine": "gen-klein-v3-hex-palette-craft-rules",
+        # reading a build log.
+        "promptEngine": "gen-klein-v2-building-lock-exact-colors",
     }
 
 

@@ -313,12 +313,10 @@ export default function Exterior() {
         setModalVisible(true);
       }
 
-      setPrompt('');
-      setImage(null);
-      setImageBase64(null);
-      // setRoomType('Living Room');
-      // setDesignStyle('Modern');
-      // setColorTone('Neutral');
+      // The brief stays exactly as it was — see the matching note in interior.jsx.
+      // Generating cleared the photo and the note but kept the space type, the
+      // style and the colour, which is the wrong half: the photo is the
+      // expensive input and the style is the one you came back to change.
     } catch (error) {
       console.error('Error generating design:', error);
       setModalData({
