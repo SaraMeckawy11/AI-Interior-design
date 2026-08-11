@@ -618,6 +618,15 @@ export default function WalkthroughScreen() {
   // to know whether there is anything to build, not which object said so.
   const hasRooms = layout.rooms.length > 0;
 
+  // The styles on offer, plus whatever this plan was actually built as — see
+  // the note on WALKTHROUGH_STYLES about the two that were retired.
+  const styleOptions = useMemo(
+    () => (WALKTHROUGH_STYLES.includes(settings.style)
+      ? WALKTHROUGH_STYLES
+      : [...WALKTHROUGH_STYLES, settings.style]),
+    [settings.style],
+  );
+
   // Build the scene with the canonical Livinai_web exporter. Rendering a
   // second, approximate room programme on-device was the source of mismatched
   // dimensions, furniture families, placement and finishes. The exporter owns
@@ -2454,7 +2463,11 @@ export default function WalkthroughScreen() {
                         <Text style={styles.cardSectionTitle}>Direction</Text>
                       </View>
                       {/* One style for the whole home, asked once. */}
-                      <ChipRow label="Design style" options={WALKTHROUGH_STYLES} value={settings.style} onChange={(v) => updateSetting("style", v)} />
+                      {/* A plan saved under a style that has since been retired
+                          keeps it, and keeps it selectable, rather than opening
+                          with nothing highlighted and no way back to what it
+                          was actually built as. */}
+                      <ChipRow label="Design style" options={styleOptions} value={settings.style} onChange={(v) => updateSetting("style", v)} />
                       <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
                       <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
                       {/* The three colours the mood actually resolves to. The

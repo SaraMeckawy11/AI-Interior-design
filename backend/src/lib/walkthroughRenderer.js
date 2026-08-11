@@ -131,6 +131,7 @@ export function describeRendererFailure(stderr = "") {
  */
 let readinessPromise = null;
 let readinessFailedAt = 0;
+let lastKnownSource = "";
 
 export function rendererReadiness({ refresh = false } = {}) {
   const expired = readinessFailedAt && Date.now() - readinessFailedAt > READINESS_RETRY_MS;
@@ -138,10 +139,26 @@ export function rendererReadiness({ refresh = false } = {}) {
     readinessFailedAt = 0;
     readinessPromise = probeRenderer().then((state) => {
       if (!state.ready) readinessFailedAt = Date.now();
+      if (typeof state.source === "string" && state.source) lastKnownSource = state.source;
       return state;
     });
   }
   return readinessPromise;
+}
+
+/**
+ * The exporter's content hash, if we already happen to know it.
+ *
+ * Callers that only want to spot a renderer having changed under them must not
+ * pay a network probe to find out — the scene cache reads this on the fastest
+ * path in the feature, where a hit should cost one indexed lookup and nothing
+ * else. So this never awaits: it starts the probe if it has not run, returns
+ * what is known, and an empty string means "cannot say yet", which every caller
+ * treats as "carry on".
+ */
+export function knownRendererSource() {
+  if (!readinessPromise) rendererReadiness().catch(() => {});
+  return lastKnownSource;
 }
 
 function probeRenderer() {

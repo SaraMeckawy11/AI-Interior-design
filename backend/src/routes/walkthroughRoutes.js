@@ -4,6 +4,7 @@ import cloudinary from "../lib/cloudinary.js";
 import {
   buildWalkthroughModel,
   ensureWalkthroughModel,
+  knownRendererSource,
   rendererReadiness,
   walkthroughModelPath,
 } from "../lib/walkthroughRenderer.js";
@@ -236,15 +237,20 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
   const forceRebuild = payload.forceRebuild === true;
 
   /**
-   * Which exporter is live, before deciding whether a stored scene may answer.
+   * Which exporter is live — but never at the cost of making a hit wait.
    *
-   * The readiness probe is memoised per process, so this costs one call to the
-   * renderer's health endpoint for the life of the server rather than one per
-   * request — and it is the only way this handler can know that the thing which
-   * built its cached rows has since been replaced.
+   * This used to `await rendererReadiness()` before touching the cache, so the
+   * fastest path in the whole feature, answering a known plan out of the
+   * database, was put behind a network probe to Modal. On a cold instance that
+   * is the difference between an instant open and a visible pause, and it was
+   * paid by every request that had nothing to invalidate.
+   *
+   * The probe is memoised, so the value is already there on all but the first
+   * request. Take it when it is, start it when it is not, and let a scene that
+   * cannot be checked yet answer — one more open will check it. Nothing is lost
+   * except the invalidation happening a single request later than it could.
    */
-  const renderer = await rendererReadiness();
-  const rendererSource = typeof renderer.source === "string" ? renderer.source : "";
+  const rendererSource = knownRendererSource();
 
   // `findOneAndUpdate` rather than `findOne`, so reading a scene is also what
   // keeps it alive: the TTL index drops rows nobody has opened in 90 days.
@@ -289,7 +295,13 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
   }
 
   // A server that cannot import the exporter will spend four minutes failing
-  // the same way for every request. Answer immediately, and say why.
+  // the same way for every request. Answer immediately, and say why. Only a
+  // miss gets this far, so awaiting the probe here costs nothing a build was
+  // not about to cost anyway.
+  const renderer = await rendererReadiness();
+  // Now that the probe has resolved, stamp the row with what actually built it
+  // rather than with whatever was known before the request started.
+  const builtBySource = (typeof renderer.source === "string" && renderer.source) || rendererSource;
   if (!renderer.ready) {
     return res.status(503).json({
       message: "The 3D walkthrough service is not available right now.",
@@ -306,7 +318,7 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
     try {
       await WalkthroughScene.updateOne(
         { key },
-        { $set: { modelName, data, rendererSource, lastUsedAt: new Date() } },
+        { $set: { modelName, data, rendererSource: builtBySource, lastUsedAt: new Date() } },
         { upsert: true },
       );
     } catch (error) {
@@ -317,7 +329,7 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
       ...data,
       modelUrl: `/api/walkthrough/realtime/model/${modelName}`,
       sceneKey: key,
-      rendererSource: rendererSource || undefined,
+      rendererSource: builtBySource || undefined,
       cached: false,
     });
   } catch (error) {
