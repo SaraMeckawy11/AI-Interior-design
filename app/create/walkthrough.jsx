@@ -653,7 +653,8 @@ export default function WalkthroughScreen() {
       try {
         // The device's copy of this exact scene. `rebuildScene` is what clears
         // it, so pressing Retry after a dead model still goes to the network.
-        const stored = forceRebuild.current ? null : await readStoredScene(sceneSignature);
+        const rebuilding = forceRebuild.current;
+        const stored = rebuilding ? null : await readStoredScene(sceneSignature);
         if (controller.signal.aborted) return;
         if (stored) {
           const origin = stored.origin || rendererRoot.match(/^https?:\/\/[^/]+/)?.[0] || rendererRoot;
@@ -673,6 +674,10 @@ export default function WalkthroughScreen() {
           },
           body: JSON.stringify({
             rendererRevision: LIVINAI_WEB_RENDERER_REVISION,
+            // Clearing the two copies on the device is only half of a rebuild:
+            // without this the server answers the identical request from its
+            // own row and hands back the very scene being replaced.
+            ...(rebuilding ? { forceRebuild: true } : {}),
             rooms: planLayout.rooms,
             doors: planLayout.doors.map((opening) => opening.slice(0, 2)),
             windows: planLayout.windows.map((opening) => opening.slice(0, 2)),

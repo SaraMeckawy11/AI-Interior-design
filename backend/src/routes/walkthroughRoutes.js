@@ -220,10 +220,25 @@ router.post("/realtime/session", isAuthenticated, async (req, res) => {
   const payload = req.body || {};
   const key = sceneCacheKey(payload);
 
+  /**
+   * "Rebuild" has to mean rebuild, here as well as on the device.
+   *
+   * The app clears its two local copies and asks again — but the request that
+   * follows is identical to the one that produced the row in the first place,
+   * so this handler answered from the cache and returned the very scene the
+   * user was trying to get rid of. Pressing Rebuild could not change anything,
+   * which made it worse than no button at all.
+   *
+   * Not part of `sceneCacheKey`: this says how to answer, not what to build,
+   * and the fresh scene is still written under the same key so the next person
+   * with this plan gets it for free.
+   */
+  const forceRebuild = payload.forceRebuild === true;
+
   // `findOneAndUpdate` rather than `findOne`, so reading a scene is also what
   // keeps it alive: the TTL index drops rows nobody has opened in 90 days.
   try {
-    const cached = await WalkthroughScene.findOneAndUpdate(
+    const cached = forceRebuild ? null : await WalkthroughScene.findOneAndUpdate(
       { key },
       { $set: { lastUsedAt: new Date() } },
       { new: true },

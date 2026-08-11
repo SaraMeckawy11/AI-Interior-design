@@ -88,7 +88,11 @@ DEFAULT_MODELS = {
     "toilet": None,
     "shower": "shower.glb",
     "bathtub": "bathtub.glb",
-    "plant": "pro/potted_plant_01/potted_plant_01_1k.gltf",
+    # potted_plant_01 is 176,000 triangles — a fifth of the whole catalogue in
+    # one asset, and a plant is staged in most rooms, so a four-room flat carried
+    # half a million triangles of foliage alone. potted_plant_04 is the same
+    # subject at 8,900.
+    "plant": "pro/potted_plant_04/potted_plant_04_1k.gltf",
     "wall_art": (
         "pro/hanging_picture_frame_01/"
         "hanging_picture_frame_01_1k.gltf"
@@ -108,6 +112,25 @@ DEFAULT_MODELS = {
 def _pro(folder: str, filename: str | None = None) -> str:
     """A `pro/` catalog path. Poly Haven names its 1k glTF after the folder."""
     return f"pro/{folder}/{filename or folder + '_1k.gltf'}"
+
+
+# ── Weight ─────────────────────────────────────────────────────────────────
+#
+# Nothing in this pipeline decimates, and the GLB is downloaded to a phone and
+# rendered in a WebView, so a model's triangle count is paid in full — once per
+# instance, since the exporter merges geometry rather than instancing it.
+#
+# That makes *how often a piece is placed* matter more than how big it looks.
+# A dining chair is put around the table four to six times, so a 40,000-triangle
+# chair costs a quarter of a million triangles in one room; the armchair beside
+# it, placed once, costs 40,000. Poly Haven models range from 182 triangles to
+# 176,000, and picking without checking is how the walkthrough became too heavy
+# to open.
+#
+# Rough budgets when adding to a kit, measured with trimesh:
+#   placed 4-6x (dining chairs, stools)      under  6,000
+#   placed 1-2x (sofa, bed, cabinet, table)  under 50,000
+#   staged in nearly every room (plants)     under 10,000
 
 
 # ── Style kits ─────────────────────────────────────────────────────────────
@@ -132,7 +155,7 @@ STYLE_MODELS = {
         "tv_unit": _pro("modern_wooden_cabinet"),
         "sideboard": _pro("modern_wooden_cabinet"),
         "dining_table": _pro("round_wooden_table_01"),
-        "dining_chair": _pro("sheen_chair", "SheenChair.glb"),
+        "dining_chair": _pro("GreenChair_01"),  # 4.2k, placed 4-6x
         "bookshelf": _pro("wooden_display_shelves_01"),
         "bed": None,
     },
@@ -146,7 +169,7 @@ STYLE_MODELS = {
         "tv_unit": _pro("vintage_cabinet_01"),
         "sideboard": _pro("vintage_cabinet_01"),
         "dining_table": _pro("round_wooden_table_02"),
-        "dining_chair": _pro("WoodenChair_01"),
+        "dining_chair": _pro("GreenChair_01"),  # 4.2k, placed 4-6x
         "bookshelf": _pro("wooden_display_shelves_01"),
         "bed": None,
     },
@@ -185,7 +208,7 @@ STYLE_MODELS = {
         # Japandi rather than as an antique.
         "bed": _pro("vintage_day_bed"),
         "dining_table": _pro("WoodenTable_01"),
-        "dining_chair": _pro("WoodenChair_01"),
+        "dining_chair": _pro("painted_wooden_chair_01"),  # 0.7k, placed 4-6x
         "bookshelf": _pro("Shelf_01"),
     },
     "industrial": {
@@ -198,7 +221,7 @@ STYLE_MODELS = {
         "bookshelf": _pro("steel_frame_shelves_01"),
         "bed": _pro("old_bed_frame"),
         "dining_table": _pro("wooden_table_02"),
-        "dining_chair": _pro("WoodenChair_01"),
+        "dining_chair": _pro("SchoolChair_01"),  # 5.1k metal frame, placed 4-6x
         "desk": _pro("metal_office_desk"),
     },
     "boho": {
