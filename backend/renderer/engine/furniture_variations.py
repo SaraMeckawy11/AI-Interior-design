@@ -298,11 +298,21 @@ def build_sofa(furnisher, original, palette, w=2.2, d=0.95):
                 meshes.append(wing)
         elif variant == 9:
             # Armless daybed silhouette with cylindrical end bolsters.
+            #
+            # The bolster is as tall as it is wide, which is what makes it read
+            # as a cylinder at roundness 0.58. That height was missing entirely,
+            # so `dark_fabric` slid into the `height` parameter and `color` was
+            # left unfilled — a TypeError raised out of the whole furnishing
+            # pass, leaving the room empty. It only showed up on the one sofa
+            # seed in ten that picks this variant, and the seed includes the
+            # style, so changing style could land on it for the first time and
+            # look as though the new furniture had simply not arrived.
             for side in (-1, 1):
                 meshes.append(_rounded(
                     original,
                     0.26,
                     d - 0.18,
+                    0.26,
                     dark_fabric,
                     cx=side * (w / 2 - 0.15),
                     cy=0.03,
