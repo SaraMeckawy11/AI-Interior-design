@@ -2451,10 +2451,25 @@ export default function WalkthroughScreen() {
                   />
                 ) : (
                   <>
-                    {/* Four questions in one undifferentiated card asked the
-                        reader to notice on their own that two of them are about
-                        taste and two are about materials. They are the same two
-                        pairs the whole flow is built on, so they are two cards. */}
+                    {/* Two questions, and they are the two that decide what gets
+                        built: what the home looks like, and how much is in it.
+                        This was five, across two cards, and the other three are
+                        refinements with working defaults — so they wait behind
+                        the disclosure below rather than standing between someone
+                        and their home.
+
+                        Colour mood is gone rather than moved. It mixed 34% into
+                        the walls, but a wall finish then mixes 72% over the top,
+                        so once any finish is chosen the mood moves a wall by
+                        under 1% and a sofa by at most 7%. The only thing it
+                        visibly changed was the accent — cushions and one object.
+                        It read as a colour control and behaved like a rounding
+                        error, which is what made it feel broken.
+
+                        The colour decision now lives in the one place it is
+                        actually honoured: the Render sheet picks a tone and
+                        sends it to a model that paints with it. Asking here as
+                        well was asking twice and answering once. */}
                     <View style={[styles.card, styles.cardFirst]}>
                       <View style={styles.cardSectionHead}>
                         <View style={styles.cardSectionIcon}>
@@ -2462,30 +2477,12 @@ export default function WalkthroughScreen() {
                         </View>
                         <Text style={styles.cardSectionTitle}>Direction</Text>
                       </View>
-                      {/* One style for the whole home, asked once. */}
                       {/* A plan saved under a style that has since been retired
                           keeps it, and keeps it selectable, rather than opening
-                          with nothing highlighted and no way back to what it
-                          was actually built as. */}
+                          with nothing highlighted and no way back to what it was
+                          actually built as. */}
                       <ChipRow label="Design style" options={styleOptions} value={settings.style} onChange={(v) => updateSetting("style", v)} />
                       <ChipRow label="Design profile" options={DESIGN_PROFILES} value={settings.designProfile} onChange={(v) => updateSetting("designProfile", v)} />
-                      <ChipRow label="Colour mood" options={COLOR_MOODS} value={settings.colorMood} onChange={(v) => updateSetting("colorMood", v)} />
-                      {/* The three colours the mood actually resolves to. The
-                          chip row named a mood and showed none of it, so the one
-                          choice on this step that is entirely about colour was
-                          the only one with nothing to look at. */}
-                      <PalettePreview tone={settings.colorMood} />
-                    </View>
-
-                    <View style={styles.card}>
-                      <View style={styles.cardSectionHead}>
-                        <View style={styles.cardSectionIcon}>
-                          <Ionicons name="layers-outline" size={16} color={COLORS.primaryDark} />
-                        </View>
-                        <Text style={styles.cardSectionTitle}>Surfaces</Text>
-                      </View>
-                      <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
-                      <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
                     </View>
 
                     <Pressable
@@ -2503,16 +2500,28 @@ export default function WalkthroughScreen() {
                       />
                     </Pressable>
 
-                    {/* Everything past the four questions above lives behind one
-                        disclosure, closed by default. Rugs, curtains and decor
-                        all default to "Auto by style" and are read by the same
+                    {/* Everything past the two questions above lives behind one
+                        disclosure, closed by default. Every field in here
+                        defaults to "Auto by style" and is read by the same
                         designer that reads the profile, so a plan is complete
-                        without opening this — and "Walk through walls" joined
-                        them because it is a preference about the camera, not a
-                        decision about the home, and it was the only control on
-                        the step that changed nothing about what gets built. */}
+                        without ever opening it.
+
+                        Floor and wall finish moved down here with the rest.
+                        They do change what you see — a finish replaces the
+                        floor colour outright — but they are a choice about
+                        materials, and the style above has already made a good
+                        one. Someone who wants oak instead of stone comes
+                        looking; someone who wants a home does not have to
+                        answer first.
+
+                        "Walk through walls" is here because it is a preference
+                        about the camera rather than a decision about the home —
+                        the only control on the step that changes nothing about
+                        what gets built. */}
                     {styleExpanded && (
                       <View style={styles.card}>
+                        <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
+                        <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
                         <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
                         <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
                         <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
