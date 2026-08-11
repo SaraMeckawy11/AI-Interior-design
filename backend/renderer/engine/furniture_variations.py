@@ -1622,7 +1622,27 @@ def install(original):
                 )
             return built
 
-        return build_original_variation
+        # The variation is the *fallback*, not the answer.
+        #
+        # This used to return `build_original_variation` directly, and this
+        # dictionary names every major piece of furniture — sofa, armchair,
+        # coffee table, dining table and chairs, bed, nightstand, wardrobe,
+        # sideboard, desk, bookshelf, TV unit. So for all of them the catalogue
+        # branch in `base_method` was never reached, and every room was
+        # furnished with procedural geometry. Only the assets missing from this
+        # dictionary — wall art, sconces, ceiling lights, plants, bathroom
+        # fixtures — ever loaded a real model, which is why a walkthrough could
+        # have a photoreal pendant hanging over a sofa built from boxes, and why
+        # changing the design style moved the palette and nothing else.
+        #
+        # Handing the variation to `base_method` as its procedural builder keeps
+        # both halves honest: the catalogue answers when the style kit names a
+        # model, and the variation still answers when the kit says None, when the
+        # model cannot be loaded, and when the piece is deliberately designed to
+        # the room, like the kitchen island. It also still runs first inside the
+        # wrapper, so its measured width and depth are what the catalogue model
+        # is scaled to.
+        return base_method(self, asset_key, build_original_variation)
 
     original.RoomFurnisher.furniture_builder = furniture_builder
 
