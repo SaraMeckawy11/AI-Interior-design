@@ -298,20 +298,17 @@ def build_sofa(furnisher, original, palette, w=2.2, d=0.95):
                 meshes.append(wing)
         elif variant == 9:
             # Armless daybed silhouette with cylindrical end bolsters.
-            #
-            # The bolster is as tall as it is wide, which is what makes it read
-            # as a cylinder at roundness 0.58. That height was missing entirely,
-            # so `dark_fabric` slid into the `height` parameter and `color` was
-            # left unfilled — a TypeError raised out of the whole furnishing
-            # pass, leaving the room empty. It only showed up on the one sofa
-            # seed in ten that picks this variant, and the seed includes the
-            # style, so changing style could land on it for the first time and
-            # look as though the new furniture had simply not arrived.
             for side in (-1, 1):
                 meshes.append(_rounded(
                     original,
                     0.26,
                     d - 0.18,
+                    # The bolster is as tall as it is wide, which is what makes
+                    # it read as a cylinder at roundness 0.58. This height was
+                    # missing, so `dark_fabric` slid into `height` and `color`
+                    # went unfilled — a TypeError out of the whole furnishing
+                    # pass that left the room empty, on the one sofa seed in ten
+                    # that picks this variant.
                     0.26,
                     dark_fabric,
                     cx=side * (w / 2 - 0.15),
@@ -1622,33 +1619,25 @@ def install(original):
                 )
             return built
 
-        # The variation is the *fallback*, not the answer.
-        #
-        # This used to return `build_original_variation` directly, and this
-        # dictionary names every major piece of furniture — sofa, armchair,
-        # coffee table, dining table and chairs, bed, nightstand, wardrobe,
-        # sideboard, desk, bookshelf, TV unit. So for all of them the catalogue
-        # branch in `base_method` was never reached, and every room was
-        # furnished with procedural geometry. Only the assets missing from this
-        # dictionary — wall art, sconces, ceiling lights, plants, bathroom
-        # fixtures — ever loaded a real model, which is why a walkthrough could
-        # have a photoreal pendant hanging over a sofa built from boxes, and why
-        # changing the design style moved the palette and nothing else.
-        #
-        # Handing the variation to `base_method` as its procedural builder keeps
-        # both halves honest: the catalogue answers when the style kit names a
-        # model, and the variation still answers when the kit says None, when the
-        # model cannot be loaded, and when the piece is deliberately designed to
-        # the room, like the kitchen island. It also still runs first inside the
-        # wrapper, so its measured width and depth are what the catalogue model
-        # is scaled to.
-        return base_method(self, asset_key, build_original_variation)
+        return build_original_variation
 
     original.RoomFurnisher.furniture_builder = furniture_builder
 
     def art_on(self, slot_info, w=1.25):
         if not self.wants_wall_decor or self._window_behind(slot_info, w):
             return
+        # One picture per room.
+        #
+        # `art_on` is called after the sofa, the sideboard, the bed, the desk
+        # and the console, so a living room that happened to fit all of them
+        # ended up with four framed pictures on four walls. That is not how a
+        # room is styled, and each one is a textured model the phone has to
+        # download. A layered scheme may have two; nothing gets more.
+        limit = 2 if self.design_choices["decor_set"] == "layered" else 1
+        hung = getattr(self, "_livinai_art_hung", 0)
+        if hung >= limit:
+            return
+        self._livinai_art_hung = hung + 1
         room_type = str(self.config.get("room_type", "")).lower()
         if "office" in room_type:
             return base_art_on(self, slot_info, w=w)

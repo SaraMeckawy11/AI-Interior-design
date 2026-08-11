@@ -2332,42 +2332,20 @@ def build_room_design_surfaces(room_m, edges, P, config):
                 )
                 meshes.append(panel)
 
-        if treatment == "wood slats":
-            slat_color = _shade(P["wood_dark"], 0.92)
-            spacing = 0.23 if profile == "airy" else 0.17
-            offset = -width / 2 + spacing / 2
-            while offset < width / 2:
-                center = middle + direction * offset
-                sa = center - direction * 0.018
-                sb = center + direction * 0.018
-                slat = _wall_strip(
-                    sa, sb, 0.16, WALL_H - 0.16, 0.04, slat_color,
-                    inward, WALL_THICKNESS / 2 + 0.052,
-                )
-                if slat:
-                    meshes.append(slat)
-                offset += spacing
-        elif treatment == "panel moulding":
-            # Calm full-height proportions match the classic furniture family
-            # without mixing in the former industrial sconces or timber slats.
-            moulding = _shade(P["wall"], 0.78)
-            for z in (0.88, 2.10):
-                rail = _wall_strip(
-                    fa, fb, z, z + 0.035, 0.04, moulding,
-                    inward, WALL_THICKNESS / 2 + 0.052,
-                )
-                if rail:
-                    meshes.append(rail)
-            for offset in (-width * 0.28, width * 0.28):
-                center = middle + direction * offset
-                va = center - direction * 0.018
-                vb = center + direction * 0.018
-                rail = _wall_strip(
-                    va, vb, 0.28, 2.38, 0.04, moulding,
-                    inward, WALL_THICKNESS / 2 + 0.052,
-                )
-                if rail:
-                    meshes.append(rail)
+        # No applied battens or rails on the feature wall.
+        #
+        # "Wood slats" drew a 4 cm strip every 17 cm across the whole wall, and
+        # "panel moulding" drew two horizontal rails plus two verticals. At the
+        # size these render they do not read as joinery — they read as lines
+        # ruled onto the paint, and the moulding in particular put a stray band
+        # across a classic room at chair-rail height with nothing to justify it.
+        # A real slatted wall needs geometry with depth and a shadow gap, and a
+        # real panelled wall needs mitred frames; neither is a strip.
+        #
+        # The tinted feature panel above stays, because a wall painted a
+        # different tone is a design decision that survives being flat. What is
+        # left is the finish colour and the texture, which is what these
+        # treatments were reaching for in the first place.
 
         # Sconces are now part of a compatible classic/industrial lighting
         # family instead of being mixed into every room style.
@@ -2735,17 +2713,16 @@ class RoomFurnisher:
                     from furniture_catalog import load_catalog_asset
 
                     style_name = self.config.get("style", "Modern")
-                    # The kitchen island is fitted joinery sized to the room, so
-                    # a fixed model can never fit it; that one stays designed.
-                    #
-                    # The bed used to be forced procedural for every style
-                    # except Classic, which meant the largest object in almost
-                    # every bedroom was a stack of rounded cuboids next to
-                    # photoreal furniture. Whether a bed is drawn or loaded is
-                    # now the style kit's decision like everything else: a kit
-                    # naming a model gets it, a kit naming None keeps the
-                    # designed one.
-                    use_designer_geometry = asset_key == "kitchen_island"
+                    use_designer_geometry = (
+                        (
+                            asset_key == "bed"
+                            and not any(
+                                word in str(style_name).lower()
+                                for word in ("classic", "traditional")
+                            )
+                        )
+                        or asset_key == "kitchen_island"
+                    )
                     generated = (
                         None
                         if use_designer_geometry
@@ -3465,7 +3442,13 @@ class RoomFurnisher:
                 self.place_dining_zone(compact=compact_dining)
                 or self.place_dining_zone(compact=True)
             )
-            if dining_zone:
+            # A dining sideboard only where the room can carry a second large
+            # cabinet. This living room already has a media console against a
+            # wall; adding another full-size case piece to a 20 m² room that is
+            # also hosting dining crowds the floor and adds a second cabinet to
+            # download for no design gain. The programme note has always said
+            # "sideboard only where circulation permits" — this is that.
+            if dining_zone and self.poly.area >= 26.0:
                 sideboard_builder = self.furniture_builder(
                     "sideboard", build_sideboard
                 )
@@ -4204,12 +4187,16 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
     furniture_objects = []
     room_polys = []
     room_lights = []
+    # Floor colours, so a door threshold can take a shade that belongs to
+    # the rooms it joins rather than to whichever one happened to be last.
+    room_floor_colors = []
 
     for i, room in enumerate(rooms_m):
         cfg = room_configs[i] if i < len(room_configs) else {}
         style = cfg.get("style", "Modern")
         rtype = cfg.get("room_type", "Living Room")
         P = get_palette(style, cfg)
+        room_floor_colors.append(list(P["floor"]))
 
         poly = Polygon([(p[0], p[1]) for p in room])
         if not poly.is_valid:
@@ -4300,8 +4287,23 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
     base.translate((0, 0, -0.01))
     meshes.append(base)
 
-    # ---- threshold floor strips under every door (rooms' floors don't
-    # cover the wall band between two detected polygons) ----
+    # ---- threshold under every door ----
+    #
+    # The rooms' own floors stop at their polygons, so the wall band between two
+    # of them needs covering or you see through to nothing. That is all this is
+    # for — but it was a mid-brown plate 30 cm wider than the opening and 55 cm
+    # deep on each side, raised 12 mm proud of the floor, in a colour belonging
+    # to no finish the user picked. In a wide kitchen opening it read as a plank
+    # laid across the middle of the room.
+    #
+    # It now spans the opening and the wall band and nothing more, sits flush
+    # rather than proud, and takes the room's own floor colour so a threshold
+    # looks like the floor continuing rather than a strip of something else.
+    threshold_color = (
+        _shade(list(np.mean(room_floor_colors, axis=0)), 0.98)
+        if room_floor_colors
+        else [0.55, 0.45, 0.36]
+    )
     for a, b in door_infos:
         c = (a + b) / 2
         d = b - a
@@ -4309,8 +4311,8 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
         if L < 1e-6:
             continue
         ang = math.atan2(d[1], d[0])
-        strip = _bx(max(L, MIN_DOOR_W) + 0.3, WALL_THICKNESS * 2 + 0.55, 0.012,
-                    [0.62, 0.47, 0.32])
+        strip = _bx(max(L, MIN_DOOR_W), WALL_THICKNESS * 2 + 0.06, 0.004,
+                    threshold_color)
         strip.rotate(_rotz(ang), center=(0, 0, 0))
         strip.translate((c[0], c[1], 0))
         meshes.append(strip)
