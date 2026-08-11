@@ -1,108 +1,116 @@
-import React, { useState, useEffect } from "react";
-import {
-  View, Text, StyleSheet, TouchableOpacity, Pressable,
-  Platform, Modal, Image
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import { scale, verticalScale } from "react-native-size-matters";
-import { fontSizes, windowWidth } from "@/themes/app.constant";
 import { BlurView } from "expo-blur";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
-import JWT from "expo-jwt";
 import axios from "axios";
 import { useRouter } from "expo-router";
+import { fontSizes } from "@/themes/app.constant";
 import { useAuthStore } from "../../authStore";
-import SignupForm from "./signup";
-import LoginForm from "./login"; // ✅ new component
 import styles from "../../assets/styles/authModal.styles";
-import COLORS from "@/constants/colors";
 import { apiUrl } from "../../configs/api";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
-  const loginGoogle = useAuthStore((state) => state.loginGoogle);
-  const [isLogin, setIsLogin] = useState(true); // ✅ toggle
+  const loginSocial = useAuthStore((state) => state.loginSocial);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [signInError, setSignInError] = useState(null);
 
-  const configureGoogleSignIn = () => {
-    if (Platform.OS === "ios") {
-      GoogleSignin.configure({
-        iosClientId: process.env.EXPO_PUBLIC_IOS_GOOGLE_API_KEY,
-      });
-    } else {
-      GoogleSignin.configure({
-        webClientId: process.env.EXPO_PUBLIC_EXPO_GOOGLE_API_KEY,
-        scopes: ["profile", "email"],
-      });
-    }
-  };
-
   useEffect(() => {
-    configureGoogleSignIn();
+    GoogleSignin.configure({
+      webClientId: process.env.EXPO_PUBLIC_EXPO_GOOGLE_API_KEY,
+      iosClientId:
+        Platform.OS === "ios"
+          ? process.env.EXPO_PUBLIC_IOS_GOOGLE_API_KEY
+          : undefined,
+      scopes: ["profile", "email"],
+    });
+
+    if (Platform.OS === "ios") {
+      AppleAuthentication.isAvailableAsync().then(setAppleSignInAvailable);
+    }
   }, []);
 
-  const authHandler = async ({ name, email, avatar }) => {
-    const JWT_SECRET = "cSG+pNycQqHhGFj0qqDqkPfhNDxCBgv2Kv6EJOAHCz0=";
-    try {
-      const user = { name, email, avatar };
-      const signedToken = JWT.encode(user, JWT_SECRET);
+  const completeProviderLogin = async ({ provider, identityToken, fullName }) => {
+    const response = await axios.post(apiUrl("/api/auth/social"), {
+      provider,
+      identityToken,
+      fullName,
+    });
 
-      const res = await axios.post(
-        apiUrl("/api/auth/login"),
-        { signedToken }
-      );
+    const { user, accessToken } = response.data;
+    const result = await loginSocial(user, accessToken);
+    if (!result?.success) throw new Error(result?.error || "Could not save your login.");
 
-      const accessToken = res.data.accessToken;
-      await loginGoogle(user, accessToken);
-
-      setModalVisible(false);
-      router.push("/create");
-    } catch (err) {
-      const detail = err.response?.data?.message || err.response?.data || err.message;
-      console.error("authHandler error:", detail);
-      throw new Error(
-        typeof detail === "string" ? detail : "Could not reach the Livinai server."
-      );
-    }
+    setModalVisible(false);
+    router.push("/create");
   };
 
-  // Google returns codes, not sentences. Map the ones a user can actually act on.
-  const describeSignInError = (error) => {
+  const describeGoogleError = (error) => {
     switch (error?.code) {
       case statusCodes.SIGN_IN_CANCELLED:
-        return null; // The user backed out on purpose; nothing to report.
       case statusCodes.IN_PROGRESS:
-        return null; // A sign-in is already running; the guard below covers this.
+        return null;
       case statusCodes.PLAY_SERVICES_NOT_AVAILABLE:
         return "Google Play services isn't available on this device.";
       case statusCodes.DEVELOPER_ERROR:
-        return "This build isn't registered for Google Sign-In. Check the app's signing certificate.";
+        return "This build isn't registered for Google Sign-In. Check its OAuth client settings.";
       default:
-        return error?.message || "Sign-in failed. Please try again.";
+        return error?.response?.data?.message || error?.message || "Sign-in failed. Please try again.";
     }
   };
 
   const handleGoogleSignIn = async () => {
-    if (isSigningIn) return; // Overlapping signIn() calls reject each other.
+    if (isSigningIn) return;
     setIsSigningIn(true);
     setSignInError(null);
 
     try {
-      await GoogleSignin.hasPlayServices();
-      await GoogleSignin.signOut();
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const result = await GoogleSignin.signIn();
+      if (result.type !== "success") return;
 
-      const userInfo = await GoogleSignin.signIn();
-      const { name, email, photo } = userInfo?.data?.user || {};
-
-      if (!name || !email) {
-        setSignInError("Google didn't return your name and email.");
-        return;
+      const identityToken = result.data.idToken;
+      if (!identityToken) {
+        throw new Error("Google did not return an identity token. Check the Web client ID.");
       }
 
-      await authHandler({ name, email, avatar: photo });
+      await completeProviderLogin({ provider: "google", identityToken });
     } catch (error) {
       console.log("Google sign-in error:", error.message || error);
-      setSignInError(describeSignInError(error));
+      setSignInError(describeGoogleError(error));
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    if (isSigningIn) return;
+    setIsSigningIn(true);
+    setSignInError(null);
+
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      await completeProviderLogin({
+        provider: "apple",
+        identityToken: credential.identityToken,
+        fullName: credential.fullName,
+      });
+    } catch (error) {
+      if (error?.code !== "ERR_REQUEST_CANCELED") {
+        console.log("Apple sign-in error:", error.message || error);
+        setSignInError(
+          error?.response?.data?.message || error?.message || "Apple sign-in failed. Please try again."
+        );
+      }
     } finally {
       setIsSigningIn(false);
     }
@@ -117,30 +125,49 @@ export default function AuthModal({ setModalVisible }) {
       <Pressable
         style={{
           width: scale(320),
-          height: verticalScale(160),
+          minHeight: verticalScale(appleSignInAvailable ? 225 : 165),
           backgroundColor: "#fff",
           borderRadius: 24,
+          paddingVertical: verticalScale(18),
           alignItems: "center",
           justifyContent: "center",
         }}
-        onPress={(e) => e.stopPropagation?.()}
+        onPress={(event) => event.stopPropagation?.()}
       >
-        <Text style={{
-          fontSize: 24,
-          marginTop: verticalScale(4),
-          fontFamily: "Poppins_500Medium",
-        }}>
-          Join to LIVINAI
+        <Text
+          style={{
+            fontSize: 24,
+            fontFamily: "Poppins_500Medium",
+          }}
+        >
+          Join LIVINAI
         </Text>
-        <Text style={{
-          fontSize: fontSizes.FONT17,
-          paddingTop: verticalScale(4),
-          fontFamily: "Poppins_300Light",
-        }}>
-          It&apos;s easier than your imagination!
+        <Text
+          style={{
+            fontSize: fontSizes.FONT17,
+            paddingTop: verticalScale(4),
+            fontFamily: "Poppins_300Light",
+          }}
+        >
+          It&apos;s easier than you imagine!
         </Text>
-        
-        <View style={styles.googleContainer}>
+
+        {appleSignInAvailable && (
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            cornerRadius={12}
+            style={{
+              width: scale(255),
+              height: verticalScale(42),
+              marginTop: verticalScale(14),
+              opacity: isSigningIn ? 0.6 : 1,
+            }}
+            onPress={handleAppleSignIn}
+          />
+        )}
+
+        <View style={[styles.googleContainer, appleSignInAvailable && { paddingTop: verticalScale(8) }]}>
           <Pressable
             onPress={handleGoogleSignIn}
             disabled={isSigningIn}
@@ -170,58 +197,7 @@ export default function AuthModal({ setModalVisible }) {
             {signInError}
           </Text>
         )}
-
       </Pressable>
     </BlurView>
-
-     // <BlurView intensity={100} tint="dark" style={styles.overlay}>
-    //   <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation?.()}>
-    //     <Text style={styles.title}>
-    //       {isLogin ? "LIVINAI" : "Join to LIVINAI"}
-    //     </Text>
-    //     <Text style={styles.subtitle}>
-    //       {isLogin
-    //         ? "Log in to continue"
-    //         : "It's easier than your imagination!"}
-    //     </Text>
-
-    //     {/* ✅ Toggle between Login and Signup */}
-    //     {isLogin ? (
-    //       <LoginForm setModalVisible={setModalVisible} />
-    //     ) : (
-    //       <SignupForm setModalVisible={setModalVisible} />
-    //     )}
-
-    //     {/* Switcher */}
-    //     <View style={{ marginTop: 12, flexDirection: "row" }}>
-    //       <Text style={{ color: "#555" }}>
-    //         {isLogin ? "Don’t have an account? " : "Already have an account? "}
-    //       </Text>
-    //       <TouchableOpacity onPress={() => setIsLogin(!isLogin)}>
-    //         <Text style={{ color: COLORS.primaryDark, fontWeight: "600" }}>
-    //           {isLogin ? "Sign Up" : "Login"}
-    //         </Text>
-    //       </TouchableOpacity>
-    //     </View>
-
-    //     {/* Divider */}
-    //     <View style={styles.divider}>
-    //       <View style={styles.dividerLine} />
-    //       <Text style={styles.dividerText}>OR</Text>
-    //       <View style={styles.dividerLine} />
-    //     </View>
-
-    //     {/* Google Sign-in */}
-    //     <View style={styles.googleContainer}>
-    //       <Pressable onPress={handleGoogleSignIn}>
-    //         <Image
-    //           source={require("@/assets/images/onboarding/google.png")}
-    //           style={styles.googleIcon}
-    //         />
-    //       </Pressable>
-    //     </View>
-    //   </Pressable>
-    // </BlurView>
-    
   );
 }

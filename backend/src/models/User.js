@@ -21,6 +21,16 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    googleSubject: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    appleSubject: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     orders: [
       {
         type: mongoose.Schema.Types.ObjectId,

@@ -9,31 +9,29 @@ export const useAuthStore = create((set) => ({
   isLoading: false,
   isCheckingAuth: true,
 
-  //Login with Google
-  loginGoogle: async (googleUser, idToken) => {
+  // Complete a Google or Apple login after the backend verifies the provider token.
+  loginSocial: async (user, accessToken) => {
     try {
       set({ isLoading: true });
 
-      if (!idToken || typeof idToken !== "string" || idToken.split(".").length !== 3) {
-        console.error("Invalid JWT token format:", idToken);
-        set({ isLoading: false });
-        return;
-      }
+      if (!accessToken) throw new Error("No token received");
 
       const normalizedUser = {
-        ...googleUser,
-        username: googleUser.name || googleUser.username || "user" + Date.now(),
+        ...user,
+        username: user.username || user.name || "user" + Date.now(),
       };
 
       await AsyncStorage.multiSet([
         ["user", JSON.stringify(normalizedUser)],
-        ["token", idToken],
+        ["token", accessToken],
       ]);
 
-      set({ user: normalizedUser, token: idToken, isLoading: false });
+      set({ user: normalizedUser, token: accessToken, isLoading: false });
+      return { success: true };
     } catch (error) {
-      console.error("Google login error:", error);
+      console.error("Social login error:", error);
       set({ isLoading: false });
+      return { success: false, error: error.message || "Login failed" };
     }
   },
 

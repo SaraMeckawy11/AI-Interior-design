@@ -1,14 +1,76 @@
 import express from "express";
-import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import { OAuth2Client } from "google-auth-library";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import User from "../models/User.js";
-import PrePremium from "../models/PrePremium.js"; // 👈 import new model
+import PrePremium from "../models/PrePremium.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { sendToken } from "../../utils/sendToken.js";
 
 const router = express.Router();
+const googleClient = new OAuth2Client();
+const appleJwks = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"));
 
-//Signup with email + password
+const googleAudiences = () =>
+  (process.env.GOOGLE_CLIENT_IDS || "")
+    .split(",")
+    .map((clientId) => clientId.trim())
+    .filter(Boolean);
+
+const isAllowedGoogleAudience = (audience, configuredAudiences) => {
+  if (configuredAudiences.length) return configuredAudiences.includes(audience);
+
+  const projectNumber = process.env.GOOGLE_CLOUD_PROJECT_NUMBER || "365853441307";
+  return (
+    typeof audience === "string" &&
+    audience.startsWith(`${projectNumber}-`) &&
+    audience.endsWith(".apps.googleusercontent.com")
+  );
+};
+
+const displayNameFromApple = (fullName) => {
+  if (!fullName || typeof fullName !== "object") return "Apple user";
+  return [fullName.givenName, fullName.middleName, fullName.familyName]
+    .filter(Boolean)
+    .join(" ") || "Apple user";
+};
+
+const findOrCreateSocialUser = async ({
+  provider,
+  subject,
+  email,
+  username,
+  profileImage = "",
+}) => {
+  const subjectField = provider === "apple" ? "appleSubject" : "googleSubject";
+  let user = await User.findOne({ [subjectField]: subject });
+  if (user) return user;
+
+  if (!email) {
+    const error = new Error("Your identity provider did not share an email address.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  user = await User.findOne({ email });
+  if (user) {
+    user[subjectField] = subject;
+    if (!user.profileImage && profileImage) user.profileImage = profileImage;
+    await user.save();
+    return user;
+  }
+
+  const prePremium = await PrePremium.findOne({ email });
+  return User.create({
+    username: username || `${provider} user`,
+    email,
+    profileImage,
+    [subjectField]: subject,
+    isPremium: !!prePremium,
+  });
+};
+
+// Sign up with email and password.
 router.post("/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -17,64 +79,101 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    let existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ success: false, message: "User already exists" });
     }
 
-    // 🔹 Check if email was pre-marked as premium
     const prePremium = await PrePremium.findOne({ email });
-
     const user = await User.create({
       username,
       email,
       password,
       profileImage: "",
-      isPremium: !!prePremium, // auto-set premium
+      isPremium: !!prePremium,
     });
 
-    await sendToken(user, res);
+    return sendToken(user, res);
   } catch (error) {
     console.error("Signup error:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
-//Login with email + password OR Google
-router.post("/login", async (req, res) => {
+// Verify Google and Apple identity tokens on the server. The app never signs
+// its own provider tokens and never contains a server secret.
+router.post("/social", async (req, res) => {
   try {
-    const { email, password, signedToken } = req.body;
+    const { provider, identityToken, fullName } = req.body;
+    if (!identityToken || !["google", "apple"].includes(provider)) {
+      return res.status(400).json({
+        success: false,
+        message: "Provider and identity token are required",
+      });
+    }
 
-    // 🔹 Case 1: Google login with signedToken
-    if (signedToken) {
-      let data;
-      try {
-        data = jwt.verify(signedToken, process.env.JWT_SECRET);
-      } catch (err) {
-        return res.status(401).json({ success: false, message: "Invalid Google token" });
-      }
+    let socialIdentity;
 
-      if (!data.email) {
-        return res.status(400).json({ success: false, message: "Missing email in Google token" });
-      }
-
-      let user = await User.findOne({ email: data.email });
-      if (!user) {
-        // 🔹 Check if email is pre-premium
-        const prePremium = await PrePremium.findOne({ email: data.email });
-
-        user = await User.create({
-          username: data.username || data.name || "user" + Date.now(),
-          email: data.email,
-          profileImage: data.avatar || "",
-          isPremium: !!prePremium, // 👈 auto-set premium
+    if (provider === "google") {
+      const audiences = googleAudiences();
+      const ticket = await googleClient.verifyIdToken({
+        idToken: identityToken,
+        ...(audiences.length ? { audience: audiences } : {}),
+      });
+      const payload = ticket.getPayload();
+      if (
+        !payload?.sub ||
+        !payload.email ||
+        payload.email_verified !== true ||
+        !isAllowedGoogleAudience(payload.aud, audiences)
+      ) {
+        return res.status(401).json({
+          success: false,
+          message: "Google could not verify this email",
         });
       }
 
-      return sendToken(user, res);
+      socialIdentity = {
+        provider,
+        subject: payload.sub,
+        email: payload.email,
+        username: payload.name || payload.email.split("@")[0],
+        profileImage: payload.picture || "",
+      };
+    } else {
+      const { payload } = await jwtVerify(identityToken, appleJwks, {
+        issuer: "https://appleid.apple.com",
+        audience: process.env.APPLE_BUNDLE_ID || "com.livinai.app",
+      });
+      if (!payload.sub) {
+        return res.status(401).json({ success: false, message: "Apple identity is invalid" });
+      }
+
+      socialIdentity = {
+        provider,
+        subject: payload.sub,
+        email: typeof payload.email === "string" ? payload.email : null,
+        username: displayNameFromApple(fullName),
+      };
     }
 
-    // 🔹 Case 2: Normal email+password login
+    const user = await findOrCreateSocialUser(socialIdentity);
+    return sendToken(user, res);
+  } catch (error) {
+    console.error("Social login error:", error.message);
+    return res.status(error.statusCode || 401).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "The identity token could not be verified",
+    });
+  }
+});
+
+// Log in with email and password.
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password required" });
     }
@@ -89,20 +188,19 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid credentials" });
     }
 
-    await sendToken(user, res);
+    return sendToken(user, res);
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
-// ✅ Get Logged-In User
 router.get("/me", isAuthenticated, async (req, res) => {
   try {
-    res.status(200).json({ success: true, user: req.user });
+    return res.status(200).json({ success: true, user: req.user });
   } catch (error) {
     console.error("Me route error:", error);
-    res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 

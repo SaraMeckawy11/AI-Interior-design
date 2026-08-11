@@ -12,13 +12,24 @@
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com",
+        "EXPO_PUBLIC_IOS_GOOGLE_API_KEY": "365853441307-c1frc7jb4tt7custuqaqn5ua7hnpu7i8.apps.googleusercontent.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_QuKzBCGnKgsizsdRDpQDQJaZXkN"
+      }
+    },
+    "development-device": {
+      "extends": "development",
+      "ios": {
+        "resourceClass": "m-medium",
+        "simulator": false
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com",
+        "EXPO_PUBLIC_IOS_GOOGLE_API_KEY": "365853441307-c1frc7jb4tt7custuqaqn5ua7hnpu7i8.apps.googleusercontent.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_QuKzBCGnKgsizsdRDpQDQJaZXkN"
       },
       "android": {
         "image": "latest"
@@ -27,7 +38,9 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com"
+        "EXPO_PUBLIC_SERVER_URI": "https://ai-interior-design-g5oc.onrender.com",
+        "EXPO_PUBLIC_IOS_GOOGLE_API_KEY": "365853441307-c1frc7jb4tt7custuqaqn5ua7hnpu7i8.apps.googleusercontent.com",
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_QuKzBCGnKgsizsdRDpQDQJaZXkN"
       },
       "android": {
         "image": "latest",
@@ -36,6 +49,10 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6800486898"
+      }
+    }
   }
 }

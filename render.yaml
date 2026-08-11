@@ -44,6 +44,14 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
+      # Comma-separated OAuth client IDs accepted by Google token verification.
+      # Include the Web client ID and the iOS client ID used by the app.
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+      - key: GOOGLE_CLOUD_PROJECT_NUMBER
+        value: "365853441307"
+      - key: APPLE_BUNDLE_ID
+        value: com.livinai.app
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY

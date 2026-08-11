@@ -19,9 +19,11 @@ export const sendToken = async (user, res) => {
       accessToken,
       user: {
         _id: user._id,
-        name: user.name,
+        username: user.username,
+        name: user.username,
         email: user.email,
-        avatar: user.avatar,
+        profileImage: user.profileImage,
+        avatar: user.profileImage,
         createdAt: user.createdAt,
       },
     });
