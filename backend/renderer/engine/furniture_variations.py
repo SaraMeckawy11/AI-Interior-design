@@ -190,8 +190,13 @@ def build_sofa(furnisher, original, palette, w=2.2, d=0.95):
     timber = palette["wood_dark"]
     metal = palette["metal"]
     low = family in {"quiet", "modern"}
-    seat_height = 0.30 if low else 0.36
-    lift = 0.08 if low else 0.12
+    # A sofa seat lands 42-45 cm off the floor. The classic and boho families
+    # were framed at 0.12 + 0.36, and with a 14 cm cushion stacked on top the
+    # seat came out at 62 cm — a bar stool, not a sofa. The heavier families
+    # still sit a little taller and show more leg, which is the distinction the
+    # numbers were reaching for.
+    seat_height = 0.30 if low else 0.32
+    lift = 0.08 if low else 0.10
     actual_depth = float(d)
     meshes = []
 
@@ -243,11 +248,11 @@ def build_sofa(furnisher, original, palette, w=2.2, d=0.95):
                 x = -side * (chaise_width / 2 + 0.10 + module_width * (module + 0.5))
                 meshes.append(
                     _rounded(
-                        original, module_width - 0.05, d - 0.30, 0.14,
+                        original, module_width - 0.02, d - 0.20, 0.10,
                         light_fabric,
-                        cx=x, cy=rear_center + 0.08,
-                        z=lift + seat_height,
-                        roundness=0.30,
+                        cx=x, cy=rear_center + 0.06,
+                        z=lift + seat_height - 0.06,
+                        roundness=0.18,
                     )
                 )
     else:
@@ -330,6 +335,13 @@ def build_sofa(furnisher, original, palette, w=2.2, d=0.95):
                         roundness=0.22,
                     )
                 )
+        # Seat cushions, sunk into the seat rather than stacked on it.
+        #
+        # These were 14 cm slabs sitting on top of a full-height seat base, 35 cm
+        # shallower than it and pushed forward, so the seat came out at 44-50 cm
+        # and the cushions read as loose pillows dropped onto the sofa. A seat
+        # cushion is part of the seat: it fills the width between the arms, runs
+        # back to the backrest, and stands a few centimetres proud of the frame.
         cushion_count = 3 if w >= 2.35 else 2
         cushion_width = (w - arm_width * 2 - 0.12) / cushion_count
         for index in range(cushion_count):
@@ -337,14 +349,14 @@ def build_sofa(furnisher, original, palette, w=2.2, d=0.95):
             meshes.append(
                 _rounded(
                     original,
-                    cushion_width - 0.045,
-                    d - 0.35,
-                    0.14,
+                    cushion_width - 0.02,
+                    d - 0.22,
+                    0.10,
                     light_fabric,
                     cx=x,
-                    cy=0.07,
-                    z=lift + seat_height,
-                    roundness=0.30,
+                    cy=0.06,
+                    z=lift + seat_height - 0.06,
+                    roundness=0.18,
                 )
             )
 
@@ -413,15 +425,19 @@ def build_armchair(furnisher, original, palette, w=0.92, d=0.85):
             z=0.18,
             roundness=0.30,
         ),
+        # Sunk into the seat, not perched on it — see the note in `build_sofa`.
+        # This was 28 cm narrower and 30 cm shallower than the seat it sat on,
+        # standing 14 cm proud of a 44 cm base, which put the seat at 58 cm and
+        # made the cushion look like a small pillow balanced on a block.
         _rounded(
             original,
-            w - 0.28,
-            d - 0.30,
-            0.14,
+            w - 0.10,
+            d - 0.16,
+            0.10,
             original._shade(fabric, 1.08),
-            cy=0.05,
-            z=0.44,
-            roundness=0.34,
+            cy=0.04,
+            z=0.36,
+            roundness=0.18,
         ),
     ]
     if variant in (1, 2):
