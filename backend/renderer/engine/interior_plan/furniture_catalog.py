@@ -105,56 +105,145 @@ DEFAULT_MODELS = {
     "throw_pillows": "pro/throw_pillows_01/throw_pillows_01_1k.gltf",
 }
 
-MODERN_MODELS = {
-    "sofa": "pro/glam_velvet_sofa/GlamVelvetSofa.glb",
-    "armchair": "pro/sheen_chair/SheenChair.glb",
-    "coffee_table": "pro/modern_coffee_table_01/modern_coffee_table_01_1k.gltf",
-    "tv_unit": "pro/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf",
-    "sideboard": "pro/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf",
-    "dining_table": None,
-    "dining_chair": "pro/sheen_chair/SheenChair.glb",
+def _pro(folder: str, filename: str | None = None) -> str:
+    """A `pro/` catalog path. Poly Haven names its 1k glTF after the folder."""
+    return f"pro/{folder}/{filename or folder + '_1k.gltf'}"
+
+
+# ── Style kits ─────────────────────────────────────────────────────────────
+#
+# One furniture kit per style the app offers, rather than the three that used to
+# cover all ten. The old buckets were `MODERN_STYLE_WORDS` — a set holding
+# modern, contemporary, minimalist, scandinavian, japandi, industrial *and*
+# mid-century — plus classic and boho. Seven of the ten styles therefore loaded
+# byte-identical furniture, and the only thing that changed when someone picked
+# Japandi over Industrial was the palette tint and a random seed. Picking a style
+# is the single biggest decision on the design step, and it was decorative.
+#
+# A kit only has to name what it wants to change; anything it leaves out falls
+# through to `DEFAULT_MODELS`. `None` is meaningful and different from missing —
+# it says "draw this procedurally", which is still the right answer for a
+# contemporary bed, since Poly Haven publishes no modern one.
+STYLE_MODELS = {
+    "modern": {
+        "sofa": _pro("sofa_02"),
+        "armchair": _pro("modern_arm_chair_01"),
+        "coffee_table": _pro("modern_coffee_table_01"),
+        "tv_unit": _pro("modern_wooden_cabinet"),
+        "sideboard": _pro("modern_wooden_cabinet"),
+        "dining_table": _pro("round_wooden_table_01"),
+        "dining_chair": _pro("sheen_chair", "SheenChair.glb"),
+        "bookshelf": _pro("wooden_display_shelves_01"),
+        "bed": None,
+    },
+    # Mid-century has a vocabulary of its own — walnut, tapered legs, low-slung
+    # seating — that the prompt engine has always known about and the 3D
+    # renderer never did.
+    "midcentury": {
+        "sofa": _pro("sofa_03"),
+        "armchair": _pro("mid_century_lounge_chair"),
+        "coffee_table": _pro("modern_coffee_table_02"),
+        "tv_unit": _pro("vintage_cabinet_01"),
+        "sideboard": _pro("vintage_cabinet_01"),
+        "dining_table": _pro("round_wooden_table_02"),
+        "dining_chair": _pro("WoodenChair_01"),
+        "bookshelf": _pro("wooden_display_shelves_01"),
+        "bed": None,
+    },
+    "minimalist": {
+        "sofa": _pro("sofa_02"),
+        "armchair": _pro("sheen_chair", "SheenChair.glb"),
+        "coffee_table": _pro("coffee_table_round_01"),
+        "tv_unit": _pro("modern_wooden_cabinet"),
+        "sideboard": _pro("modern_wooden_cabinet"),
+        "dining_table": _pro("WoodenTable_02"),
+        "dining_chair": _pro("painted_wooden_chair_01"),
+        "bookshelf": _pro("Shelf_01"),
+        "bed": None,
+    },
+    "scandinavian": {
+        "sofa": _pro("Sofa_01"),
+        "armchair": _pro("GreenChair_01"),
+        "coffee_table": _pro("coffee_table_round_01"),
+        "tv_unit": _pro("painted_wooden_cabinet"),
+        "sideboard": _pro("painted_wooden_cabinet"),
+        "wardrobe": _pro("painted_wooden_cabinet_02"),
+        "dining_table": _pro("round_wooden_table_01"),
+        "dining_chair": _pro("painted_wooden_chair_01"),
+        "bookshelf": _pro("painted_wooden_shelves"),
+        "bed": None,
+    },
+    "japandi": {
+        "sofa": _pro("chinese_sofa"),
+        "armchair": _pro("chinese_armchair"),
+        "coffee_table": _pro("chinese_tea_table"),
+        "tv_unit": _pro("chinese_console_table"),
+        "sideboard": _pro("chinese_console_table"),
+        "wardrobe": _pro("chinese_cabinet"),
+        "nightstand": _pro("chinese_stool"),
+        # A low platform bed is the one place a period Poly Haven piece reads as
+        # Japandi rather than as an antique.
+        "bed": _pro("vintage_day_bed"),
+        "dining_table": _pro("WoodenTable_01"),
+        "dining_chair": _pro("WoodenChair_01"),
+        "bookshelf": _pro("Shelf_01"),
+    },
+    "industrial": {
+        "sofa": _pro("sheen_wood_leather_sofa", "SheenWoodLeatherSofa.glb"),
+        "armchair": _pro("modern_arm_chair_01"),
+        "coffee_table": _pro("industrial_coffee_table"),
+        "tv_unit": _pro("industrial_storage_cart"),
+        "sideboard": _pro("worn_metal_rack"),
+        "wardrobe": _pro("steel_frame_shelves_03"),
+        "bookshelf": _pro("steel_frame_shelves_01"),
+        "bed": _pro("old_bed_frame"),
+        "dining_table": _pro("wooden_table_02"),
+        "dining_chair": _pro("WoodenChair_01"),
+        "desk": _pro("metal_office_desk"),
+    },
+    "boho": {
+        "sofa": _pro("painted_wooden_sofa"),
+        "armchair": _pro("Rockingchair_01"),
+        "coffee_table": _pro("small_wooden_table_01"),
+        "tv_unit": _pro("vintage_wooden_drawer_01"),
+        "sideboard": _pro("vintage_wooden_drawer_01"),
+        "wardrobe": _pro("painted_wooden_cabinet"),
+        "bookshelf": _pro("wooden_bookshelf_worn"),
+        "bed": _pro("vintage_day_bed"),
+        "dining_table": _pro("painted_wooden_table"),
+        "dining_chair": _pro("painted_wooden_chair_02"),
+    },
+    "classic": {
+        "sofa": _pro("sheen_wood_leather_sofa", "SheenWoodLeatherSofa.glb"),
+        "armchair": _pro("ArmChair_01"),
+        "coffee_table": _pro("CoffeeTable_01"),
+        "tv_unit": _pro("ClassicConsole_01"),
+        "sideboard": _pro("ClassicConsole_01"),
+        "nightstand": _pro("ClassicNightstand_01"),
+        "wardrobe": _pro("GothicCabinet_01"),
+        "bed": _pro("GothicBed_01"),
+        "dining_table": _pro("gallinera_table"),
+        "dining_chair": _pro("dining_chair_02"),
+        "bookshelf": _pro("Shelf_01"),
+    },
 }
 
-BOHO_MODELS = {
-    # Relaxed contemporary silhouettes coordinate with layered natural
-    # textiles much better than the former Gothic/ornate classic family.
-    "sofa": "pro/glam_velvet_sofa/GlamVelvetSofa.glb",
-    "armchair": "pro/modern_arm_chair_01/modern_arm_chair_01_1k.gltf",
-    "coffee_table": "pro/modern_coffee_table_01/modern_coffee_table_01_1k.gltf",
-    "tv_unit": "pro/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf",
-    "sideboard": "pro/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf",
-    "nightstand": (
-        "pro/painted_wooden_nightstand/"
-        "painted_wooden_nightstand_1k.gltf"
-    ),
-    "wardrobe": "pro/drawer_cabinet/drawer_cabinet_1k.gltf",
-    "bed": None,
-    "dining_table": None,
-    "dining_chair": "pro/sheen_chair/SheenChair.glb",
-}
-
-CLASSIC_MODELS = {
-    "sofa": (
-        "pro/sheen_wood_leather_sofa/SheenWoodLeatherSofa.glb"
-    ),
-    "armchair": "pro/ArmChair_01/ArmChair_01_1k.gltf",
-    "coffee_table": "pro/CoffeeTable_01/CoffeeTable_01_1k.gltf",
-    "tv_unit": "pro/ClassicConsole_01/ClassicConsole_01_1k.gltf",
-    "sideboard": "pro/ClassicConsole_01/ClassicConsole_01_1k.gltf",
-    "nightstand": (
-        "pro/ClassicNightstand_01/ClassicNightstand_01_1k.gltf"
-    ),
-    "wardrobe": "pro/GothicCabinet_01/GothicCabinet_01_1k.gltf",
-    "dining_table": None,
-    "dining_chair": "pro/dining_chair_02/dining_chair_02_1k.gltf",
-}
-
-MODERN_STYLE_WORDS = {
-    "modern", "contemporary", "minimalist", "scandinavian", "japandi",
-    "industrial", "mid-century",
-}
-CLASSIC_STYLE_WORDS = {"classic", "traditional"}
-BOHO_STYLE_WORDS = {"bohemian", "boho"}
+#: Which kit a style label asks for. Longest match wins, so "modern minimalist"
+#: and "mid-century modern" are not swallowed by the bare "modern" they contain.
+STYLE_KITS = (
+    ("mid-century", "midcentury"),
+    ("mid century", "midcentury"),
+    ("minimalist", "minimalist"),
+    ("scandinavian", "scandinavian"),
+    ("japandi", "japandi"),
+    ("industrial", "industrial"),
+    ("bohemian", "boho"),
+    ("boho", "boho"),
+    ("traditional", "classic"),
+    ("classic", "classic"),
+    ("contemporary", "modern"),
+    ("modern", "modern"),
+)
 
 _MESH_CACHE = {}
 _PBR_CACHE = {}
@@ -205,14 +294,26 @@ def _shade_materials(mesh):
     return mesh
 
 
+def style_kit(style: str) -> str:
+    """Which furniture kit a style label asks for.
+
+    Substring matching, longest first: "modern minimalist" has to reach the
+    minimalist kit rather than the modern one it also contains, and the old
+    `any(word in style_key ...)` over an unordered set could not promise that.
+    """
+    style_key = (style or "").lower().strip()
+    for token, kit in STYLE_KITS:
+        if token in style_key:
+            return kit
+    return "modern"
+
+
 def _model_name(asset_key: str, style: str) -> str | None:
-    style_key = (style or "").lower()
-    if any(word in style_key for word in CLASSIC_STYLE_WORDS):
-        return CLASSIC_MODELS.get(asset_key, DEFAULT_MODELS.get(asset_key))
-    if any(word in style_key for word in BOHO_STYLE_WORDS):
-        return BOHO_MODELS.get(asset_key, DEFAULT_MODELS.get(asset_key))
-    if any(word in style_key for word in MODERN_STYLE_WORDS):
-        return MODERN_MODELS.get(asset_key, DEFAULT_MODELS.get(asset_key))
+    kit = STYLE_MODELS.get(style_kit(style), {})
+    # `in` rather than `.get(...) or`: a kit saying None means "draw it
+    # procedurally", which must not fall through to the default model.
+    if asset_key in kit:
+        return kit[asset_key]
     return DEFAULT_MODELS.get(asset_key)
 
 
@@ -369,12 +470,7 @@ def catalog_status() -> tuple[bool, str]:
     """Return whether every required native model is installed."""
     required = {
         name
-        for mapping in (
-            DEFAULT_MODELS,
-            MODERN_MODELS,
-            BOHO_MODELS,
-            CLASSIC_MODELS,
-        )
+        for mapping in (DEFAULT_MODELS, *STYLE_MODELS.values())
         for name in mapping.values()
         if name is not None
     }

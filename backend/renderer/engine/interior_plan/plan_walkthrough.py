@@ -2735,16 +2735,17 @@ class RoomFurnisher:
                     from furniture_catalog import load_catalog_asset
 
                     style_name = self.config.get("style", "Modern")
-                    use_designer_geometry = (
-                        (
-                            asset_key == "bed"
-                            and not any(
-                                word in str(style_name).lower()
-                                for word in ("classic", "traditional")
-                            )
-                        )
-                        or asset_key == "kitchen_island"
-                    )
+                    # The kitchen island is fitted joinery sized to the room, so
+                    # a fixed model can never fit it; that one stays designed.
+                    #
+                    # The bed used to be forced procedural for every style
+                    # except Classic, which meant the largest object in almost
+                    # every bedroom was a stack of rounded cuboids next to
+                    # photoreal furniture. Whether a bed is drawn or loaded is
+                    # now the style kit's decision like everything else: a kit
+                    # naming a model gets it, a kit naming None keeps the
+                    # designed one.
+                    use_designer_geometry = asset_key == "kitchen_island"
                     generated = (
                         None
                         if use_designer_geometry
