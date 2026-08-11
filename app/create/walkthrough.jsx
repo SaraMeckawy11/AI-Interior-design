@@ -55,12 +55,9 @@ import useRewardedCoins from "../../lib/useRewardedCoins";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
   COLOR_MOODS,
-  CURTAIN_DESIGNS,
-  DECOR_SETS,
   DEFAULT_WALKTHROUGH_SETTINGS,
   DESIGN_PROFILES,
   FLOOR_FINISHES,
-  RUG_DESIGNS,
   ROOM_TYPES,
   WALKTHROUGH_STYLES,
   WALL_FINISHES,
@@ -145,10 +142,6 @@ const TOOLS = [
   { key: "balcony", icon: "sunny-outline", label: "Balcony" },
 ];
 
-const TOOL_GROUPS = [
-  { label: "Shape the plan", keys: ["pan", "rect", "room", "select"] },
-  { label: "Put in a wall", keys: ["door", "window", "balcony"], needsRooms: true },
-];
 
 /** The tools that need a wall to aim at. */
 const OPENING_TOOLS = new Set(["door", "window", "balcony"]);
@@ -1633,7 +1626,9 @@ export default function WalkthroughScreen() {
           product: "walkthrough",
           // The one piece of text that is the user's own — the Notes field on
           // the Style step — exactly as Interior sends its optional prompt.
-          customPrompt: (settings.notes || "").trim(),
+          // The note written for this render, falling back to the plan's own
+          // notes so a plan saved under the old Style step keeps its brief.
+          customPrompt: (renderBrief?.note || settings.notes || "").trim(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2520,28 +2515,25 @@ export default function WalkthroughScreen() {
                         what gets built. */}
                     {styleExpanded && (
                       <View style={styles.card}>
+                        {/* The two materials people actually want to change, and
+                            nothing else.
+
+                            Rug design, window treatment and decor set were here
+                            too, and all three are exactly what "Auto by style"
+                            already decides well — the same designer that reads
+                            the profile reads them, and picking a style has
+                            picked them. Three more chip rows to scroll past on
+                            the way to a home, to arrive at the answer the
+                            default was going to give.
+
+                            The notes box has moved to the Render sheet. In 3D it
+                            was a fourteen-word keyword match — nine colours plus
+                            walnut, oak, minimal and luxury — so "calm lighting,
+                            no glossy surfaces" did nothing at all. Where it is
+                            read properly is the AI brief, which is written next
+                            to the button that pays for it. */}
                         <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
                         <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
-                        <ChipRow label="Rug design" options={RUG_DESIGNS} value={settings.rugDesign} onChange={(v) => updateSetting("rugDesign", v)} />
-                        <ChipRow label="Window treatment" options={CURTAIN_DESIGNS} value={settings.curtainDesign} onChange={(v) => updateSetting("curtainDesign", v)} />
-                        <ChipRow label="Decor set" options={DECOR_SETS} value={settings.decorSet} onChange={(v) => updateSetting("decorSet", v)} />
-
-                        <View style={[styles.notesHead, { marginTop: SPACING.lg }]}>
-                          <Text style={styles.fieldLabel}>Notes (optional)</Text>
-                          {/* The field silently stopped accepting characters at
-                              240 with nothing to say it had. */}
-                          <Text style={styles.notesCount}>{(settings.notes || "").length}/240</Text>
-                        </View>
-                        <TextInput
-                          style={styles.notes}
-                          value={settings.notes}
-                          accessibilityLabel="Notes for the designer"
-                          onChangeText={(value) => updateSetting("notes", value)}
-                          placeholder="Natural materials, calm lighting, no glossy surfaces…"
-                          placeholderTextColor={COLORS.placeholderText}
-                          multiline
-                          maxLength={240}
-                        />
 
                         <Pressable
                           style={({ pressed }) => [styles.settingToggle, pressed && styles.pressedSurface]}
@@ -3355,6 +3347,7 @@ function RenderSheet({
   const [roomType, setRoomType] = useState(defaultRoomType || "Living Room");
   const [designStyle, setDesignStyle] = useState(defaultDesignStyle || "Modern");
   const [colorTone, setColorTone] = useState(defaultColorTone || "Warm neutral");
+  const [note, setNote] = useState("");
 
   // Start each render from the room and whole-home choices already made. The
   // brief stays local until Render is pressed, so exploring options here does
@@ -3364,6 +3357,7 @@ function RenderSheet({
     setRoomType(defaultRoomType || "Living Room");
     setDesignStyle(defaultDesignStyle || "Modern");
     setColorTone(defaultColorTone || "Warm neutral");
+    setNote("");
   }, [defaultColorTone, defaultDesignStyle, defaultRoomType, visible]);
 
   const submitRender = () => {
@@ -3371,6 +3365,7 @@ function RenderSheet({
       roomType: bird ? "Floor Plan" : roomType,
       designStyle,
       colorTone,
+      note: note.trim(),
     });
   };
 
@@ -3456,6 +3451,29 @@ function RenderSheet({
               <ChipRow label="Color tone" options={COLOR_MOODS} value={colorTone} onChange={setColorTone} />
               <PalettePreview tone={colorTone} />
             </View>
+
+            {/* The one place free text is read properly.
+                This lived on the Style step, where the 3D exporter matched it
+                against fourteen words — nine colours plus walnut, oak, minimal
+                and luxury — so most of what anyone wrote there did nothing. It
+                reaches the image model in full, as the client note in the brief,
+                which is why it belongs next to the button that pays for one. */}
+            <View style={styles.notesHead}>
+              <Text style={styles.fieldLabel}>Anything else? (optional)</Text>
+              {/* The field silently stopped accepting characters at 240 with
+                  nothing to say it had. */}
+              <Text style={styles.notesCount}>{note.length}/240</Text>
+            </View>
+            <TextInput
+              style={styles.notes}
+              value={note}
+              accessibilityLabel="Notes for this render"
+              onChangeText={setNote}
+              placeholder="Keep the olive tree · warm evening feel · nothing glossy"
+              placeholderTextColor={COLORS.placeholderText}
+              multiline
+              maxLength={240}
+            />
 
             {/* One line, and only the line that answers "what will I get?". */}
             <View style={styles.sheetNoteRow}>
@@ -3753,6 +3771,36 @@ function RenderGallerySheet({ visible, renders, activeId, onClose, onOpen, onRem
  * scrolled off the left with nothing to say so — and its targets clear the 44pt
  * minimum, which the previous 34pt pills did not.
  */
+/**
+ * A glyph for a room's kind.
+ *
+ * Matched on a substring rather than the exact label, so a room typed as
+ * "Master Bedroom" or "Guest Bathroom" still gets the right icon, and anything
+ * unrecognised falls back to a plain outline rather than to nothing.
+ */
+const ROOM_ICONS = [
+  ["bath", "water-outline"],
+  ["bed", "bed-outline"],
+  ["kitchen", "restaurant-outline"],
+  ["dining", "restaurant-outline"],
+  ["living", "tv-outline"],
+  ["office", "laptop-outline"],
+  ["study", "laptop-outline"],
+  ["entry", "enter-outline"],
+  ["hall", "walk-outline"],
+  ["corridor", "walk-outline"],
+  ["laundry", "shirt-outline"],
+  ["utility", "construct-outline"],
+  ["closet", "file-tray-stacked-outline"],
+  ["balcony", "sunny-outline"],
+];
+
+function roomIcon(roomType) {
+  const key = String(roomType || "").toLowerCase();
+  const hit = ROOM_ICONS.find(([word]) => key.includes(word));
+  return hit ? hit[1] : "square-outline";
+}
+
 function RoomStrip({ rooms, selected, onSelect }) {
   const scroller = useRef(null);
   const offsets = useRef([]);
@@ -3776,11 +3824,16 @@ function RoomStrip({ rooms, selected, onSelect }) {
     >
       {rooms.map((room, index) => {
         const active = selected === index;
+        const label = room.name || room.roomType || `Room ${index + 1}`;
         return (
           <Pressable
             key={`jump-${index}`}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
+            // A tab in a set has to say which set and where in it, or a screen
+            // reader announces five identical "tab, selected" controls.
+            accessibilityLabel={`${label}, room ${index + 1} of ${rooms.length}`}
+            accessibilityHint={active ? undefined : "Walks you into this room"}
             android_ripple={{ color: "rgba(30,36,31,0.12)", borderless: false }}
             hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
             onLayout={(event) => { offsets.current[index] = event.nativeEvent.layout.x; }}
@@ -3791,8 +3844,18 @@ function RoomStrip({ rooms, selected, onSelect }) {
             ]}
             onPress={() => onSelect(index)}
           >
+            {/* The room's own kind, as a glyph.
+                Every pill was a word in the same weight and the same colour, so
+                finding the bathroom in a seven-room flat meant reading seven
+                labels. An icon is read before a word is, and it is the one
+                thing about a room that a glyph can say faster. */}
+            <Ionicons
+              name={roomIcon(room.roomType)}
+              size={14}
+              color={active ? COLORS.white : COLORS.textTertiary}
+            />
             <Text style={[styles.roomPillText, active && styles.roomPillTextActive]} numberOfLines={1}>
-              {room.name || room.roomType}
+              {label}
             </Text>
           </Pressable>
         );
@@ -4855,60 +4918,92 @@ function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
  * competed with the one tool that was actually selected. A labelled switch says
  * "on or off" without having to be interpreted.
  */
+/**
+ * The drawing tools, on one line.
+ *
+ * They were two labelled groups stacked vertically — four tools, a heading, a
+ * second heading, three tools — which cost two headings and a row of vertical
+ * space above a canvas that is the whole point of the step, and put "Door" on a
+ * different line from "Box" as though they were different kinds of thing. They
+ * are all one kind of thing: what the next tap on the sheet will do.
+ *
+ * One horizontally scrolling row instead. Seven cells at 78pt overflow every
+ * phone, so the row is visibly cut at the edge, which is what tells you it
+ * scrolls — no hint text required. The selected tool is scrolled into view when
+ * it changes, so arming a door from the canvas never leaves the lit tool
+ * offscreen.
+ *
+ * The opening tools still lock until a room exists, but the lock is now on the
+ * cell rather than announced by a heading: a padlock on the icon, and the one
+ * line of explanation appears under the row only while it applies.
+ */
 function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap, hasRooms }) {
+  const scroller = useRef(null);
+  const offsets = useRef([]);
+
+  useEffect(() => {
+    const x = offsets.current[TOOLS.findIndex((item) => item.key === tool)];
+    if (typeof x !== "number") return;
+    scroller.current?.scrollTo({ x: Math.max(0, x - ms(78)), animated: true });
+  }, [tool]);
+
+  const openingLocked = !hasRooms;
+
   return (
     <View style={styles.palette}>
-      {TOOL_GROUPS.map((group, groupIndex) => {
-        // A door has to go into a wall, and until a room is drawn there are no
-        // walls. Arming one of these on an empty sheet used to leave the canvas
-        // silently inert: every tap landed on nothing and the tool stayed lit,
-        // which reads as a broken app rather than as a step out of order.
-        const locked = group.needsRooms && !hasRooms;
-        return (
-          <View key={group.label} style={groupIndex > 0 && styles.paletteGroupNext}>
-            <View style={styles.paletteGroupHead}>
-              <Text style={styles.paletteGroupLabel}>{group.label}</Text>
-              {locked && <Text style={styles.paletteGroupLocked}>Draw a room first</Text>}
-            </View>
-            <View style={styles.paletteRow}>
-              {group.keys.map((key) => {
-                const item = TOOLS.find((entry) => entry.key === key);
-                if (!item) return null;
-                const active = tool === key;
-                return (
-                  <Pressable
-                    key={key}
-                    accessibilityRole="radio"
-                    accessibilityLabel={item.label}
-                    accessibilityState={{ selected: active, checked: active, disabled: locked }}
-                    disabled={locked}
-                    style={({ pressed }) => [styles.toolCell, pressed && !active && styles.pressedSurface]}
-                    onPress={() => onChange(key)}
-                  >
-                    <View style={[styles.tool, active && styles.toolActive, locked && styles.toolLocked]}>
-                      <Ionicons
-                        name={item.icon}
-                        size={19}
-                        color={active ? COLORS.primaryDark : locked ? COLORS.textTertiary : COLORS.textSecondary}
-                      />
-                      <Text
-                        style={[
-                          styles.toolLabel,
-                          active && styles.toolLabelActive,
-                          locked && styles.toolLabelLocked,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {item.label}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        );
-      })}
+      <ScrollView
+        ref={scroller}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.paletteStrip}
+        contentContainerStyle={styles.paletteStripContent}
+        accessibilityRole="radiogroup"
+      >
+        {TOOLS.map((item, index) => {
+          // A door has to go into a wall, and until a room is drawn there are no
+          // walls. Arming one of these on an empty sheet used to leave the canvas
+          // silently inert: every tap landed on nothing and the tool stayed lit,
+          // which reads as a broken app rather than as a step out of order.
+          const locked = OPENING_TOOLS.has(item.key) && openingLocked;
+          const active = tool === item.key;
+          return (
+            <Pressable
+              key={item.key}
+              accessibilityRole="radio"
+              accessibilityLabel={locked ? `${item.label}, draw a room first` : item.label}
+              accessibilityState={{ selected: active, checked: active, disabled: locked }}
+              disabled={locked}
+              onLayout={(event) => { offsets.current[index] = event.nativeEvent.layout.x; }}
+              style={({ pressed }) => [pressed && !active && styles.pressedSurface]}
+              onPress={() => onChange(item.key)}
+            >
+              <View style={[styles.tool, active && styles.toolActive, locked && styles.toolLocked]}>
+                <Ionicons
+                  name={locked ? "lock-closed-outline" : item.icon}
+                  size={19}
+                  color={active ? COLORS.primaryDark : locked ? COLORS.textTertiary : COLORS.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.toolLabel,
+                    active && styles.toolLabelActive,
+                    locked && styles.toolLabelLocked,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.label}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {openingLocked && (
+        <Text style={styles.paletteLocked}>
+          Doors, windows and balconies go into a wall — draw a room first.
+        </Text>
+      )}
 
       <Pressable
         accessibilityRole="switch"
@@ -5499,15 +5594,8 @@ const styles = StyleSheet.create({
   palette: {
     marginBottom: SPACING.md,
   },
-  paletteGroupNext: { marginTop: SPACING.sm },
-  paletteGroupHead: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    gap: SPACING.sm, marginBottom: SPACING.sm,
-  },
-  paletteGroupLabel: { ...TYPE.overline, color: COLORS.textTertiary },
   // Says why the row below it is grey, on the row itself. A disabled control
   // that does not explain itself is indistinguishable from a broken one.
-  paletteGroupLocked: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary },
   // One four-column grid, not one grid per group.
   //
   // Every cell used to be `flex: 1` within its own row, so the three wall tools
@@ -5517,10 +5605,21 @@ const styles = StyleSheet.create({
   // fault before it reads as a grouping. A fixed quarter-width cell keeps the
   // columns true and leaves the short row short, which is what says "there are
   // three of these" without saying it.
-  paletteRow: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: -3 },
-  toolCell: { width: "25%", paddingHorizontal: 3 },
+  // Full-bleed, so the row is cut by the screen edge rather than by the card's
+  // padding — which is what makes it read as "there is more this way".
+  paletteStrip: { marginHorizontal: -SPACING.base, flexGrow: 0 },
+  paletteStripContent: {
+    paddingHorizontal: SPACING.base, gap: SPACING.sm, alignItems: "center",
+  },
+  paletteLocked: {
+    ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary,
+    marginTop: SPACING.sm,
+  },
+  // A fixed width now that the cells sit in a scroller rather than a 25% grid.
+  // 78 fits "Balcony" without truncating and puts roughly four and a half cells
+  // on a 390pt screen, so the row is always visibly cut.
   tool: {
-    height: ms(50), alignItems: "center", justifyContent: "center", gap: 3,
+    width: ms(78), height: ms(54), alignItems: "center", justifyContent: "center", gap: 3,
     borderRadius: RADIUS.md, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle,
   },
@@ -6025,8 +6124,9 @@ const styles = StyleSheet.create({
   // Was 34pt tall — below the 44pt touch minimum, and these sit in a row where
   // a mis-tap jumps the camera into the wrong room. 40 plus hitSlop clears it.
   roomPill: {
-    justifyContent: "center", height: ms(40), maxWidth: ms(170),
-    paddingHorizontal: SPACING.base, borderRadius: RADIUS.md,
+    flexDirection: "row", alignItems: "center", gap: SPACING.xs,
+    justifyContent: "center", height: ms(40), maxWidth: ms(180),
+    paddingHorizontal: SPACING.md, borderRadius: RADIUS.md,
     backgroundColor: COLORS.surface, ...SHADOW.sm,
   },
   roomPillActive: { backgroundColor: COLORS.primaryDark },
