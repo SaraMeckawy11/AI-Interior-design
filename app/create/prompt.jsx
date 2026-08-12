@@ -65,7 +65,11 @@ export default function Prompt() {
   const [isManualDisabled, setIsManualDisabled] = useState(false);
   // One ad instance owned by this screen, one coin per ad, and the wiring in
   // one place instead of copied into five. See lib/useRewardedCoins.js.
-  const { coins, setCoins, watchAd: handleWatchAd } = useRewardedCoins(token);
+  const { coins, setCoins, watchAd: handleWatchAd } = useRewardedCoins(token, {
+    // Both are null until the account answers, so this stays false until we
+    // know, and no ad is requested for someone who turns out to be subscribed.
+    enabled: isSubscribed === false && isPremium === false,
+  });
   
   
  // Fetch user status

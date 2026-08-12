@@ -392,8 +392,12 @@ export default function WalkthroughScreen() {
    * whether a charge happens; these numbers only let the screen say the price
    * up front and stop a render that is going to be refused.
    */
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
+  // Null until `refreshAccount` answers, rather than false. Both only ever feed
+  // `unlimited` below, which reads them for truth and so cannot tell the two
+  // apart — but the ad hook has to: starting at false told it to go and fetch an
+  // ad for an account that had not yet said it was subscribed.
+  const [isSubscribed, setIsSubscribed] = useState(null);
+  const [isPremium, setIsPremium] = useState(null);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [renderBlocked, setRenderBlocked] = useState(false);
   const {
@@ -403,7 +407,9 @@ export default function WalkthroughScreen() {
     status: adStatus,
     message: adMessage,
     clearMessage: clearAdMessage,
-  } = useRewardedCoins(token);
+  } = useRewardedCoins(token, {
+    enabled: isSubscribed === false && isPremium === false,
+  });
 
   // The ad hook reports what happened — a coin added, a daily cap reached, no
   // ad available. Interior drops that on the floor; here it goes through the

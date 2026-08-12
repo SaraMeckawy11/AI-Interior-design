@@ -27,8 +27,11 @@ export default function Upgrade() {
   const [busy, setBusy] = useState('');
   const [dialog, setDialog] = useState(null);
 
+  // `loading` is what separates "not subscribed" from "not asked yet" here, and
+  // it clears in a `finally`, so a failed account fetch still leaves ads
+  // working rather than stranding the watch-ad button.
   const { coins, setCoins, status: adStatus, message: adMessage, watchAd } =
-    useRewardedCoins(token);
+    useRewardedCoins(token, { enabled: !loading && !isSubscribed });
 
   useFocusEffect(
     useCallback(() => {

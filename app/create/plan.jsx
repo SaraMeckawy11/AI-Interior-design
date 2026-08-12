@@ -277,7 +277,11 @@ export default function PlanEditor() {
   const [isPremium, setIsPremium] = useState(null);
   const [isManualDisabled, setIsManualDisabled] = useState(false);
   // One ad instance, one coin per ad, one place the wiring lives.
-  const { coins, setCoins, status: adStatus, watchAd: handleWatchAd } = useRewardedCoins(token);
+  const { coins, setCoins, status: adStatus, watchAd: handleWatchAd } = useRewardedCoins(token, {
+    // Both are null until the account answers, so this stays false until we
+    // know, and no ad is requested for someone who turns out to be subscribed.
+    enabled: isSubscribed === false && isPremium === false,
+  });
 
   const pathsRef = useRef([]);
   const verticesRef = useRef([]);
