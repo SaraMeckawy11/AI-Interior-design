@@ -24,6 +24,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import ColorToneSelector from "../../components/create/ColorToneSelector";
 import PlanCanvas, {
   DEFAULT_CURVE_SETTINGS,
   GRID_METERS,
@@ -48,13 +49,12 @@ import PlanCanvas, {
 import WalkthroughViewer from "../../components/walkthrough/WalkthroughViewer";
 import { useAuthStore } from "../../authStore";
 import { SERVER_URI, apiUrl } from "../../configs/api";
-import { paletteForRequest, paletteForTone } from "../../lib/colorPalettes";
+import { paletteForRequest } from "../../lib/colorPalettes";
 import COLORS from "../../constants/colors";
 import { COIN_COST, FREE_DESIGNS, coinLabel } from "../../constants/pricing";
 import useRewardedCoins from "../../lib/useRewardedCoins";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
-  COLOR_MOODS,
   DEFAULT_WALKTHROUGH_SETTINGS,
   DESIGN_PROFILES,
   FLOOR_FINISHES,
@@ -3205,7 +3205,11 @@ function WalkthroughStage({
         night={night}
         defaultRoomType={roomConfigs[selectedRoom]?.roomType || "Living Room"}
         defaultDesignStyle={settings.style || "Modern"}
-        defaultColorTone={settings.colorMood || "Warm neutral"}
+        // The picker's own vocabulary, not the walkthrough's. `colorMood` was
+        // the seed for this while the Style step still asked for one, and its
+        // words — "Warm neutral", "Earthy natural" — are not tones this picker
+        // offers, so seeding from it would open with nothing selected.
+        defaultColorTone="Neutral"
         renderCount={renders.length}
         rendering={rendering}
         price={renderPrice}
@@ -3346,7 +3350,7 @@ function RenderSheet({
   const bird = viewMode === "plan";
   const [roomType, setRoomType] = useState(defaultRoomType || "Living Room");
   const [designStyle, setDesignStyle] = useState(defaultDesignStyle || "Modern");
-  const [colorTone, setColorTone] = useState(defaultColorTone || "Warm neutral");
+  const [colorTone, setColorTone] = useState(defaultColorTone || "Neutral");
   const [note, setNote] = useState("");
 
   // Start each render from the room and whole-home choices already made. The
@@ -3356,7 +3360,7 @@ function RenderSheet({
     if (!visible) return;
     setRoomType(defaultRoomType || "Living Room");
     setDesignStyle(defaultDesignStyle || "Modern");
-    setColorTone(defaultColorTone || "Warm neutral");
+    setColorTone(defaultColorTone || "Neutral");
     setNote("");
   }, [defaultColorTone, defaultDesignStyle, defaultRoomType, visible]);
 
@@ -3402,20 +3406,6 @@ function RenderSheet({
             </Pressable>
           </View>
 
-          {/* What this will cost, before the brief rather than after it — the
-              same three states the Interior screen has: included, free-trial
-              renders remaining, or a coin balance with a way to add to it. */}
-          <RenderCostBar
-            price={price}
-            unlimited={unlimited}
-            freeRendersLeft={freeRendersLeft}
-            coins={coins}
-            affordable={affordable}
-            adStatus={adStatus}
-            onWatchAd={onWatchAd}
-            onUpgrade={onUpgrade}
-          />
-
           <ScrollView
             style={styles.renderBriefScroll}
             contentContainerStyle={styles.renderBriefContent}
@@ -3447,10 +3437,14 @@ function RenderSheet({
               onChange={setDesignStyle}
             />
 
-            <View style={styles.renderToneBlock}>
-              <ChipRow label="Color tone" options={COLOR_MOODS} value={colorTone} onChange={setColorTone} />
-              <PalettePreview tone={colorTone} />
-            </View>
+            {/* The same colour control the Interior path uses.
+                This was a chip row of six mood words with a strip of three
+                swatches under it — a second, smaller vocabulary for the one
+                decision the app already has a proper picker for. That picker
+                shows each tone as the 60/30/10 trio it resolves to, names the
+                three colours, and lets someone add their own hex. Two ways to
+                choose a colour in one app is one too many. */}
+            <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
 
             {/* The one place free text is read properly.
                 This lived on the Style step, where the 3D exporter matched it
@@ -3500,6 +3494,25 @@ function RenderSheet({
               </View>
             )}
           </ScrollView>
+
+          {/* What it costs, next to the button that spends it.
+              This was a full-width tinted card directly under the title, so the
+              sheet opened with 150pt of chrome — a handle, a header and a
+              banner — before the first question. Cost is not a preamble; it is
+              part of the decision, and the decision is made at the button. The
+              price is on the button itself, so this line only carries what the
+              button cannot: how many free renders are left, what the balance
+              is, and the one way to add to it. */}
+          <RenderCostBar
+            price={price}
+            unlimited={unlimited}
+            freeRendersLeft={freeRendersLeft}
+            coins={coins}
+            affordable={affordable}
+            adStatus={adStatus}
+            onWatchAd={onWatchAd}
+            onUpgrade={onUpgrade}
+          />
 
           <Pressable
             accessibilityRole="button"
@@ -5201,30 +5214,6 @@ function ChipRow({ label, options, value, onChange, formatOption = (option) => o
   );
 }
 
-/**
- * The 60/30/10 scheme behind the chosen colour mood.
- *
- * Same derivation the Interior path shows on its tone picker, so a mood means
- * the same three colours wherever it is chosen.
- */
-function PalettePreview({ tone }) {
-  const palette = useMemo(() => paletteForTone(tone), [tone]);
-  if (!palette) return null;
-  const swatches = [palette.dominant, palette.secondary, palette.accent];
-  return (
-    <View style={styles.palettePreview} accessibilityLabel={
-      `${tone}: ${swatches.map((swatch) => `${swatch.share} per cent ${swatch.name}`).join(", ")}`
-    }>
-      {swatches.map((swatch) => (
-        <View key={swatch.role} style={styles.paletteSwatchCell}>
-          <View style={[styles.paletteSwatch, { backgroundColor: swatch.hex }]} />
-          <Text style={styles.paletteShare}>{swatch.share}%</Text>
-          <Text style={styles.paletteName} numberOfLines={1}>{swatch.name}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
 
 /**
  * A step that cannot be done yet.
@@ -5733,17 +5722,6 @@ const styles = StyleSheet.create({
   },
   cardSectionTitle: { ...TYPE.bodyStrong, color: COLORS.textPrimary },
 
-  palettePreview: {
-    flexDirection: "row", gap: SPACING.sm, marginTop: SPACING.md,
-    paddingTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.borderSubtle,
-  },
-  paletteSwatchCell: { flex: 1, minWidth: 0, alignItems: "center", gap: 4 },
-  paletteSwatch: {
-    width: "100%", height: ms(34), borderRadius: RADIUS.xs,
-    borderWidth: 1, borderColor: COLORS.borderSubtle,
-  },
-  paletteShare: { ...TYPE.caption, fontSize: 11, color: COLORS.textPrimary },
-  paletteName: { ...TYPE.caption, fontSize: 10, color: COLORS.textTertiary },
   roomIndexLabel: { flex: 1, minWidth: 0, ...TYPE.overline, color: COLORS.textTertiary },
   roomCardHead: {
     flexDirection: "row", alignItems: "center", gap: SPACING.md,
@@ -6282,8 +6260,8 @@ const styles = StyleSheet.create({
   renderSheet: { maxHeight: "92%" },
   renderBriefScroll: { flexShrink: 1, marginHorizontal: -SPACING.xs },
   renderBriefContent: { paddingHorizontal: SPACING.xs, paddingBottom: SPACING.xs, gap: SPACING.base },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.lg },
-  sheetHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.lg },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.md },
+  sheetHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.base },
   sheetIcon: {
     width: ms(44), height: ms(44), borderRadius: RADIUS.md,
     alignItems: "center", justifyContent: "center", backgroundColor: COLORS.primaryTint,
@@ -6300,20 +6278,25 @@ const styles = StyleSheet.create({
   // One line above the brief, in the app's own tinted-card language: an icon,
   // the price in plain words, and — only when there is something to do about
   // it — one action on the right.
+  // A line, not a banner. It sits between the brief and the button, carries no
+  // fill of its own unless something is wrong, and gives its height back to the
+  // content — 48pt of tinted card plus 16 of margin was more room than the fact
+  // deserved, directly above the only thing on the sheet that matters.
   costBar: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    minHeight: ms(48), paddingLeft: SPACING.md, paddingRight: SPACING.xs,
-    marginBottom: SPACING.base, borderRadius: RADIUS.md,
-    backgroundColor: COLORS.primaryTint,
-    borderWidth: 1, borderColor: COLORS.primarySoft,
+    minHeight: ms(36), paddingRight: SPACING.xs, marginTop: SPACING.sm,
   },
-  costBarIncluded: { backgroundColor: COLORS.successSoft, borderColor: COLORS.successSoft },
-  costBarShort: { backgroundColor: COLORS.warningSoft, borderColor: COLORS.warningSoft },
-  costBarText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
+  // Only a state that needs acting on earns a fill.
+  costBarIncluded: {},
+  costBarShort: {
+    paddingLeft: SPACING.sm, borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.warningSoft,
+  },
+  costBarText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textSecondary },
   costBarAction: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
-    height: ms(36), minWidth: ms(84), paddingHorizontal: SPACING.md,
-    borderRadius: RADIUS.sm, backgroundColor: COLORS.surface,
+    height: ms(32), paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.sm, backgroundColor: COLORS.primaryTint,
   },
   costBarActionText: { ...TYPE.caption, color: COLORS.primaryDark },
 
