@@ -95,8 +95,55 @@ GEN_KLEIN_FURNITURE_BY_ROOM = {
 }
 
 
+#: What the render is a render *of*. Interiors reach this engine from two very
+#: different surfaces and they fail in opposite directions, so each gets its own
+#: geometry lock rather than one wording compromised for both.
+PHOTO_SOURCE = "photo"
+WALKTHROUGH_SOURCE = "walkthrough"
+
+_ARCHITECTURE_LOCKS = {
+    # A photograph of a real room. The model will silently move or invent an
+    # opening unless it is told what preserving one means, so this spells it out
+    # and claims the only priority marker in the brief.
+    PHOTO_SOURCE: (
+        "ARCHITECTURE - HIGHEST PRIORITY:\n"
+        "- Change finishes and movable contents only. Keep every wall, door, "
+        "window and balcony opening exactly as it appears: same count, size, "
+        "shape, position and sill height. Never add, remove, move, resize, cover "
+        "or reshape an opening.\n"
+        "- Keep the camera position, framing and perspective identical.\n"
+    ),
+    # A frame captured out of the 3D walkthrough. Its openings are the user's own
+    # plan geometry, already exactly where they asked for them — the problem here
+    # is not drift, it is that the source is a crude massing model. Enumerating
+    # sill heights and shapes over it held the render to those crude shapes
+    # instead of designing the room, so this asks only for what the frame is:
+    # the geometry stays, the finishes and contents become a design.
+    WALKTHROUGH_SOURCE: (
+        "ARCHITECTURE:\n"
+        "- Change finishes and movable contents only. Preserve all walls, doors, "
+        "windows, balcony openings and camera framing.\n"
+    ),
+}
+
+
+def resolve_render_source(source) -> str:
+    """``walkthrough`` for a captured 3D frame, ``photo`` for anything else.
+
+    Unrecognised and absent values mean photo, so a client that does not send
+    the field — every build before this one — keeps the brief it had.
+    """
+    value = str(source or "").strip().lower()
+    return WALKTHROUGH_SOURCE if value == WALKTHROUGH_SOURCE else PHOTO_SOURCE
+
+
 def build_gen_klein_interior_prompt(
-    *, space_type: str, design_style: str, color_tone: str, color_palette=None
+    *,
+    space_type: str,
+    design_style: str,
+    color_tone: str,
+    color_palette=None,
+    source: str = PHOTO_SOURCE,
 ) -> str:
     """Return a flexible, whole-room brief that leaves architecture untouched."""
     room_type = space_type or "Living Room"
@@ -206,21 +253,15 @@ def build_gen_klein_interior_prompt(
         "tray, a ceramic, a sculptural object",
     )
 
-    # The opening sentence and the architecture block are worded as they were
-    # before the senior-designer pass: "finished scheme, built on the input
-    # photo's architecture" read as licence to redesign, and openings moved.
-    # Everything creative stays below them, so the lock is read first.
+    # The opening sentence is the wording that holds geometry; "a senior interior
+    # designer's finished scheme, built on the input photo's architecture" read as
+    # licence to redesign and openings moved. The lock that follows it is chosen
+    # by render source — see _ARCHITECTURE_LOCKS. Everything creative stays below
+    # both, so the lock is read first.
     return (
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
-        "ARCHITECTURE - HIGHEST PRIORITY:\n"
-        "- Change finishes and movable contents only. Keep every wall, door, "
-        "window and balcony opening exactly as it appears: same count, size, "
-        "shape, position and sill height. Never add, remove, move, resize, cover "
-        "or reshape an opening.\n"
-        "- Keep the camera position, framing and perspective identical.\n\n"
-        # Architecture is now the only clause marked as a priority, so the lock
-        # does not have to share that emphasis with a decor rule.
+        f"{_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
         "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
         "potted floor plant; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"

@@ -148,10 +148,16 @@ def handler(event):
                 color_palette=color_palette,
             )
 
-        engine_name = (
-            "gen-klein-exterior"
-            if resolve_mode(mode, room_type) == "exterior"
-            else "gen-klein"
+        is_exterior = resolve_mode(mode, room_type) == "exterior"
+        engine_name = "gen-klein-exterior" if is_exterior else "gen-klein"
+        # Photograph or a frame captured out of the 3D walkthrough. Only the
+        # interior brief reads it, and only to pick a geometry lock, so it is not
+        # passed to the exterior engine — that renderer is pinned to ad7a9ba and
+        # takes the arguments it took then. Absent means photograph, which is
+        # what every client sent before this field existed.
+        source_kwargs = (
+            {} if is_exterior
+            else {"render_source": (body.get("render_source") or "").strip()}
         )
         return _engine(engine_name).run(
             image=image,
@@ -165,6 +171,7 @@ def handler(event):
             preserve_geometry=body.get("preserve_geometry", True),
             creativity=int(body.get("creativity") or 42),
             color_palette=color_palette,
+            **source_kwargs,
         )
 
     except Exception as error:

@@ -46,6 +46,7 @@ from prompt_engine import (
     build_prompt,
     build_short_prompt,
     resolve_mode,
+    resolve_render_source,
 )
 
 # ---------------------------------------------------------------------------
@@ -471,6 +472,7 @@ class GenKleinEngine(_Engine):
         preserve_geometry: bool = True,
         creativity: int = 42,
         color_palette: dict = None,
+        render_source: str = "",
     ):
         from PIL import Image, ImageChops, ImageFilter, ImageOps
 
@@ -486,6 +488,8 @@ class GenKleinEngine(_Engine):
                 design_style=design_style or "Modern",
                 color_tone=color_tone or "Neutral",
                 color_palette=color_palette,
+                # Photograph or captured 3D frame; absent means photograph.
+                source=render_source,
             )
         elif room_type.strip().lower() == "prompt only" and custom_prompt.strip():
             prompt = custom_prompt.strip()
@@ -570,6 +574,7 @@ class GenKleinEngine(_Engine):
             "structure_score": round(score, 4),
             "seed": selected_seed,
             "candidates": 1,
+            "render_source": resolve_render_source(render_source),
             "cleanup_applied": False,
             "negative_prompt": "",
             "engine": "gen-klein",

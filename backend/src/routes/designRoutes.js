@@ -248,6 +248,12 @@ router.post("/", isAuthenticated, async (req, res) => {
       // the 3D view. Only the *name* comes from the client; the price attached
       // to that name is decided here.
       product,
+      // What the image *is*: a photograph, or a frame captured out of the 3D
+      // walkthrough. The interior brief locks geometry differently for the two,
+      // so this reaches the engine. Kept separate from `product` on purpose —
+      // that names a price list row, and billing must not decide what the model
+      // is asked for. Absent means photograph.
+      renderSource,
     } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
@@ -332,6 +338,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       lighting: typeof lighting === "string" ? lighting : "",
       preserve_geometry: preserveGeometry !== false,
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
+      render_source: typeof renderSource === "string" ? renderSource : "",
     };
 
     // Modal first, RunPod second. The design credit was already spent above and

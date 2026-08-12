@@ -1670,6 +1670,15 @@ export default function WalkthroughScreen() {
           // design one. Naming the row is all this does — the price attached to
           // the name is decided by the server, and the prompt never sees it.
           product: "walkthrough",
+          // This one *does* reach the prompt, and is the only field on this
+          // request that differs from a photographed interior. Both surfaces
+          // share one brief; the difference is how hard it locks the openings.
+          // A photograph needs them spelled out — count, size, shape, position,
+          // sill height — or the model quietly moves a window. A frame captured
+          // here already has the openings the user drew, and spelling them out
+          // over a crude massing model held the render to those crude shapes
+          // instead of designing the room.
+          renderSource: "walkthrough",
           // The one piece of text that is the user's own — the Notes field on
           // the Style step — exactly as Interior sends its optional prompt.
           // There is no free-text field any more, on either surface. A plan

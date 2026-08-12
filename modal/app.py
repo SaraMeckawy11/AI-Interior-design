@@ -62,6 +62,7 @@ from prompt_engine import (
     build_prompt,
     build_short_prompt,
     resolve_mode,
+    resolve_render_source,
 )
 
 # ---------------------------------------------------------------------------
@@ -587,6 +588,7 @@ class GenKlein:
         preserve_geometry: bool = True,
         creativity: int = 42,
         color_palette: dict | None = None,
+        render_source: str = "",
     ):
         from PIL import Image, ImageChops, ImageFilter, ImageOps
 
@@ -604,6 +606,10 @@ class GenKlein:
                 design_style=design_style or "Modern",
                 color_tone=color_tone or "Neutral",
                 color_palette=color_palette,
+                # A photograph and a captured 3D frame need different geometry
+                # locks. Absent, this resolves to photo — the brief every client
+                # before this field was added was getting.
+                source=render_source,
             )
         elif room_type.strip().lower() == "prompt only" and custom_prompt.strip():
             prompt = custom_prompt.strip()
@@ -700,6 +706,10 @@ class GenKlein:
             "structure_score": round(score, 4),
             "seed": selected_seed,
             "candidates": 1,
+            # Which geometry lock this render was briefed with. Reported so a
+            # walkthrough frame briefed as a photograph is visible in the
+            # response rather than only in the picture.
+            "render_source": resolve_render_source(render_source),
             # Kept so any existing reader of this field sees a value, not a
             # missing key. Nothing applies a cleanup pass any more.
             "cleanup_applied": False,
@@ -1182,6 +1192,10 @@ def _dispatch(body: dict):
     # back to the generic ratio clause.
     color_palette = body.get("color_palette") if isinstance(body.get("color_palette"), dict) else None
     custom_prompt = body.get("custom_prompt") or ""
+    # What the image is: a photograph, or a frame captured out of the 3D
+    # walkthrough. Only the interior brief reads it, and only to pick a geometry
+    # lock; absent — every client before this field — means photograph.
+    render_source = (body.get("render_source") or "").strip()
 
     # Interior and exterior take one engine and only one: Gen-Klein, on the L40S.
     #
@@ -1238,6 +1252,7 @@ def _dispatch(body: dict):
             preserve_geometry=body.get("preserve_geometry", True),
             creativity=int(body.get("creativity") or 42),
             color_palette=color_palette,
+            render_source=render_source,
         )
     except Exception as error:
         engine = "InteriorAI" if is_guided else "ExteriorGenKlein" if is_exterior else "Gen-Klein"
@@ -1377,7 +1392,10 @@ def health():
         # Bump whenever prompt_engine.py changes what the model is asked for, so
         # a deployed service can be told apart from the one before it without
         # reading a build log.
-        "promptEngine": "gen-klein-geometry-lock-hero-piece-v16",
+        # Two interior briefs now: the photo lock and the walkthrough lock. The
+        # tag names both so a deployment can be told apart by which pair it has.
+        "promptEngine": "gen-klein-hero-piece-v18",
+        "interiorLocks": {"photo": "explicit-openings", "walkthrough": "concise"},
         "exteriorPrompt": "ad7a9ba2c5b396c78dbf390aa6136a3262dd0cec",
         "exteriorEngine": "ad7a9ba-exact-full-path",
         "exteriorBuildingSeed": 977,
