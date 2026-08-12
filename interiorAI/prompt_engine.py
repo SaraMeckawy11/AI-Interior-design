@@ -104,25 +104,32 @@ def build_gen_klein_interior_prompt(
     tone = color_tone or "Neutral"
 
     def swatch(entry, fallback):
+        """The swatch name only.
+
+        The hex code used to be appended here. It cost ~29 of the 512 tokens
+        this brief is allowed for three swatches while carrying almost nothing
+        the text encoder can act on — the name is what it understands — so the
+        budget now buys the distribution and decor direction below instead.
+        """
         if not isinstance(entry, dict):
             return fallback
-        name = str(entry.get("name") or fallback).strip()
-        code = str(entry.get("hex") or "").strip().upper()
-        return f"{name} ({code})" if code.startswith("#") else name
+        return str(entry.get("name") or fallback).strip()
 
     selected = color_palette.get("colors") if isinstance(color_palette, dict) else None
     if isinstance(selected, list) and len(selected) >= 3:
         palette = ", ".join(swatch(entry, tone) for entry in selected[:3])
-        color_rule = f"Use the selected palette ({palette}) as an overall direction"
+        color_rule = f"the selected palette ({palette})"
     else:
-        color_rule = f"Use {tone} as the overall color direction"
+        color_rule = f"{tone} as the overall direction"
 
     room_key = room_type.lower().strip()
     programmes = {
+        # Coffee table and rug are briefed in detail below, so they are not
+        # repeated here: the token budget is tight and Klein weights a
+        # once-stated instruction more heavily than a twice-stated one.
         "living room": (
-            "a complete conversation group with sofa, complementary seating, "
-            "coffee table, correctly sized anchoring rug, and a TV centred above "
-            "a media console on an available solid wall"
+            "a conversation group with sofa and complementary seating, and a TV "
+            "centred above a media console on a solid wall"
         ),
         "bedroom": "a restful sleeping area, useful bedside surfaces and calm storage",
         "dining room": "a correctly scaled dining group and practical circulation",
@@ -136,34 +143,103 @@ def build_gen_klein_interior_prompt(
         f"the essential functions of a well-designed {room_type}",
     )
 
+    # The one piece the room is judged on. Naming it, and naming the materials
+    # it may be made from, is what stops Klein from filling the focal slot with
+    # a vague low box; the brief is shared by every room type, so the coffee
+    # table has to be asked for only where a coffee table belongs.
+    heroes = {
+        "living room": (
+            "The coffee table is the hero piece: one sculptural, well-proportioned "
+            "table in stone, solid timber or slim metal and glass, low, centred on the rug"
+        ),
+        "bedroom": (
+            "The bed is the hero piece: a well-proportioned upholstered headboard, "
+            "crisp layered bedding and two matched nightstands"
+        ),
+        "dining room": (
+            "The dining table is the hero piece: one well-proportioned solid stone "
+            "or timber table with matched sculptural chairs"
+        ),
+        "kitchen": (
+            "The island or run of cabinetry is the hero piece: honest stone tops, "
+            "flush hardware and one considered splashback"
+        ),
+        "home office": (
+            "The desk is the hero piece: one well-proportioned solid-topped desk "
+            "with a refined chair and aligned shelving"
+        ),
+        "kids room": (
+            "The bed is the hero piece: a well-proportioned frame in honest timber "
+            "with calm bedding and one playful accent"
+        ),
+        "bathroom": (
+            "The vanity is the hero piece: a well-proportioned stone top, honest "
+            "cabinetry and one considered mirror and light"
+        ),
+    }
+    hero = heroes.get(
+        room_key,
+        "Give the room one well-proportioned hero piece in an honest material and "
+        "let everything else support it",
+    )
+
+    # Styling asked for by room, so a bathroom is not briefed for cushions and a
+    # book stack. Only the selected line reaches the model, so the specific ones
+    # cost nothing against the token ceiling.
+    decor = {
+        "bathroom": (
+            "neatly folded towels, one framed piece at eye level, and a small "
+            "tray holding a ceramic and a candle"
+        ),
+        "kitchen": (
+            "one framed piece at eye level and a single restrained counter group "
+            "at varied heights - a board, a bowl and a ceramic"
+        ),
+        "dining room": (
+            "one large artwork at eye level, a linen runner, and one low "
+            "centrepiece group - a bowl, a ceramic and candles"
+        ),
+    }.get(
+        room_key,
+        "layered cushions, a folded throw, one large artwork at eye level, and "
+        "one tight group per surface at varied heights - books, a "
+        "tray, a ceramic, a sculptural object",
+    )
+
+    # The opening sentence and the architecture block are worded as they were
+    # before the senior-designer pass: "finished scheme, built on the input
+    # photo's architecture" read as licence to redesign, and openings moved.
+    # Everything creative stays below them, so the lock is read first.
     return (
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
-        "ARCHITECTURE:\n"
-        "- Change finishes and movable contents only. Preserve all walls, doors, "
-        "windows, balcony openings and camera framing.\n\n"
-        "VISIBLE ITEM LIMITS - HIGH PRIORITY:\n"
-        "- Show exactly one ceiling fixture and one floor lamp beside seating; no other lamps.\n"
-        "- Show exactly one potted floor plant; no other greenery, flowers or branches.\n\n"
+        "ARCHITECTURE - HIGHEST PRIORITY:\n"
+        "- Change finishes and movable contents only. Keep every wall, door, "
+        "window and balcony opening exactly as it appears: same count, size, "
+        "shape, position and sill height. Never add, remove, move, resize, cover "
+        "or reshape an opening.\n"
+        "- Keep the camera position, framing and perspective identical.\n\n"
+        # Architecture is now the only clause marked as a priority, so the lock
+        # does not have to share that emphasis with a decor rule.
+        "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
+        "potted floor plant; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
-        "- Create one cohesive, professionally resolved room with balanced "
-        "proportions, clear circulation, visual rhythm and a focal point.\n"
+        "- Design as a senior interior designer: balanced proportions, a mix of "
+        "large, medium and small forms, one focal point.\n"
         f"- Resolve {programme}. Choose the layout, furniture count and scale from the visible space.\n"
-        "- Group furniture around a correctly sized rug; maintain realistic "
-        "clearances and align art, lighting and casework with nearby furniture.\n"
-        "- Select flooring, rugs, curtains, furniture, lighting, art, materials "
-        "and finishes together as one coordinated scheme. Do not force a predetermined material or object color.\n"
-        "- DECORATE: use layered cushions and curated non-botanical table styling: "
-        "a small book stack, tray, ceramics and one sculptural object, grouped at "
-        "varied heights across tables and console. Leave most surface area empty; no decor on the floor.\n"
-        f"- COLOR: {color_rule}. Distribute it naturally across the whole room "
-        "as anchors, not rigid paint matches: light or muted variants on large "
-        "fields, mid-tones for depth, and the strongest or darkest color sparingly.\n"
-        "- Keep undertones consistent and repeat key colors in two or three "
-        "separated details. Preserve realistic wood, stone and metal with balanced "
-        "contrast; avoid a flat wash, muddy neutrals, oversaturation or equal color weight.\n"
-        "- Keep openings and walkways clear. Avoid clutter, mismatched pieces and duplicates.\n"
-        "- Photorealistic editorial interior, natural light, believable scale and contact shadows."
+        f"- Designer furniture, clean silhouettes, honest materials. {hero}.\n"
+        "- Group seating around a correctly sized rug; align art and lighting with "
+        "the furniture below.\n"
+        "- Choose all finishes and furnishings as one scheme; force no "
+        "predetermined material or color.\n"
+        f"- DECORATE: {decor}. Leave most surfaces bare; nothing on the floor.\n"
+        f"- COLOR: {color_rule}, weighted as a designer would: lightest or most "
+        "muted over the large fields, mid-tones on upholstery, curtains and rugs, "
+        "the deepest color in a few small touches.\n"
+        "- Consistent undertones, each color echoed in two or three separated "
+        "places; no flat wash, muddy neutrals or oversaturation.\n"
+        "- Keep walkways clear; no clutter or duplicates.\n"
+        "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
     )
 
 ROOM_PROGRAMS = {

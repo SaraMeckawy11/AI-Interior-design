@@ -683,36 +683,11 @@ class GenKlein:
             generator=self.torch.Generator(device="cuda").manual_seed(selected_seed),
         ).images[0].convert("RGB")
 
-        cleanup_applied = False
-        if resolved_mode == "interior" and room_type.strip().lower() == "living room":
-            cleanup_prompt = (
-                "Refine this exact finished living-room image without redesigning it. "
-                "Keep the architecture, openings, camera, furniture layout, TV, media "
-                "console, rug, palette, materials and ceiling fixture unchanged. Keep exactly "
-                "one floor lamp beside seating and one visible potted floor plant; remove all "
-                "other lamps, greenery, flowers and branches. Style the coffee table and media "
-                "console with a restrained small book stack, tray, ceramics and one sculptural "
-                "object at varied heights, leaving most surfaces empty. Add nothing to the floor."
-            )
-            with self.torch.no_grad():
-                cleanup_embeds = self.pipe._get_qwen3_prompt_embeds(
-                    text_encoder=self.text_encoder,
-                    tokenizer=self.tokenizer,
-                    prompt=cleanup_prompt,
-                    dtype=self.torch.bfloat16,
-                    device="cuda",
-                ).cpu()
-            result = self.pipe(
-                prompt=None,
-                prompt_embeds=cleanup_embeds.to("cuda"),
-                image=[result],
-                width=width,
-                height=height,
-                num_inference_steps=4,
-                guidance_scale=1.0,
-                generator=self.torch.Generator(device="cuda").manual_seed(19),
-            ).images[0].convert("RGB")
-            cleanup_applied = True
+        # Living rooms used to get a second 4-step pass here to strip the extra
+        # lamps and greenery. It also re-rendered the furniture it was told to
+        # leave alone, and the coffee table — the piece the room is judged on —
+        # came back softer than the single-pass version. The restraint it was
+        # buying is now stated in the brief itself, so one pass is enough.
         score = structure_score(result)
 
         buf = io.BytesIO()
@@ -725,7 +700,9 @@ class GenKlein:
             "structure_score": round(score, 4),
             "seed": selected_seed,
             "candidates": 1,
-            "cleanup_applied": cleanup_applied,
+            # Kept so any existing reader of this field sees a value, not a
+            # missing key. Nothing applies a cleanup pass any more.
+            "cleanup_applied": False,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,
@@ -1400,7 +1377,7 @@ def health():
         # Bump whenever prompt_engine.py changes what the model is asked for, so
         # a deployed service can be told apart from the one before it without
         # reading a build log.
-        "promptEngine": "gen-klein-curated-table-decor-v14",
+        "promptEngine": "gen-klein-geometry-lock-hero-piece-v16",
         "exteriorPrompt": "ad7a9ba2c5b396c78dbf390aa6136a3262dd0cec",
         "exteriorEngine": "ad7a9ba-exact-full-path",
         "exteriorBuildingSeed": 977,

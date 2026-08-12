@@ -555,36 +555,9 @@ class GenKleinEngine(_Engine):
             generator=self.torch.Generator(device=self.device).manual_seed(selected_seed),
         ).images[0].convert("RGB")
 
-        cleanup_applied = False
-        if resolved_mode == "interior" and room_type.strip().lower() == "living room":
-            cleanup_prompt = (
-                "Refine this exact finished living-room image without redesigning it. "
-                "Keep the architecture, openings, camera, furniture layout, TV, media "
-                "console, rug, palette, materials and ceiling fixture unchanged. Keep exactly "
-                "one floor lamp beside seating and one visible potted floor plant; remove all "
-                "other lamps, greenery, flowers and branches. Style the coffee table and media "
-                "console with a restrained small book stack, tray, ceramics and one sculptural "
-                "object at varied heights, leaving most surfaces empty. Add nothing to the floor."
-            )
-            with self.torch.no_grad():
-                cleanup_embeds = self.pipe._get_qwen3_prompt_embeds(
-                    text_encoder=self.text_encoder,
-                    tokenizer=self.tokenizer,
-                    prompt=cleanup_prompt,
-                    dtype=self.torch.bfloat16,
-                    device=self.device,
-                ).cpu()
-            result = self.pipe(
-                prompt=None,
-                prompt_embeds=cleanup_embeds.to(self.device),
-                image=[result],
-                width=width,
-                height=height,
-                num_inference_steps=4,
-                guidance_scale=1.0,
-                generator=self.torch.Generator(device=self.device).manual_seed(19),
-            ).images[0].convert("RGB")
-            cleanup_applied = True
+        # Living rooms used to get a second 4-step cleanup pass here. It also
+        # re-rendered the furniture it was told to leave alone and softened the
+        # coffee table; the restraint it bought is now in the brief itself.
         score = structure_score(result)
 
         buf = io.BytesIO()
@@ -597,7 +570,7 @@ class GenKleinEngine(_Engine):
             "structure_score": round(score, 4),
             "seed": selected_seed,
             "candidates": 1,
-            "cleanup_applied": cleanup_applied,
+            "cleanup_applied": False,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,
