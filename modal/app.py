@@ -344,6 +344,126 @@ def _decode_base64_image_bytes(base64_str):
     return base64.b64decode(base64_str)
 
 
+# Complete exterior rendering path from
+# ad7a9ba2c5b396c78dbf390aa6136a3262dd0cec. Keep this separate from the
+# subsequently tuned interior renderer below.
+@app.cls(
+    image=flux_image,
+    gpu="L40S",
+    volumes={"/cache": hf_cache_vol},
+    secrets=[api_key_secret],
+    scaledown_window=90,
+    min_containers=0,
+    max_containers=3,
+    timeout=900,
+)
+class ExteriorGenKlein:
+    """Historical full-bf16 exterior renderer from ad7a9ba."""
+
+    @modal.enter()
+    def load(self):
+        import torch
+
+        try:
+            from diffusers import Flux2KleinPipeline
+        except ImportError as error:  # pragma: no cover
+            raise RuntimeError(
+                "Flux2KleinPipeline is missing. It requires diffusers >= 0.37; "
+                "check the pins in flux_image."
+            ) from error
+
+        self.torch = torch
+        self.pipe = Flux2KleinPipeline.from_pretrained(
+            FLUX_MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            cache_dir=CACHE_DIR,
+        )
+        self.pipe.to("cuda")
+        for enable in (
+            lambda: self.pipe.enable_attention_slicing(),
+            lambda: self.pipe.vae.enable_tiling(),
+        ):
+            try:
+                enable()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _target_size(image, preserve_aspect=False):
+        if not preserve_aspect:
+            return (1024, 768) if image.width >= image.height else (768, 1024)
+
+        scale = 1024 / max(image.width, image.height)
+        width = max(16, round(image.width * scale / 16) * 16)
+        height = max(16, round(image.height * scale / 16) * 16)
+        return width, height
+
+    @modal.method()
+    def run(
+        self,
+        image: str,
+        room_type: str = "",
+        design_style: str = "",
+        color_tone: str = "",
+        custom_prompt: str = "",
+        mode: str = "interior",
+        material: str = "Natural oak",
+        lighting: str = "Natural daylight",
+        preserve_geometry: bool = True,
+        creativity: int = 42,
+        color_palette: dict | None = None,
+    ):
+        from PIL import Image, ImageEnhance, ImageOps
+
+        source = ImageOps.exif_transpose(
+            Image.open(io.BytesIO(_decode_base64_image_bytes(image)))
+        ).convert("RGB")
+        resolved_mode = resolve_mode(mode, room_type)
+        width, height = self._target_size(
+            source,
+            preserve_aspect=resolved_mode == "exterior",
+        )
+        prompt = build_prompt(
+            mode=resolved_mode,
+            space_type=room_type or ("Building" if resolved_mode == "exterior" else "Living Room"),
+            design_style=design_style or "Modern",
+            color_tone=color_tone or "Neutral",
+            material=material or "Natural oak",
+            lighting=lighting or "Natural daylight",
+            preserve_geometry=bool(preserve_geometry),
+            creativity=int(creativity or 42),
+            custom_prompt=(custom_prompt or "")[:280],
+            color_palette=color_palette,
+        )
+
+        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
+        result = self.pipe(
+            prompt=prompt,
+            image=[source],
+            width=width,
+            height=height,
+            num_inference_steps=4,
+            guidance_scale=1.0,
+            generator=self.torch.Generator(device="cuda").manual_seed(seed),
+        ).images[0].convert("RGB")
+
+        result = ImageEnhance.Contrast(result).enhance(1.025)
+        result = ImageEnhance.Sharpness(result).enhance(1.08)
+
+        buf = io.BytesIO()
+        result.save(buf, format="PNG", optimize=True)
+        return {
+            "message": "Image generated successfully",
+            "generatedImage": base64.b64encode(buf.getvalue()).decode(),
+            "prompt": prompt,
+            "negative_prompt": "",
+            "engine": "gen-klein",
+            "model": FLUX_MODEL_ID,
+            "mode": resolved_mode,
+            "has_window": True,
+        }
+
+
 # ---------------------------------------------------------------------------
 # GEN-KLEIN — FLUX.2 [klein] image editing (default path)
 # ---------------------------------------------------------------------------
@@ -562,6 +682,37 @@ class GenKlein:
             guidance_scale=1.0,
             generator=self.torch.Generator(device="cuda").manual_seed(selected_seed),
         ).images[0].convert("RGB")
+
+        cleanup_applied = False
+        if resolved_mode == "interior" and room_type.strip().lower() == "living room":
+            cleanup_prompt = (
+                "Refine this exact finished living-room image without redesigning it. "
+                "Keep the architecture, openings, camera, furniture layout, TV, media "
+                "console, rug, palette, materials and ceiling fixture unchanged. Keep exactly "
+                "one floor lamp beside seating and one visible potted floor plant; remove all "
+                "other lamps, greenery, flowers and branches. Style the coffee table and media "
+                "console with a restrained small book stack, tray, ceramics and one sculptural "
+                "object at varied heights, leaving most surfaces empty. Add nothing to the floor."
+            )
+            with self.torch.no_grad():
+                cleanup_embeds = self.pipe._get_qwen3_prompt_embeds(
+                    text_encoder=self.text_encoder,
+                    tokenizer=self.tokenizer,
+                    prompt=cleanup_prompt,
+                    dtype=self.torch.bfloat16,
+                    device="cuda",
+                ).cpu()
+            result = self.pipe(
+                prompt=None,
+                prompt_embeds=cleanup_embeds.to("cuda"),
+                image=[result],
+                width=width,
+                height=height,
+                num_inference_steps=4,
+                guidance_scale=1.0,
+                generator=self.torch.Generator(device="cuda").manual_seed(19),
+            ).images[0].convert("RGB")
+            cleanup_applied = True
         score = structure_score(result)
 
         buf = io.BytesIO()
@@ -574,6 +725,7 @@ class GenKlein:
             "structure_score": round(score, 4),
             "seed": selected_seed,
             "candidates": 1,
+            "cleanup_applied": cleanup_applied,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,
@@ -1065,6 +1217,7 @@ def _dispatch(body: dict):
     # and can never land there.
     photo_mode = mode.lower() in ("interior", "exterior")
     is_guided = (not photo_mode) and mode.lower() == "guided" and bool(rooms)
+    is_exterior = resolve_mode(mode, room_type) == "exterior"
 
     try:
         if is_guided:
@@ -1078,6 +1231,21 @@ def _dispatch(body: dict):
                 canvas=canvas,
                 mode=mode,
                 doors=doors,
+                color_palette=color_palette,
+            )
+
+        if is_exterior:
+            return ExteriorGenKlein().run.spawn(
+                image=image_b64,
+                room_type=room_type,
+                design_style=design_style,
+                color_tone=color_tone,
+                custom_prompt=custom_prompt,
+                mode=mode or "exterior",
+                material=(body.get("material") or "Natural oak").strip(),
+                lighting=(body.get("lighting") or "Natural daylight").strip(),
+                preserve_geometry=body.get("preserve_geometry", True),
+                creativity=int(body.get("creativity") or 42),
                 color_palette=color_palette,
             )
 
@@ -1095,7 +1263,7 @@ def _dispatch(body: dict):
             color_palette=color_palette,
         )
     except Exception as error:
-        engine = "InteriorAI" if is_guided else "Gen-Klein"
+        engine = "InteriorAI" if is_guided else "ExteriorGenKlein" if is_exterior else "Gen-Klein"
         print(f"[router] {engine} failed: {error}")
         raise HTTPException(status_code=500, detail=str(error))
 
@@ -1232,7 +1400,10 @@ def health():
         # Bump whenever prompt_engine.py changes what the model is asked for, so
         # a deployed service can be told apart from the one before it without
         # reading a build log.
-        "promptEngine": "gen-klein-designer-color-hierarchy-v8",
+        "promptEngine": "gen-klein-curated-table-decor-v14",
+        "exteriorPrompt": "ad7a9ba2c5b396c78dbf390aa6136a3262dd0cec",
+        "exteriorEngine": "ad7a9ba-exact-full-path",
+        "exteriorBuildingSeed": 977,
     }
 
 
@@ -1246,6 +1417,7 @@ def main(
     design_style: str = "modern",
     color_tone: str = "warm vanilla latte",
     mode: str = "interior",
+    creativity: int = 42,
 ):
     """Run a smoke test from the CLI using a local image file."""
     from pathlib import Path
@@ -1263,7 +1435,8 @@ def main(
     else:
         raw = Path(image_path).read_bytes()
     b64 = base64.b64encode(raw).decode()
-    result = GenKlein().run.remote(
+    engine = ExteriorGenKlein if resolve_mode(mode, room_type) == "exterior" else GenKlein
+    result = engine().run.remote(
         image=b64,
         room_type=room_type,
         design_style=design_style,
@@ -1276,14 +1449,17 @@ def main(
             ]
         } if color_tone.lower() == "warm vanilla latte" else None,
         mode=mode,
+        creativity=creativity,
     )
     out_path = Path("generated.png")
     out_path.write_bytes(base64.b64decode(result["generatedImage"]))
     print(f"Saved -> {out_path.resolve()}")
     print(f"Engine: {result['engine']}")
-    print(f"Prompt tokens: {result['prompt_tokens']}/512")
-    print(
-        f"Structure: {result['structure_score']:.4f} from "
-        f"{result['candidates']} candidates; seed {result['seed']}"
-    )
+    if "prompt_tokens" in result:
+        print(f"Prompt tokens: {result['prompt_tokens']}/512")
+    if "structure_score" in result:
+        print(
+            f"Structure: {result['structure_score']:.4f} from "
+            f"{result['candidates']} candidates; seed {result['seed']}"
+        )
     print(f"Prompt: {result['prompt'][:200]}…")

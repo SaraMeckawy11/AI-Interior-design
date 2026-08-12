@@ -39,9 +39,11 @@ from inference_core import (
     FLUX_MODEL_ID,
     SD_MODEL_ID,
     ControlNetEngine,
+    ExteriorGenKleinEngine,
     GenKleinEngine,
     is_guided_request,
 )
+from prompt_engine import resolve_mode
 
 # Weights baked into the image by the Dockerfile.
 BAKED_CACHE_DIR = "/home/user/.cache/huggingface"
@@ -77,6 +79,7 @@ def _cache_dir_for(model_id):
 
 _ENGINE_TYPES = {
     "gen-klein": (GenKleinEngine, FLUX_MODEL_ID),
+    "gen-klein-exterior": (ExteriorGenKleinEngine, FLUX_MODEL_ID),
     "controlnet": (ControlNetEngine, SD_MODEL_ID),
 }
 
@@ -145,7 +148,12 @@ def handler(event):
                 color_palette=color_palette,
             )
 
-        return _engine("gen-klein").run(
+        engine_name = (
+            "gen-klein-exterior"
+            if resolve_mode(mode, room_type) == "exterior"
+            else "gen-klein"
+        )
+        return _engine(engine_name).run(
             image=image,
             room_type=room_type,
             design_style=design_style,

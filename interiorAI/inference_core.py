@@ -281,6 +281,106 @@ class _Engine:
 # ---------------------------------------------------------------------------
 
 
+class ExteriorGenKleinEngine(_Engine):
+    """Exact RunPod exterior renderer from ad7a9ba."""
+
+    name = "gen-klein-exterior-ad7a9ba"
+    model_id = FLUX_MODEL_ID
+
+    def load(self):
+        self._init_torch()
+        try:
+            from diffusers import Flux2KleinPipeline
+        except ImportError as error:  # pragma: no cover
+            raise RuntimeError(
+                "Flux2KleinPipeline is missing. It requires diffusers >= 0.37; "
+                "check the pins in the deployment image."
+            ) from error
+
+        self.pipe = Flux2KleinPipeline.from_pretrained(
+            FLUX_MODEL_ID,
+            torch_dtype=self.torch.bfloat16,
+            cache_dir=self.cache_dir,
+        )
+        self.pipe.to(self.device)
+        for enable in (
+            lambda: self.pipe.enable_attention_slicing(),
+            lambda: self.pipe.vae.enable_tiling(),
+        ):
+            try:
+                enable()
+            except Exception:
+                pass
+        return self
+
+    @staticmethod
+    def _target_size(image):
+        landscape = image.width >= image.height
+        return (1024, 768) if landscape else (768, 1024)
+
+    def run(
+        self,
+        image: str,
+        room_type: str = "",
+        design_style: str = "",
+        color_tone: str = "",
+        custom_prompt: str = "",
+        mode: str = "interior",
+        material: str = "Natural oak",
+        lighting: str = "Natural daylight",
+        preserve_geometry: bool = True,
+        creativity: int = 42,
+        color_palette: dict = None,
+    ):
+        from PIL import Image, ImageEnhance, ImageOps
+
+        source = ImageOps.exif_transpose(
+            Image.open(io.BytesIO(decode_base64_image_bytes(image)))
+        ).convert("RGB")
+        width, height = self._target_size(source)
+
+        resolved_mode = resolve_mode(mode, room_type)
+        prompt = build_prompt(
+            mode=resolved_mode,
+            space_type=room_type or ("Building" if resolved_mode == "exterior" else "Living Room"),
+            design_style=design_style or "Modern",
+            color_tone=color_tone or "Neutral",
+            material=material or "Natural oak",
+            lighting=lighting or "Natural daylight",
+            preserve_geometry=bool(preserve_geometry),
+            creativity=int(creativity or 42),
+            custom_prompt=(custom_prompt or "")[:280],
+            color_palette=color_palette,
+        )
+
+        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
+        result = self.pipe(
+            prompt=prompt,
+            image=[source],
+            width=width,
+            height=height,
+            num_inference_steps=4,
+            guidance_scale=1.0,
+            generator=self.torch.Generator(device=self.device).manual_seed(seed),
+        ).images[0].convert("RGB")
+
+        result = ImageEnhance.Contrast(result).enhance(1.025)
+        result = ImageEnhance.Sharpness(result).enhance(1.08)
+
+        buf = io.BytesIO()
+        result.save(buf, format="PNG", optimize=True)
+        return {
+            "message": "Image generated successfully",
+            "generatedImage": base64.b64encode(buf.getvalue()).decode(),
+            "prompt": prompt,
+            "negative_prompt": "",
+            "engine": "gen-klein",
+            "model": FLUX_MODEL_ID,
+            "mode": resolved_mode,
+            "has_window": True,
+        }
+
+
 class GenKleinEngine(_Engine):
     """FLUX.2 [klein] 4B image-to-image redesign, matching the web studio."""
 
@@ -454,6 +554,37 @@ class GenKleinEngine(_Engine):
             guidance_scale=1.0,
             generator=self.torch.Generator(device=self.device).manual_seed(selected_seed),
         ).images[0].convert("RGB")
+
+        cleanup_applied = False
+        if resolved_mode == "interior" and room_type.strip().lower() == "living room":
+            cleanup_prompt = (
+                "Refine this exact finished living-room image without redesigning it. "
+                "Keep the architecture, openings, camera, furniture layout, TV, media "
+                "console, rug, palette, materials and ceiling fixture unchanged. Keep exactly "
+                "one floor lamp beside seating and one visible potted floor plant; remove all "
+                "other lamps, greenery, flowers and branches. Style the coffee table and media "
+                "console with a restrained small book stack, tray, ceramics and one sculptural "
+                "object at varied heights, leaving most surfaces empty. Add nothing to the floor."
+            )
+            with self.torch.no_grad():
+                cleanup_embeds = self.pipe._get_qwen3_prompt_embeds(
+                    text_encoder=self.text_encoder,
+                    tokenizer=self.tokenizer,
+                    prompt=cleanup_prompt,
+                    dtype=self.torch.bfloat16,
+                    device=self.device,
+                ).cpu()
+            result = self.pipe(
+                prompt=None,
+                prompt_embeds=cleanup_embeds.to(self.device),
+                image=[result],
+                width=width,
+                height=height,
+                num_inference_steps=4,
+                guidance_scale=1.0,
+                generator=self.torch.Generator(device=self.device).manual_seed(19),
+            ).images[0].convert("RGB")
+            cleanup_applied = True
         score = structure_score(result)
 
         buf = io.BytesIO()
@@ -466,6 +597,7 @@ class GenKleinEngine(_Engine):
             "structure_score": round(score, 4),
             "seed": selected_seed,
             "candidates": 1,
+            "cleanup_applied": cleanup_applied,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,

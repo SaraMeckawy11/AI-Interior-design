@@ -13,7 +13,8 @@
       "Read(//c/Users/sara1/**)",
       "PowerShell(Test-Path \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"; Test-Path \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\emulator\\\\emulator.exe\"; $env:ANDROID_HOME; $env:ANDROID_SDK_ROOT)",
       "Bash(npx eslint *)",
-      "Bash(grep -n \"const \\\\[notice, setNotice\\\\]\\\\|const \\\\[styleExpanded\\\\|const { *$\\\\|clearMessage: clearAdMessage\" app/create/walkthrough.jsx)"
+      "Bash(grep -n \"const \\\\[notice, setNotice\\\\]\\\\|const \\\\[styleExpanded\\\\|const { *$\\\\|clearMessage: clearAdMessage\" app/create/walkthrough.jsx)",
+      "Bash(grep -rn \"priceUsd\\\\|priceString\\\\|\\\\\\\\$\\\\|USD\\\\|EGP\" components/upgrade/*.jsx)"
     ]
   }
 }
