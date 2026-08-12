@@ -3535,47 +3535,34 @@ function RenderSheet({
               onPaletteChange={setSelectedColorPalette}
             />
 
-            {/* The notes that close the brief.
-                One block rather than two loose rows: they are the same kind of
-                remark and belong to each other more than either belongs to the
-                controls above, so they sit on the tighter gap and the block
-                carries the space that separates them from the sheet's actions. */}
-            <View style={styles.sheetNotes}>
-              {/* Only the line that answers "what will I get?". */}
+            {/* The "rendered from exactly the view you are looking at, your
+                walls and openings stay where they are" note is gone.
+                It was two lines of small grey prose sitting between the last
+                control and the button that spends a coin, and it said nothing
+                the sheet had not already said: the header under the title reads
+                "This room, photorealistic" or "The whole floor, from above",
+                and the bird view spells the scope out again in its own field.
+                A caption that repeats the heading is not reassurance, it is
+                weight — and it was the heaviest thing on the sheet.
+
+                What stays is the one remark that is genuinely not guessable and
+                costs a coin to discover: every Livinai design is briefed as
+                daylight, so the night toggle moves the 3D lighting and stops
+                there. */}
+            {night && (
               <View style={styles.sheetNoteRow}>
                 <Ionicons
-                  name="information-circle-outline"
+                  name="sunny-outline"
                   size={16}
                   color={COLORS.textSecondary}
                   style={styles.sheetNoteIcon}
                 />
                 <Text style={styles.sheetNoteText}>
-                  {bird
-                    ? "Rendered from above with the roof open, exactly as you see it."
-                    : "Rendered from exactly the view you are looking at. Your walls, openings and furniture stay where they are."}
+                  Renders are always lit as daylight, whichever way the Day/Night
+                  toggle sits.
                 </Text>
               </View>
-
-              {/* Said before the coin is spent, not discovered afterwards.
-                  Every Livinai design is briefed as daylight — an evening brief
-                  is what had the model adding a lit window to a wall that has
-                  none — so the night toggle moves the 3D lighting and stops
-                  there. */}
-              {night && (
-                <View style={styles.sheetNoteRow}>
-                  <Ionicons
-                    name="sunny-outline"
-                    size={16}
-                    color={COLORS.textSecondary}
-                    style={styles.sheetNoteIcon}
-                  />
-                  <Text style={styles.sheetNoteText}>
-                    Renders are always lit as daylight, whichever way the Day/Night
-                    toggle sits.
-                  </Text>
-                </View>
-              )}
-            </View>
+            )}
           </ScrollView>
 
           {/* What it costs, next to the button that spends it.
@@ -6472,8 +6459,10 @@ const styles = StyleSheet.create({
    * opening on a stack of three different spacings between the last control and
    * the button. The container below owns that space now, once.
    */
-  sheetNotes: { gap: SPACING.sm, paddingHorizontal: SPACING.xs },
-  sheetNoteRow: { flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm },
+  sheetNoteRow: {
+    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
+    paddingHorizontal: SPACING.xs,
+  },
   // Optical, not metric: the glyph's box is taller than its ink, so matching the
   // text box exactly sits the icon a shade above the first line's cap height.
   sheetNoteIcon: { marginTop: 1.5 },

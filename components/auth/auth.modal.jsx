@@ -147,22 +147,26 @@ export default function AuthModal({ setModalVisible }) {
           <Ionicons name="close" size={20} color="#334039" />
         </Pressable>
 
-        {/* The Livinai logo, whole. The sheet is asking someone to hand over an
-            identity, so it should show whose app it is — and the lockup does
-            that better than a heading set in the same word. Which is why the
-            heading below is the action rather than the name: the logo has
-            already said "Livinai", and saying it twice, stacked, reads as a
-            mistake. */}
+        {/* The Livinai lockup, cut out of `icon.jpg`.
+            The source is a JPEG with the artwork floating in the middle of a
+            1280pt square of cream, so used directly it would be a tiny mark
+            inside a beige rectangle on a white card. `livinai-wordmark.png` is
+            the same artwork cropped to itself with the cream keyed out, which is
+            what lets it sit on the sheet rather than on a plate of its own.
+            The heading still earns its line: the lockup is pictorial and reads
+            as a picture of the name, not as the name set in type. */}
         <Image
-          source={require("@/assets/images/livinai-mark.png")}
+          source={require("@/assets/images/livinai-wordmark.png")}
           style={styles.socialMark}
           resizeMode="contain"
           accessibilityLabel="Livinai"
         />
 
-        <Text style={styles.socialTitle}>Sign in</Text>
+        <Text style={styles.socialTitle} accessibilityRole="header">
+          Join Livinai
+        </Text>
         <Text style={styles.socialSubtitle}>
-          Save and sync your designs across your devices.
+          Save your designs to your account and pick them up on any device.
         </Text>
 
         <View style={styles.providerStack}>

@@ -197,7 +197,10 @@ export default StyleSheet.create({
   socialSheet: {
     width: "100%",
     maxWidth: scale(360),
-    paddingTop: verticalScale(24),
+    // Deeper at the top than the bottom. The close button occupies the top
+    // right, so what follows needs room to sit clear of it rather than level
+    // with it; below the last line there is nothing to clear.
+    paddingTop: verticalScale(28),
     paddingBottom: verticalScale(20),
     paddingHorizontal: scale(24),
     backgroundColor: COLORS.surface,
@@ -224,26 +227,37 @@ export default StyleSheet.create({
     backgroundColor: COLORS.surfaceSunken,
     transform: [{ scale: 0.96 }],
   },
-  // `livinai-mark.png` is 643 x 774. The box keeps that ratio exactly, so the
-  // lockup fills it rather than sitting letterboxed inside it.
+  /**
+   * `livinai-wordmark.png` is 1055 x 367, so the box holds that 2.875 ratio and
+   * the lockup fills it instead of sitting letterboxed inside it.
+   *
+   * 184 rather than anything wider because of the close button. That button
+   * reaches 32pt into the content column, and the narrowest phone this runs on
+   * leaves a 232pt column — so a centred 184 keeps 24pt of air on each side even
+   * there, and more on everything larger. A wider lockup would tuck under the
+   * close target on small screens only, which is the kind of overlap that never
+   * shows up on the device it was designed on.
+   */
   socialMark: {
-    width: scale(96),
-    height: scale(116),
+    width: scale(184),
+    height: scale(64),
     marginBottom: verticalScale(14),
   },
   socialTitle: {
-    // Clears the close button, so a longer heading can never run under it.
+    // Clears the close button, so a longer heading can never run under it. The
+    // button intrudes 32pt into the content column (12 inset + 44 wide, less
+    // the sheet's own 24 gutter); 36 covers it with room to spare.
     paddingHorizontal: scale(36),
     color: COLORS.textPrimary,
     fontFamily: "Poppins_600SemiBold",
-    fontSize: scale(21),
-    lineHeight: scale(28),
-    letterSpacing: -0.2,
+    fontSize: scale(22),
+    lineHeight: scale(29),
+    letterSpacing: -0.3,
     textAlign: "center",
   },
   socialSubtitle: {
-    maxWidth: scale(260),
-    marginTop: verticalScale(6),
+    maxWidth: scale(272),
+    marginTop: verticalScale(7),
     color: COLORS.textSecondary,
     // Regular, not Light. A 12pt Light face on a white card is a hairline at
     // arm's length, and this sentence is the sheet's whole explanation.
@@ -255,7 +269,10 @@ export default StyleSheet.create({
   providerStack: {
     width: "100%",
     gap: 10,
-    marginTop: verticalScale(22),
+    // The one large gap on the sheet. Everything above it is the sheet saying
+    // what it is; everything below is the person acting on that, and the space
+    // is what separates the two rather than a rule across the card.
+    marginTop: verticalScale(26),
   },
   appleButton: {
     width: "100%",
