@@ -123,38 +123,69 @@ export default StyleSheet.create({
     justifyContent: "center",
   },
 
+  // Same height and radius as the Apple button it stacks under, so the two read
+  // as one pair of equals rather than as a control and a near-miss of one.
   googleButton: {
     width: "100%",
-    height: verticalScale(42),
-    minHeight: 44,
+    height: 50,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: COLORS.white,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
-    borderRadius: 12,
+    borderRadius: 14,
   },
 
   googleIcon: {
-    width: scale(18),
-    height: scale(18),
+    width: scale(20),
+    height: scale(20),
     resizeMode: "contain",
     marginRight: 10,
   },
 
   googleText: {
-    fontSize: 13,
+    // Was a bare 13 while every other value on the sheet was scaled, so this
+    // label alone stayed put as the sheet grew.
+    fontSize: scale(15),
     fontFamily: "Poppins_500Medium",
     color: COLORS.textPrimary,
     textAlign: "center",
   },
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sign-in sheet
+  //
+  // What was wrong with it, and what each rule below is answering:
+  //
+  //  - **Three measures in one card.** The sheet was 320 wide with a 20 gutter,
+  //    so its content column is 280 — but the provider buttons were pinned to
+  //    255, the error callout to 100%, and the legal line to 260. Four elements,
+  //    three left edges, none of them aligned. Everything now sits on the one
+  //    content column the card defines.
+  //  - **Two corner radii on two stacked buttons.** Apple was drawn at 14 and
+  //    Google at 12, and the Apple button changed shape again while it was
+  //    loading. One radius token now, so the stack reads as one control group.
+  //  - **Type below the legible floor.** The terms line was 9.5pt Light in
+  //    `textTertiary` — 3.2:1 on white, which fails WCAG AA outright, at a size
+  //    no platform's own guidance allows for body text. It is the only text on
+  //    the sheet with legal weight, and it was the hardest thing on it to read.
+  //  - **A 34pt close button.** Under the 44pt minimum both platforms specify.
+  //
+  // Sizes here are deliberately not `verticalScale`d. A button's height is a
+  // touch target, not a proportion of the screen: scaling it by device height
+  // makes it smaller than the minimum on exactly the small phones where hitting
+  // it is hardest.
   socialOverlay: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(18, 24, 20, 0.42)",
+    // The blur above this is iOS-only in practice, so the scrim has to stand on
+    // its own on Android — dark enough to separate the sheet from a photographic
+    // onboarding slide, light enough not to double up with the blur where it
+    // does render.
+    backgroundColor: "rgba(18, 24, 20, 0.40)",
+    paddingHorizontal: scale(20),
   },
   backdropDismissArea: {
     position: "absolute",
@@ -164,12 +195,13 @@ export default StyleSheet.create({
     left: 0,
   },
   socialSheet: {
-    width: scale(320),
-    maxWidth: "90%",
-    paddingVertical: verticalScale(18),
-    paddingHorizontal: scale(20),
+    width: "100%",
+    maxWidth: scale(360),
+    paddingTop: verticalScale(24),
+    paddingBottom: verticalScale(20),
+    paddingHorizontal: scale(24),
     backgroundColor: COLORS.surface,
-    borderRadius: scale(24),
+    borderRadius: scale(28),
     alignItems: "center",
     shadowColor: COLORS.black,
     shadowOpacity: 0.18,
@@ -179,11 +211,11 @@ export default StyleSheet.create({
   },
   closeButton: {
     position: "absolute",
-    top: verticalScale(10),
-    right: scale(10),
-    width: scale(34),
-    height: scale(34),
-    borderRadius: 17,
+    top: verticalScale(12),
+    right: scale(12),
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: COLORS.surfaceAlt,
@@ -192,40 +224,49 @@ export default StyleSheet.create({
     backgroundColor: COLORS.surfaceSunken,
     transform: [{ scale: 0.96 }],
   },
+  // `livinai-mark.png` is 643 x 774. The box keeps that ratio exactly, so the
+  // lockup fills it rather than sitting letterboxed inside it.
+  socialMark: {
+    width: scale(96),
+    height: scale(116),
+    marginBottom: verticalScale(14),
+  },
   socialTitle: {
-    marginTop: verticalScale(3),
+    // Clears the close button, so a longer heading can never run under it.
+    paddingHorizontal: scale(36),
     color: COLORS.textPrimary,
     fontFamily: "Poppins_600SemiBold",
     fontSize: scale(21),
-    lineHeight: scale(27),
+    lineHeight: scale(28),
     letterSpacing: -0.2,
     textAlign: "center",
   },
   socialSubtitle: {
-    maxWidth: scale(250),
-    marginTop: verticalScale(4),
+    maxWidth: scale(260),
+    marginTop: verticalScale(6),
     color: COLORS.textSecondary,
-    fontFamily: "Poppins_300Light",
-    fontSize: scale(12),
-    lineHeight: scale(18),
+    // Regular, not Light. A 12pt Light face on a white card is a hairline at
+    // arm's length, and this sentence is the sheet's whole explanation.
+    fontFamily: "Poppins_400Regular",
+    fontSize: scale(13),
+    lineHeight: scale(19),
     textAlign: "center",
   },
   providerStack: {
-    width: scale(255),
-    maxWidth: "100%",
-    gap: verticalScale(8),
-    marginTop: verticalScale(14),
+    width: "100%",
+    gap: 10,
+    marginTop: verticalScale(22),
   },
   appleButton: {
     width: "100%",
-    height: verticalScale(42),
-    minHeight: 44,
+    height: 50,
   },
   appleLoadingButton: {
     width: "100%",
-    height: verticalScale(42),
-    minHeight: 44,
-    borderRadius: 12,
+    height: 50,
+    // Matches `cornerRadius` on the native Apple button, so the control does not
+    // change shape when it starts working.
+    borderRadius: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -235,7 +276,7 @@ export default StyleSheet.create({
   appleLoadingText: {
     color: COLORS.white,
     fontFamily: "Poppins_500Medium",
-    fontSize: scale(14),
+    fontSize: scale(15),
   },
   providerButtonPressed: {
     backgroundColor: COLORS.surfaceAlt,
@@ -249,26 +290,28 @@ export default StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: scale(9),
-    marginTop: verticalScale(13),
+    marginTop: verticalScale(16),
     paddingHorizontal: scale(13),
     paddingVertical: verticalScale(11),
-    borderRadius: scale(13),
+    borderRadius: scale(14),
     backgroundColor: COLORS.dangerSoft,
   },
   errorText: {
     flex: 1,
     color: COLORS.danger,
     fontFamily: "Poppins_400Regular",
-    fontSize: scale(12),
+    fontSize: scale(12.5),
     lineHeight: scale(18),
   },
   legalText: {
-    maxWidth: scale(260),
-    marginTop: verticalScale(11),
-    color: COLORS.textTertiary,
-    fontFamily: "Poppins_300Light",
-    fontSize: scale(9.5),
-    lineHeight: scale(14),
+    maxWidth: scale(280),
+    marginTop: verticalScale(18),
+    // `textSecondary` at 6.2:1 rather than `textTertiary` at 3.2:1. Terms a
+    // person is agreeing to by pressing the button above have to be readable.
+    color: COLORS.textSecondary,
+    fontFamily: "Poppins_400Regular",
+    fontSize: scale(11.5),
+    lineHeight: scale(17),
     textAlign: "center",
   },
   legalLink: {

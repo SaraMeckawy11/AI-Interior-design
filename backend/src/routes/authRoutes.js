@@ -2,7 +2,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import { OAuth2Client } from "google-auth-library";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import User from "../models/User.js";
+import User, { normalizeEmail } from "../models/User.js";
 import PrePremium from "../models/PrePremium.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { sendToken } from "../../utils/sendToken.js";
@@ -35,10 +35,20 @@ const displayNameFromApple = (fullName) => {
     .join(" ") || "Apple user";
 };
 
+/**
+ * The account behind a verified Google or Apple identity.
+ *
+ * Three lookups, in the order that keeps one person to one account: the
+ * provider's own subject (stable forever, survives an address change), then the
+ * address, then creation. The address step is the one that matters here — a
+ * person who signed up with an email and password and later taps "Sign in with
+ * Google" has to land back on the account holding their designs and their saved
+ * 3D plans, not on a fresh one that looks empty.
+ */
 const findOrCreateSocialUser = async ({
   provider,
   subject,
-  email,
+  email: rawEmail,
   username,
   profileImage = "",
 }) => {
@@ -46,13 +56,14 @@ const findOrCreateSocialUser = async ({
   let user = await User.findOne({ [subjectField]: subject });
   if (user) return user;
 
+  const email = normalizeEmail(rawEmail);
   if (!email) {
     const error = new Error("Your identity provider did not share an email address.");
     error.statusCode = 400;
     throw error;
   }
 
-  user = await User.findOne({ email });
+  user = await User.findByEmail(email);
   if (user) {
     user[subjectField] = subject;
     if (!user.profileImage && profileImage) user.profileImage = profileImage;
@@ -61,37 +72,59 @@ const findOrCreateSocialUser = async ({
   }
 
   const prePremium = await PrePremium.findOne({ email });
-  return User.create({
-    username: username || `${provider} user`,
-    email,
-    profileImage,
-    [subjectField]: subject,
-    isPremium: !!prePremium,
-  });
+  try {
+    return await User.create({
+      username: username || `${provider} user`,
+      email,
+      profileImage,
+      [subjectField]: subject,
+      isPremium: !!prePremium,
+    });
+  } catch (error) {
+    // Two devices completing the same first sign-in at once both reach this
+    // line. The unique index decides; the loser reads the row the winner wrote
+    // rather than failing a login that has already succeeded.
+    if (error?.code !== 11000) throw error;
+    const existing = await User.findOne({ [subjectField]: subject })
+      || await User.findByEmail(email);
+    if (existing) return existing;
+    throw error;
+  }
 };
 
 // Sign up with email and password.
 router.post("/signup", async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, password } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     if (!username || !email || !password) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    const existingUser = await User.findOne({ email });
+    // Case-insensitive, so "Sara@Gmail.com" cannot become a second account
+    // beside the "sara@gmail.com" this person already signed in with.
+    const existingUser = await User.findByEmail(email);
     if (existingUser) {
       return res.status(400).json({ success: false, message: "User already exists" });
     }
 
     const prePremium = await PrePremium.findOne({ email });
-    const user = await User.create({
-      username,
-      email,
-      password,
-      profileImage: "",
-      isPremium: !!prePremium,
-    });
+    let user;
+    try {
+      user = await User.create({
+        username,
+        email,
+        password,
+        profileImage: "",
+        isPremium: !!prePremium,
+      });
+    } catch (error) {
+      if (error?.code === 11000) {
+        return res.status(400).json({ success: false, message: "User already exists" });
+      }
+      throw error;
+    }
 
     return sendToken(user, res);
   } catch (error) {
@@ -173,14 +206,28 @@ router.post("/social", async (req, res) => {
 // Log in with email and password.
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = normalizeEmail(req.body.email);
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password required" });
     }
 
-    const user = await User.findOne({ email }).select("+password");
+    const user = await User.findByEmail(email, { withPassword: true });
     if (!user) {
       return res.status(400).json({ success: false, message: "Invalid credentials" });
+    }
+
+    // An account created through Google or Apple has no password at all.
+    // `bcrypt.compare` rejects on an undefined hash, which reached the client as
+    // a 500 — and told someone who had simply forgotten which button they used
+    // last time that the server was broken.
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        message: user.appleSubject
+          ? "This account signs in with Apple. Use Sign in with Apple."
+          : "This account signs in with Google. Use Sign in with Google.",
+      });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);

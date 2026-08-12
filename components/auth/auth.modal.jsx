@@ -125,7 +125,7 @@ export default function AuthModal({ setModalVisible }) {
   };
 
   return (
-    <BlurView intensity={72} tint="dark" style={styles.socialOverlay}>
+    <BlurView intensity={40} tint="dark" style={styles.socialOverlay}>
       <Pressable
         accessible={false}
         style={styles.backdropDismissArea}
@@ -147,9 +147,22 @@ export default function AuthModal({ setModalVisible }) {
           <Ionicons name="close" size={20} color="#334039" />
         </Pressable>
 
-        <Text style={styles.socialTitle}>Join LIVINAI</Text>
+        {/* The Livinai logo, whole. The sheet is asking someone to hand over an
+            identity, so it should show whose app it is — and the lockup does
+            that better than a heading set in the same word. Which is why the
+            heading below is the action rather than the name: the logo has
+            already said "Livinai", and saying it twice, stacked, reads as a
+            mistake. */}
+        <Image
+          source={require("@/assets/images/livinai-mark.png")}
+          style={styles.socialMark}
+          resizeMode="contain"
+          accessibilityLabel="Livinai"
+        />
+
+        <Text style={styles.socialTitle}>Sign in</Text>
         <Text style={styles.socialSubtitle}>
-          Sign in to save and sync your designs.
+          Save and sync your designs across your devices.
         </Text>
 
         <View style={styles.providerStack}>

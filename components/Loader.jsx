@@ -2,15 +2,41 @@ import { View, ActivityIndicator, Image, StyleSheet } from 'react-native';
 import React from 'react';
 import COLORS from '../constants/colors';
 
-export default function Loader({ size = "large" }) {
+/**
+ * The full-screen wait, in two forms — because there are two different waits.
+ *
+ * **Branded** is the launch screen. `app/index.jsx` runs directly under the
+ * native splash while the stored session is read, so it carries the Livinai
+ * lockup on the splash colour and the handover from the native screen has no
+ * seam. That is the app opening, and it should look like it.
+ *
+ * **Plain** is everything else. Opening the collection is not the app starting;
+ * it is one screen fetching a list. Showing the launch screen again there
+ * flashed a full sage panel and a logo over a tab the person was already
+ * standing in, then swapped to warm paper — which reads as a glitch rather than
+ * as loading. So the default is a spinner on the background the list underneath
+ * is painted in, and nothing moves when the content arrives.
+ */
+export const SPLASH_BACKGROUND = '#D9E1D6';
+
+// The asset is 643 x 774; the height keeps that ratio so the lockup is never
+// stretched.
+const MARK_WIDTH = 168;
+const MARK_HEIGHT = Math.round(MARK_WIDTH * (774 / 643));
+
+export default function Loader({ size = 'large', branded = false, background }) {
+  const surface = background || (branded ? SPLASH_BACKGROUND : COLORS.background);
+
   return (
-    <View style={styles.container}>
-      <Image
-        source={require('../assets/images/splash-livinai.png')}
-        style={styles.logo}
-        resizeMode="contain"
-        accessibilityLabel="Livinai"
-      />
+    <View style={[styles.container, { backgroundColor: surface }]}>
+      {branded && (
+        <Image
+          source={require('../assets/images/livinai-mark.png')}
+          style={styles.logo}
+          resizeMode="contain"
+          accessibilityLabel="Livinai"
+        />
+      )}
       <ActivityIndicator size={size} color={COLORS.primaryDark} />
     </View>
   );
@@ -21,11 +47,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 18,
-    backgroundColor: '#D9E1D6',
+    gap: 24,
   },
   logo: {
-    width: 210,
-    height: 210,
+    width: MARK_WIDTH,
+    height: MARK_HEIGHT,
   },
 });

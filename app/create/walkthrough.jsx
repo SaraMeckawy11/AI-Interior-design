@@ -1960,7 +1960,10 @@ export default function WalkthroughScreen() {
             end={{ x: 1, y: 1 }}
             style={styles.editorHeaderSurface}
           >
-            <SafeAreaView edges={["top"]} style={styles.header}>
+            <SafeAreaView
+              edges={["top"]}
+              style={[styles.header, stage === STAGES.length - 1 && styles.headerBare]}
+            >
               <View style={styles.headerRow}>
                 {/* Leaves the walkthrough. Moving between steps is the footer's
                     job, so this arrow means the same thing on all four steps. */}
@@ -3532,30 +3535,47 @@ function RenderSheet({
               onPaletteChange={setSelectedColorPalette}
             />
 
-            {/* One line, and only the line that answers "what will I get?". */}
-            <View style={styles.sheetNoteRow}>
-              <Ionicons name="information-circle-outline" size={15} color={COLORS.textTertiary} />
-              <Text style={styles.sheetNoteText}>
-                {bird
-                  ? "Rendered from above with the roof open, exactly as you see it."
-                  : "Rendered from exactly the view you are looking at. Your walls, openings and furniture stay where they are."}
-              </Text>
-            </View>
-
-            {/* Said before the coin is spent, not discovered afterwards.
-                Every Livinai design is briefed as daylight — an evening brief
-                is what had the model adding a lit window to a wall that has
-                none — so the night toggle moves the 3D lighting and stops
-                there. */}
-            {night && (
+            {/* The notes that close the brief.
+                One block rather than two loose rows: they are the same kind of
+                remark and belong to each other more than either belongs to the
+                controls above, so they sit on the tighter gap and the block
+                carries the space that separates them from the sheet's actions. */}
+            <View style={styles.sheetNotes}>
+              {/* Only the line that answers "what will I get?". */}
               <View style={styles.sheetNoteRow}>
-                <Ionicons name="sunny-outline" size={15} color={COLORS.textTertiary} />
+                <Ionicons
+                  name="information-circle-outline"
+                  size={16}
+                  color={COLORS.textSecondary}
+                  style={styles.sheetNoteIcon}
+                />
                 <Text style={styles.sheetNoteText}>
-                  Renders are always lit as daylight, whichever way the Day/Night
-                  toggle sits.
+                  {bird
+                    ? "Rendered from above with the roof open, exactly as you see it."
+                    : "Rendered from exactly the view you are looking at. Your walls, openings and furniture stay where they are."}
                 </Text>
               </View>
-            )}
+
+              {/* Said before the coin is spent, not discovered afterwards.
+                  Every Livinai design is briefed as daylight — an evening brief
+                  is what had the model adding a lit window to a wall that has
+                  none — so the night toggle moves the 3D lighting and stops
+                  there. */}
+              {night && (
+                <View style={styles.sheetNoteRow}>
+                  <Ionicons
+                    name="sunny-outline"
+                    size={16}
+                    color={COLORS.textSecondary}
+                    style={styles.sheetNoteIcon}
+                  />
+                  <Text style={styles.sheetNoteText}>
+                    Renders are always lit as daylight, whichever way the Day/Night
+                    toggle sits.
+                  </Text>
+                </View>
+              )}
+            </View>
           </ScrollView>
 
           {/* What it costs, next to the button that spends it.
@@ -3653,7 +3673,11 @@ function RenderCostBar({
     return (
       <View style={[styles.costBar, styles.costBarIncluded]} accessibilityRole="text">
         <Ionicons name="checkmark-circle" size={17} color={COLORS.success} />
-        <Text style={styles.costBarText} numberOfLines={1}>
+        {/* Two lines, not one. On a 375pt phone this sentence is wider than the
+            row, and `numberOfLines={1}` answered that by cutting it — so the
+            line telling a subscriber their renders are included ended in an
+            ellipsis. */}
+        <Text style={styles.costBarText} numberOfLines={2}>
           Included with your plan — render as often as you like.
         </Text>
       </View>
@@ -3664,7 +3688,7 @@ function RenderCostBar({
     return (
       <View style={styles.costBar} accessibilityRole="text">
         <Ionicons name="gift-outline" size={17} color={COLORS.primaryDark} />
-        <Text style={styles.costBarText} numberOfLines={1}>
+        <Text style={styles.costBarText} numberOfLines={2}>
           {freeRendersLeft === 1 ? "1 free render left" : `${freeRendersLeft} free renders left`}
           {" · then "}
           {coinLabel(price)} each
@@ -3680,7 +3704,7 @@ function RenderCostBar({
         size={17}
         color={affordable ? COLORS.primaryDark : COLORS.warning}
       />
-      <Text style={styles.costBarText} numberOfLines={1}>
+      <Text style={styles.costBarText} numberOfLines={2}>
         {coinLabel(price)} per render · you have {coins}
       </Text>
       <Pressable
@@ -5410,6 +5434,20 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
     backgroundColor: "transparent",
   },
+  /**
+   * Explore has no step bar, so nothing else was giving the header a bottom.
+   *
+   * On the first three steps the bar below the title supplies `SPACING.md` of
+   * padding before the border. On the fourth it is not rendered, and
+   * `paddingBottom: 0` left the plan name sitting on the hairline with the 3D
+   * view immediately under it — the one step where the header is only a title
+   * row was also the one where it had no breathing room at all.
+   *
+   * `SPACING.md` below against `SPACING.sm` above is deliberate rather than
+   * symmetric: a bar closed by a rule reads as balanced when the space under
+   * the text is slightly larger than the space over it.
+   */
+  headerBare: { paddingBottom: SPACING.md },
   headerRow: { flexDirection: "row", alignItems: "center", gap: SPACING.md, paddingTop: SPACING.sm },
   headerButton: {
     width: ms(44), height: ms(44), borderRadius: RADIUS.md,
@@ -6328,7 +6366,7 @@ const styles = StyleSheet.create({
   },
   renderSheet: { maxHeight: "92%" },
   renderBriefScroll: { flexShrink: 1, marginHorizontal: -SPACING.xs },
-  renderBriefContent: { paddingHorizontal: SPACING.xs, paddingBottom: SPACING.xs, gap: SPACING.base },
+  renderBriefContent: { paddingHorizontal: SPACING.xs, paddingBottom: SPACING.sm, gap: SPACING.base },
   sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: COLORS.borderStrong, alignSelf: "center", marginBottom: SPACING.md },
   sheetHead: { flexDirection: "row", alignItems: "center", gap: SPACING.md, marginBottom: SPACING.base },
   sheetIcon: {
@@ -6353,12 +6391,16 @@ const styles = StyleSheet.create({
   // deserved, directly above the only thing on the sheet that matters.
   costBar: {
     flexDirection: "row", alignItems: "center", gap: SPACING.sm,
-    minHeight: ms(36), paddingRight: SPACING.xs, marginTop: SPACING.sm,
+    minHeight: ms(36), paddingRight: SPACING.xs,
+    // The break between the brief and the sheet's actions, stated once here
+    // rather than accumulated out of three margins that did not know about each
+    // other.
+    marginTop: SPACING.md, marginBottom: SPACING.md,
   },
   // Only a state that needs acting on earns a fill.
   costBarIncluded: {},
   costBarShort: {
-    paddingLeft: SPACING.sm, borderRadius: RADIUS.sm,
+    paddingLeft: SPACING.sm, paddingVertical: SPACING.xs, borderRadius: RADIUS.sm,
     backgroundColor: COLORS.warningSoft,
   },
   costBarText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textSecondary },
@@ -6410,11 +6452,27 @@ const styles = StyleSheet.create({
   renderScopeText: { flex: 1, ...TYPE.bodyStrong, color: COLORS.primaryDark },
   renderFieldHint: { ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
   renderToneBlock: { gap: SPACING.sm },
-  sheetNoteRow: {
-    flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm,
-    marginBottom: SPACING.lg, paddingHorizontal: SPACING.xs,
-  },
-  sheetNoteText: { flex: 1, ...TYPE.caption, color: COLORS.textTertiary, lineHeight: 17 },
+  /**
+   * The explanatory copy that closes the brief.
+   *
+   * It was set in `caption` — 11.5pt, tracked out, in `textTertiary`, which is
+   * 2.8:1 on this sheet and fails WCAG AA by a wide margin. `caption` is a
+   * label ramp: it works for "3 renders left", not for two sentences somebody
+   * is expected to read before spending a coin. So this is `small` in
+   * `textSecondary` (5.5:1), which is the ramp step the rest of the app uses
+   * for supporting body copy.
+   *
+   * The row's own `marginBottom` is gone with it. It was 20pt on top of the
+   * scroll's 16pt gap and the cost bar's own margin, which left the sheet
+   * opening on a stack of three different spacings between the last control and
+   * the button. The container below owns that space now, once.
+   */
+  sheetNotes: { gap: SPACING.sm, paddingHorizontal: SPACING.xs },
+  sheetNoteRow: { flexDirection: "row", alignItems: "flex-start", gap: SPACING.sm },
+  // Optical, not metric: the glyph's box is taller than its ink, so matching the
+  // text box exactly sits the icon a shade above the first line's cap height.
+  sheetNoteIcon: { marginTop: 1.5 },
+  sheetNoteText: { flex: 1, ...TYPE.small, color: COLORS.textSecondary },
   // Full width, 52pt, and the only filled thing on the sheet: this is the tap
   // that spends a design credit.
   sheetPrimary: {

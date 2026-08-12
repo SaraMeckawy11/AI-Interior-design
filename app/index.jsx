@@ -33,7 +33,11 @@ export default function Index() {
     };
   }, [checkAuth]);
 
-  if (isCheckingAuth) return <Loader />;
+  // The app opening. This screen sits directly under the native launch screen
+  // while the stored session is read, so it carries Livinai's own splash rather
+  // than a bare spinner — the branded screen continues, it does not stop and
+  // start again.
+  if (isCheckingAuth) return <Loader branded />;
 
   return <Redirect href={token ? "/create" : "/(routes)/onboarding"} />;
 }

@@ -59,7 +59,22 @@ export default function Upgrade() {
             if (!storeReady || cancelled) return;
 
             const current = await purchases.getOfferings();
-            if (!cancelled && current?.current) setOfferings(current);
+            // Kept whether or not a *current* offering is set. On iOS the
+            // Livinai products live in App Store Connect and are attached to
+            // RevenueCat separately from the Play ones, and an offering that
+            // has not been marked current there answered `current: null` — so
+            // this screen threw away a perfectly good StoreKit response and
+            // rendered every price as "Unavailable". Which is the whole bug:
+            // Egyptian users saw no EGP prices on iOS because they saw no
+            // prices at all.
+            if (!cancelled && current) setOfferings(current);
+            if (__DEV__ && current) {
+              const names = Object.keys(current.all || {});
+              console.info(
+                `[store] current offering: ${current.current?.identifier || 'none'}; `
+                + `all: ${names.join(', ') || 'none'}`,
+              );
+            }
           }
         } catch (error) {
           // Opening pricing should never surface a native-store error. Missing
@@ -77,25 +92,57 @@ export default function Upgrade() {
     }, [setCoins, token]),
   );
 
+  /**
+   * Every package the store answered with, current offering first.
+   *
+   * `constants/pricing.js` names products in Google Play's `product:base-plan`
+   * form, because that is the store this app shipped on first. App Store Connect
+   * has no such syntax and no reason to have picked the same identifiers, so
+   * matching iOS packages by product id alone was always going to be brittle —
+   * and when it missed, the screen had nothing to show a price with.
+   *
+   * Deduplicated on the product identifier, so a product that appears in more
+   * than one offering is one entry and the current offering's copy is the one
+   * kept.
+   */
+  const storePackages = useMemo(() => {
+    if (!offerings) return [];
+    const seen = new Set();
+    const packages = [];
+    const collect = (offering) => {
+      for (const item of offering?.availablePackages || []) {
+        const key = item.product?.identifier || item.identifier;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        packages.push(item);
+      }
+    };
+    collect(offerings.current);
+    for (const offering of Object.values(offerings.all || {})) collect(offering);
+    return packages;
+  }, [offerings]);
+
+  // Subscriptions are found by package type first. That is the one identifier
+  // RevenueCat defines itself, so it means the same thing on both stores however
+  // the products underneath are named.
   const packageForPlan = useCallback(
-    (plan) => {
-      const availablePackages = offerings?.current?.availablePackages || [];
-      return (
-        availablePackages.find((item) => item.packageType === plan.packageType) ||
-        availablePackages.find((item) =>
-          sameStoreProduct(item.product?.identifier, plan.productId),
-        )
-      );
-    },
-    [offerings],
+    (plan) =>
+      storePackages.find((item) => item.packageType === plan.packageType) ||
+      storePackages.find((item) => sameStoreProduct(item.product?.identifier, plan.productId)) ||
+      storePackages.find((item) => sameStoreProduct(item.identifier, plan.productId)),
+    [storePackages],
   );
 
+  // Coin packs are consumables, so every one of them is packageType CUSTOM and
+  // the type cannot tell them apart. The package's own identifier is the second
+  // chance: it is set in the RevenueCat dashboard rather than in the store, so it
+  // can agree across platforms even when the SKUs do not.
   const packageForPack = useCallback(
     (pack) =>
-      (offerings?.current?.availablePackages || []).find((item) =>
-        sameStoreProduct(item.product?.identifier, pack.productId),
-      ),
-    [offerings],
+      storePackages.find((item) => sameStoreProduct(item.product?.identifier, pack.productId)) ||
+      storePackages.find((item) => sameStoreProduct(item.identifier, pack.productId)) ||
+      storePackages.find((item) => sameStoreProduct(item.identifier, pack.id)),
+    [storePackages],
   );
 
   // StoreKit/Play Billing owns the displayed currency. For an Egyptian store
