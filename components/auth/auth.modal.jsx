@@ -30,8 +30,13 @@ export default function AuthModal({ setModalVisible }) {
   const isSigningIn = signingInProvider !== null;
 
   useEffect(() => {
+    // `webClientId` unconditionally. It used to be spread in only when it
+    // happened to be defined, which meant a missing value configured a client
+    // that could open Google's sheet and never return an identity token —
+    // failing at the end of the flow, with a message about a client id, rather
+    // than at the point the client id was wrong.
     GoogleSignin.configure({
-      ...(GOOGLE_WEB_CLIENT_ID ? { webClientId: GOOGLE_WEB_CLIENT_ID } : {}),
+      webClientId: GOOGLE_WEB_CLIENT_ID,
       ...(Platform.OS === "ios" ? { iosClientId: GOOGLE_IOS_CLIENT_ID } : {}),
       scopes: ["profile", "email"],
     });
