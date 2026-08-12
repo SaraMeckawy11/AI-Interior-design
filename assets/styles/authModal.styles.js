@@ -198,9 +198,9 @@ export default StyleSheet.create({
     width: "100%",
     maxWidth: scale(360),
     // Deeper at the top than the bottom. The close button occupies the top
-    // right, so what follows needs room to sit clear of it rather than level
+    // right, so the heading needs room to sit clear of it rather than level
     // with it; below the last line there is nothing to clear.
-    paddingTop: verticalScale(28),
+    paddingTop: verticalScale(30),
     paddingBottom: verticalScale(20),
     paddingHorizontal: scale(24),
     backgroundColor: COLORS.surface,
@@ -226,22 +226,6 @@ export default StyleSheet.create({
   iconButtonPressed: {
     backgroundColor: COLORS.surfaceSunken,
     transform: [{ scale: 0.96 }],
-  },
-  /**
-   * `livinai-wordmark.png` is 1055 x 367, so the box holds that 2.875 ratio and
-   * the lockup fills it instead of sitting letterboxed inside it.
-   *
-   * 184 rather than anything wider because of the close button. That button
-   * reaches 32pt into the content column, and the narrowest phone this runs on
-   * leaves a 232pt column — so a centred 184 keeps 24pt of air on each side even
-   * there, and more on everything larger. A wider lockup would tuck under the
-   * close target on small screens only, which is the kind of overlap that never
-   * shows up on the device it was designed on.
-   */
-  socialMark: {
-    width: scale(184),
-    height: scale(64),
-    marginBottom: verticalScale(14),
   },
   socialTitle: {
     // Clears the close button, so a longer heading can never run under it. The

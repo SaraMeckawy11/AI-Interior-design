@@ -147,21 +147,10 @@ export default function AuthModal({ setModalVisible }) {
           <Ionicons name="close" size={20} color="#334039" />
         </Pressable>
 
-        {/* The Livinai lockup, cut out of `icon.jpg`.
-            The source is a JPEG with the artwork floating in the middle of a
-            1280pt square of cream, so used directly it would be a tiny mark
-            inside a beige rectangle on a white card. `livinai-wordmark.png` is
-            the same artwork cropped to itself with the cream keyed out, which is
-            what lets it sit on the sheet rather than on a plate of its own.
-            The heading still earns its line: the lockup is pictorial and reads
-            as a picture of the name, not as the name set in type. */}
-        <Image
-          source={require("@/assets/images/livinai-wordmark.png")}
-          style={styles.socialMark}
-          resizeMode="contain"
-          accessibilityLabel="Livinai"
-        />
-
+        {/* No mark. The heading carries the name, which is how most sign-in
+            sheets identify themselves — and it is the shorter sheet: a logo
+            here pushes the two buttons, the terms and the whole decision
+            further down a card that is already the only thing on screen. */}
         <Text style={styles.socialTitle} accessibilityRole="header">
           Join Livinai
         </Text>
