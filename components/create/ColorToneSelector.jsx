@@ -80,7 +80,7 @@ function PaletteTrio({ palette, selected, colorCount }) {
   );
 }
 
-export default function ColorToneSelector({ colorTone, setColorTone, colorCount = 3 }) {
+export default function ColorToneSelector({ colorTone, setColorTone, colorCount = 3, onPaletteChange }) {
   const normalizedColorCount = Math.max(1, Math.min(3, Number(colorCount) || 3));
   const [showAll, setShowAll] = useState(false);
   const [customTones, setCustomTones] = useState([]);
@@ -129,8 +129,10 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
     }
 
     const newTone = { name: getColorName(hexInput), color: hexInput };
+    const newPalette = buildPalette(hexInput);
     setCustomTones((prev) => [...prev, newTone]);
     setColorTone(newTone.name);
+    onPaletteChange?.(newPalette);
     setShowColorPicker(false);
     setShowAll(true);
   };
@@ -179,7 +181,10 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
                   ? `${tone.name}: ${previewEntries.map((entry, index) => `${previewShares[index]}% ${entry.name}`).join(', ')}`
                   : tone.name
               }
-              onPress={() => setColorTone(tone.name)}
+              onPress={() => {
+                setColorTone(tone.name);
+                onPaletteChange?.(palette);
+              }}
               onLongPress={() => isCustom && handleDeleteTone(tone.name)}
             >
               <PaletteTrio
@@ -372,6 +377,7 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
                     onPress={() => {
                       setCustomTones((prev) => prev.filter((t) => t.name !== deleteModal.toneName));
                       if (colorTone === deleteModal.toneName) setColorTone(null);
+                      if (colorTone === deleteModal.toneName) onPaletteChange?.(null);
                       setDeleteModal({ visible: false, toneName: '' });
                     }}
                   >

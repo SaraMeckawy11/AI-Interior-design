@@ -27,7 +27,6 @@ import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import CreateBannerAd from "../../components/create/CreateBannerAd";
 import { useFocusEffect } from 'expo-router';
 import { apiUrl } from '../../configs/api';
 import { FREE_DESIGNS, coinCost } from '../../constants/pricing';
@@ -425,11 +424,6 @@ export default function Prompt() {
                 </LinearGradient>
               )}
             </TouchableOpacity>
-
-            {/* Banner ad for non-subscribed users */}
-            {/* {!isSubscribed  && (
-              <CreateBannerAd />
-            )} */}
 
           </View>
         </View>

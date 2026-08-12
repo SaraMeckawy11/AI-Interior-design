@@ -1,30 +1,38 @@
 import React, { useEffect, useState } from "react";
-import { Image, Platform, Pressable, Text, View } from "react-native";
-import { scale, verticalScale } from "react-native-size-matters";
+import {
+  ActivityIndicator,
+  Image,
+  Platform,
+  Pressable,
+  Text,
+  View,
+} from "react-native";
 import { BlurView } from "expo-blur";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
+import { Ionicons } from "@expo/vector-icons";
 import axios from "axios";
 import { useRouter } from "expo-router";
-import { fontSizes } from "@/themes/app.constant";
 import { useAuthStore } from "../../authStore";
 import styles from "../../assets/styles/authModal.styles";
 import { apiUrl } from "../../configs/api";
+import {
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_WEB_CLIENT_ID,
+} from "../../configs/googleAuth";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
   const loginSocial = useAuthStore((state) => state.loginSocial);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [signingInProvider, setSigningInProvider] = useState(null);
   const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [signInError, setSignInError] = useState(null);
+  const isSigningIn = signingInProvider !== null;
 
   useEffect(() => {
     GoogleSignin.configure({
-      webClientId: process.env.EXPO_PUBLIC_EXPO_GOOGLE_API_KEY,
-      iosClientId:
-        Platform.OS === "ios"
-          ? process.env.EXPO_PUBLIC_IOS_GOOGLE_API_KEY
-          : undefined,
+      ...(GOOGLE_WEB_CLIENT_ID ? { webClientId: GOOGLE_WEB_CLIENT_ID } : {}),
+      ...(Platform.OS === "ios" ? { iosClientId: GOOGLE_IOS_CLIENT_ID } : {}),
       scopes: ["profile", "email"],
     });
 
@@ -45,9 +53,6 @@ export default function AuthModal({ setModalVisible }) {
     if (!result?.success) throw new Error(result?.error || "Could not save your login.");
 
     setModalVisible(false);
-    // `replace`, not `push`: signing in is not a step to go back from. Pushing
-    // left onboarding under the tabs, so the first back press after a sign-in
-    // dropped the user onto the sign-in screen they had just finished with.
     router.replace("/create");
   };
 
@@ -67,7 +72,7 @@ export default function AuthModal({ setModalVisible }) {
 
   const handleGoogleSignIn = async () => {
     if (isSigningIn) return;
-    setIsSigningIn(true);
+    setSigningInProvider("google");
     setSignInError(null);
 
     try {
@@ -85,13 +90,13 @@ export default function AuthModal({ setModalVisible }) {
       console.log("Google sign-in error:", error.message || error);
       setSignInError(describeGoogleError(error));
     } finally {
-      setIsSigningIn(false);
+      setSigningInProvider(null);
     }
   };
 
   const handleAppleSignIn = async () => {
     if (isSigningIn) return;
-    setIsSigningIn(true);
+    setSigningInProvider("apple");
     setSignInError(null);
 
     try {
@@ -115,91 +120,116 @@ export default function AuthModal({ setModalVisible }) {
         );
       }
     } finally {
-      setIsSigningIn(false);
+      setSigningInProvider(null);
     }
   };
 
   return (
-    <BlurView
-      intensity={100}
-      tint="dark"
-      style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
-    >
+    <BlurView intensity={72} tint="dark" style={styles.socialOverlay}>
       <Pressable
-        style={{
-          width: scale(320),
-          minHeight: verticalScale(appleSignInAvailable ? 225 : 165),
-          backgroundColor: "#fff",
-          borderRadius: 24,
-          paddingVertical: verticalScale(18),
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+        accessible={false}
+        style={styles.backdropDismissArea}
+        onPress={() => setModalVisible(false)}
+      />
+
+      <Pressable
+        accessibilityViewIsModal
+        style={styles.socialSheet}
         onPress={(event) => event.stopPropagation?.()}
       >
-        <Text
-          style={{
-            fontSize: 24,
-            fontFamily: "Poppins_500Medium",
-          }}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close sign in"
+          hitSlop={8}
+          onPress={() => setModalVisible(false)}
+          style={({ pressed }) => [styles.closeButton, pressed && styles.iconButtonPressed]}
         >
-          Join LIVINAI
-        </Text>
-        <Text
-          style={{
-            fontSize: fontSizes.FONT17,
-            paddingTop: verticalScale(4),
-            fontFamily: "Poppins_300Light",
-          }}
-        >
-          It&apos;s easier than you imagine!
+          <Ionicons name="close" size={20} color="#334039" />
+        </Pressable>
+
+        <Text style={styles.socialTitle}>Join LIVINAI</Text>
+        <Text style={styles.socialSubtitle}>
+          Sign in to save and sync your designs.
         </Text>
 
-        {appleSignInAvailable && (
-          <AppleAuthentication.AppleAuthenticationButton
-            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-            cornerRadius={12}
-            style={{
-              width: scale(255),
-              height: verticalScale(42),
-              marginTop: verticalScale(14),
-              opacity: isSigningIn ? 0.6 : 1,
-            }}
-            onPress={handleAppleSignIn}
-          />
-        )}
+        <View style={styles.providerStack}>
+          {appleSignInAvailable &&
+            (signingInProvider === "apple" ? (
+              <View style={styles.appleLoadingButton}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.appleLoadingText}>Signing in with Apple…</Text>
+              </View>
+            ) : (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={14}
+                style={[styles.appleButton, isSigningIn && styles.providerButtonDisabled]}
+                onPress={handleAppleSignIn}
+              />
+            ))}
 
-        <View style={[styles.googleContainer, appleSignInAvailable && { paddingTop: verticalScale(8) }]}>
           <Pressable
             onPress={handleGoogleSignIn}
             disabled={isSigningIn}
-            style={[styles.googleButton, isSigningIn && { opacity: 0.6 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in with Google"
+            style={({ pressed }) => [
+              styles.googleButton,
+              pressed && !isSigningIn && styles.providerButtonPressed,
+              isSigningIn && styles.providerButtonDisabled,
+            ]}
           >
-            <Image
-              source={require("@/assets/images/onboarding/google.png")}
-              style={styles.googleIcon}
-            />
+            {signingInProvider === "google" ? (
+              <ActivityIndicator color="#33604A" size="small" />
+            ) : (
+              <Image
+                source={require("@/assets/images/onboarding/google.png")}
+                style={styles.googleIcon}
+              />
+            )}
             <Text style={styles.googleText}>
-              {isSigningIn ? "Signing in…" : "Sign in with Google"}
+              {signingInProvider === "google" ? "Signing in with Google…" : "Sign in with Google"}
             </Text>
           </Pressable>
         </View>
 
         {signInError && (
+          <View
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            style={styles.errorCallout}
+          >
+            <Ionicons name="alert-circle-outline" size={19} color="#BE3A2F" />
+            <Text style={styles.errorText}>{signInError}</Text>
+          </View>
+        )}
+
+        <Text style={styles.legalText}>
+          By continuing, you agree to Livinai&apos;s{" "}
           <Text
-            style={{
-              color: "#c0392b",
-              fontSize: fontSizes.FONT15,
-              fontFamily: "Poppins_300Light",
-              paddingHorizontal: scale(20),
-              paddingTop: verticalScale(4),
-              textAlign: "center",
+            accessibilityRole="link"
+            style={styles.legalLink}
+            onPress={() => {
+              setModalVisible(false);
+              router.push("/profile/terms");
             }}
           >
-            {signInError}
+            Terms of Service
+          </Text>{" "}
+          and{" "}
+          <Text
+            accessibilityRole="link"
+            style={styles.legalLink}
+            onPress={() => {
+              setModalVisible(false);
+              router.push("/profile/privacy");
+            }}
+          >
+            Privacy Policy
           </Text>
-        )}
+          .
+        </Text>
       </Pressable>
     </BlurView>
   );

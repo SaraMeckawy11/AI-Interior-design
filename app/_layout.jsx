@@ -1,10 +1,10 @@
 import React, { useEffect } from "react";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useAuthStore } from "../authStore";
 import { ensureRevenueCatConfigured } from "../lib/revenueCat";
 import AndroidBackGuard from "../components/navigation/AndroidBackGuard";
-
 import {
   Poppins_600SemiBold,
   Poppins_300Light,
@@ -14,10 +14,15 @@ import {
   useFonts,
 } from "@expo-google-fonts/poppins";
 
+// Keep iOS on the native Livinai launch screen until the fonts needed by the
+// first React frame are ready. Without this, iOS briefly replaced the splash
+// with an unstyled/blank frame while Poppins was still loading.
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
 export default function RootLayout() {
   const { user, token, isCheckingAuth, checkAuth, fetchUser } = useAuthStore();
 
-  const [loaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     Poppins_600SemiBold,
     Poppins_300Light,
@@ -29,6 +34,12 @@ export default function RootLayout() {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      SplashScreen.hideAsync().catch(() => undefined);
+    }
+  }, [fontError, fontsLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +73,8 @@ export default function RootLayout() {
   // `replace` to onboarding, so an unauthenticated session's home is that
   // screen, not a Create tab the user cannot use.
   const home = token ? "/create" : "/(routes)/onboarding";
+
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <SafeAreaProvider>

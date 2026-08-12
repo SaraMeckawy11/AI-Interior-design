@@ -66,6 +66,7 @@ export default function Exterior() {
   const [roomType, setRoomType] = useState('Balcony');
   const [designStyle, setDesignStyle] = useState('Modern');
   const [colorTone, setColorTone] = useState('Neutral');
+  const [selectedColorPalette, setSelectedColorPalette] = useState(null);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(null);
   const [isPremium, setIsPremium] = useState(null);
@@ -251,7 +252,7 @@ export default function Exterior() {
         // interior selector's secondary and accent colors.
         // The whole 60/30/10 scheme with its hexes, the same as Interior sends.
         // The three colours the swatches show are the three the facade gets.
-        colorPalette: paletteForRequest(colorTone),
+        colorPalette: paletteForRequest(colorTone, selectedColorPalette),
         customPrompt: prompt,
         // Gen-Klein fields — see the matching block in interior.jsx.
         mode: "exterior",
@@ -441,6 +442,7 @@ export default function Exterior() {
             <ColorToneSelector
               colorTone={colorTone}
               setColorTone={setColorTone}
+              onPaletteChange={setSelectedColorPalette}
             />
             
             {/* Custom Prompt (Optional) */}
@@ -486,11 +488,6 @@ export default function Exterior() {
                 </LinearGradient>
               )}
             </TouchableOpacity>
-
-            {/* Banner ad for non-subscribed users */}
-            {/* {!isSubscribed  && (
-              <CreateBannerAd />
-            )} */}
 
           </View>
         </View>

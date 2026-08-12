@@ -67,6 +67,7 @@ RUN if [ "$PREFETCH_FLUX" = "1" ]; then python -c "\
 from huggingface_hub import snapshot_download; \
 snapshot_download( \
     'black-forest-labs/FLUX.2-klein-4B', \
+    revision='e7b7dc27f91deacad38e78976d1f2b499d76a294', \
     cache_dir='/home/user/.cache/huggingface', \
     max_workers=8, \
 )"; else echo 'Skipping FLUX prefetch — attach a network volume to the endpoint.'; fi

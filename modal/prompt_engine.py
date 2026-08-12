@@ -73,6 +73,196 @@ STYLE_SPECS = {
     },
 }
 
+# Literal prompt programme from C:\Sara\Interior_design\Gen_klein.py.
+#
+# Keep this separate from STYLE_SPECS: the latter serves the exterior and
+# ControlNet paths too, while this table is the exact FLUX.2 Klein room-editing
+# recipe the standalone reference script uses.
+GEN_KLEIN_STYLE_SPECS = {
+    "modern": dict(
+        sofa="a sculptural curved sofa with a velvet back and boucle seat",
+        table="a round travertine pedestal coffee table",
+        floor="wide-plank warm honey oak laid straight",
+        rug="a LARGE chunky-woven jute rug",
+        curtains="cream double-layer drapery, sheer plus linen panels",
+        art="an oversized abstract artwork",
+        plants="tall olive trees in matte travertine planters",
+        lamp="a brass floor lamp with tapered fabric shade",
+        ceiling="ONE wide brass disc pendant close under the ceiling",
+        textures="boucle, velvet, travertine, jute and warm oak, subtle brass; warm golden ambience",
+    ),
+    "classic": dict(
+        sofa="a tailored roll-arm sofa with carved wooden legs",
+        table="a rectangular marble-top coffee table with carved legs",
+        floor="herringbone oak parquet",
+        rug="a LARGE bordered wool rug",
+        curtains="heavy pleated drapery with elegant tiebacks",
+        art="a large framed classical painting",
+        plants="sculpted plants in ceramic urns",
+        lamp="a column floor lamp with a pleated shade",
+        ceiling="ONE crystal chandelier on a short chain, close to the ceiling",
+        textures="rich deeper accents; silk, velvet, marble and dark polished wood, antique gold details; stately warm mood",
+    ),
+    "scandinavian": dict(
+        sofa="a clean-lined fabric sofa on tapered wooden legs",
+        table="a round pale-wood coffee table",
+        floor="pale matte oak boards",
+        rug="a LARGE soft wool rug",
+        curtains="airy white linen curtains",
+        art="simple framed line-art prints",
+        plants="a leafy plant in a simple white pot",
+        lamp="a minimalist tripod floor lamp",
+        ceiling="ONE small dome pendant close to the ceiling",
+        textures="muted tone-on-tone accents; wool, linen, pale birch and sheepskin, matte black details; bright airy calm",
+    ),
+    "boho": dict(
+        sofa="a relaxed low sofa with layered patterned cushions",
+        table="a round carved-wood or rattan coffee table",
+        floor="warm rustic wood boards",
+        rug="LAYERED patterned rugs",
+        curtains="light flowing natural-cotton curtains",
+        art="an eclectic mix of woven and framed wall pieces",
+        plants="abundant potted and trailing plants in terracotta and baskets",
+        lamp="a woven rattan floor lamp",
+        ceiling="ONE woven rattan pendant close to the ceiling",
+        textures="earthy playful accents; rattan, macrame, layered woven textiles, jute and terracotta; relaxed sunlit warmth",
+    ),
+    "japandi": dict(
+        sofa="a low clean-lined sofa in natural linen",
+        table="a low round dark-wood coffee table",
+        floor="light matte wood boards",
+        rug="a LARGE flat-woven neutral rug",
+        curtains="plain linen panels",
+        art="one minimal ink-brush artwork",
+        plants="a single sculptural branch arrangement in a stone vessel",
+        lamp="a paper-lantern floor lamp",
+        ceiling="ONE round paper lantern close to the ceiling",
+        textures="quiet deeper accents; linen, pale and dark wood, stone and paper, matte black; serene zen calm",
+    ),
+    "industrial": dict(
+        sofa="a cognac leather sofa",
+        table="a rectangular reclaimed-wood and black steel coffee table",
+        floor="wide dark wood boards",
+        rug="a LARGE worn-look neutral rug",
+        curtains="simple dark linen panels",
+        art="large monochrome photography prints",
+        plants="a tall plant in a black metal planter",
+        lamp="a black tripod spotlight floor lamp",
+        ceiling="ONE black metal ceiling light close to the ceiling",
+        textures="bold contrast accents; leather, black steel, reclaimed wood and aged brass; moody warm light",
+    ),
+    "minimalist": dict(
+        sofa="a low straight-lined sofa in soft neutral fabric",
+        table="a low rectangular seamless coffee table",
+        floor="seamless pale oak boards",
+        rug="a LARGE plain low-pile rug",
+        curtains="plain full-height panels near the wall tone",
+        art="one single large calm artwork",
+        plants="one sculptural plant in a plain pot",
+        lamp="a slim unobtrusive floor lamp",
+        ceiling="ONE discreet flush ceiling light",
+        textures="subtle tone-on-tone accents; smooth plaster, pale wood and soft matte fabric; serene uncluttered light",
+    ),
+}
+
+GEN_KLEIN_FURNITURE_BY_ROOM = {
+    "living room": None,  # Filled from the selected style below.
+    "bedroom": (
+        "an upholstered bed with layered premium bedding, two nightstands "
+        "with warm lamps, and a bench at the foot of the bed"
+    ),
+    "dining room": (
+        "a solid-wood dining table with sculptural chairs and a styled "
+        "sideboard"
+    ),
+    "kitchen": (
+        "fitted cabinetry with stone countertops, a breakfast counter with "
+        "designer stools, and integrated appliances"
+    ),
+    "home office": (
+        "a wide desk with a refined chair, full bookshelves, and a reading "
+        "armchair"
+    ),
+    "kids room": (
+        "a cozy bed with playful bedding, a study desk, a soft rug, and "
+        "generous storage"
+    ),
+    "bathroom": (
+        "a floating stone-top vanity with a backlit mirror, a glass shower, "
+        "and premium tile"
+    ),
+}
+
+
+def build_gen_klein_interior_prompt(
+    *, space_type: str, design_style: str, color_tone: str, color_palette=None
+) -> str:
+    """Return a flexible, whole-room brief that leaves architecture untouched."""
+    room_type = space_type or "Living Room"
+    style = design_style or "Modern"
+    tone = color_tone or "Neutral"
+
+    def swatch(entry, fallback):
+        if not isinstance(entry, dict):
+            return fallback
+        name = str(entry.get("name") or fallback).strip()
+        code = str(entry.get("hex") or "").strip().upper()
+        return f"{name} ({code})" if code.startswith("#") else name
+
+    selected = color_palette.get("colors") if isinstance(color_palette, dict) else None
+    if isinstance(selected, list) and len(selected) >= 3:
+        palette = ", ".join(swatch(entry, tone) for entry in selected[:3])
+        color_rule = f"Use the selected palette ({palette}) as an overall direction"
+    else:
+        color_rule = f"Use {tone} as the overall color direction"
+
+    room_key = room_type.lower().strip()
+    programmes = {
+        "living room": (
+            "a complete conversation group with sofa, complementary seating, "
+            "coffee table, correctly sized anchoring rug, and a TV centred above "
+            "a media console on an available solid wall"
+        ),
+        "bedroom": "a restful sleeping area, useful bedside surfaces and calm storage",
+        "dining room": "a correctly scaled dining group and practical circulation",
+        "kitchen": "functional cabinetry, work surfaces, appliances and task lighting",
+        "home office": "an ergonomic work area, storage and layered task lighting",
+        "kids room": "safe sleep, study, play and accessible storage zones",
+        "bathroom": "a functional vanity, bathing zone, storage and suitable lighting",
+    }
+    programme = programmes.get(
+        room_key,
+        f"the essential functions of a well-designed {room_type}",
+    )
+
+    return (
+        f"Redesign this {room_type} in a refined {style} style, using the input "
+        "photo as the architectural base.\n\n"
+        "ARCHITECTURE:\n"
+        "- Edit finishes, furniture and decor only. Retain the existing walls, "
+        "doors, windows, balcony openings and camera framing as they appear; do not redesign the architecture.\n\n"
+        "SENIOR DESIGN DIRECTION:\n"
+        "- Create one cohesive, professionally resolved room with balanced "
+        "proportions, clear circulation, visual rhythm, a focal point and layered lighting.\n"
+        f"- Resolve {programme}. Choose the layout, furniture count and scale from the visible space.\n"
+        "- Arrange furniture as related groups, not isolated objects. Anchor "
+        "the main group with a correctly sized rug and maintain realistic clearances.\n"
+        "- Establish a clear focal hierarchy; align art, lighting and casework "
+        "with nearby furniture and architectural lines. Use ambient, task and accent lighting.\n"
+        "- Select flooring, rugs, curtains, furniture, lighting, art, materials "
+        "and finishes together as one coordinated scheme. Do not force a predetermined material or object color.\n"
+        "- Repeat key colors, forms and finishes across separated elements so "
+        "the room feels intentionally composed, not assembled from unrelated pieces.\n"
+        f"- COLOR: {color_rule}. Distribute it naturally across the whole room "
+        "as anchors, not rigid paint matches: light or muted variants on large "
+        "fields, mid-tones for depth, and the strongest or darkest color sparingly.\n"
+        "- Keep undertones consistent and repeat key colors in two or three "
+        "separated details. Preserve realistic wood, stone and metal with balanced "
+        "contrast; avoid a flat wash, muddy neutrals, oversaturation or equal color weight.\n"
+        "- Keep every opening and walkway visible and usable. Avoid clutter, mismatched pieces and repeated objects.\n"
+        "- Photorealistic editorial interior, natural light, believable scale and contact shadows."
+    )
+
 ROOM_PROGRAMS = {
     "living room": "a coherent conversation group, correctly scaled sofa and lounge chairs, coffee table, grounded rug, media or art focal point",
     "bedroom": "an upholstered bed, two nightstands, layered bedding, a bench or chair where circulation allows, calm storage",

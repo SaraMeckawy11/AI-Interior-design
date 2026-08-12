@@ -29,7 +29,6 @@ import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import CreateBannerAd from "../../components/create/CreateBannerAd";
 import { useFocusEffect } from 'expo-router';
 import { apiUrl } from '../../configs/api';
 import { FREE_DESIGNS, coinCost } from '../../constants/pricing';
@@ -76,6 +75,7 @@ export default function Interior() {
   const [roomType, setRoomType] = useState('Living Room');
   const [designStyle, setDesignStyle] = useState('Modern');
   const [colorTone, setColorTone] = useState('Neutral');
+  const [selectedColorPalette, setSelectedColorPalette] = useState(null);
   const [freeDesignsUsed, setFreeDesignsUsed] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(null);
   const [isPremium, setIsPremium] = useState(null);
@@ -163,8 +163,11 @@ export default function Interior() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.3,
-        base64: true,
+        // Preserve the source pixels Gen_klein.py would read from disk. Asking
+        // Expo for base64 made it recompress the selected photo before the
+        // model ever saw it.
+        quality: 1,
+        base64: Platform.OS === 'web',
       });
 
       if (!result.canceled) {
@@ -205,8 +208,8 @@ export default function Interior() {
       }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.3,
-        base64: true,
+        quality: 1,
+        base64: Platform.OS === 'web',
       });
 
       if (!result.canceled) {
@@ -279,7 +282,7 @@ export default function Interior() {
         // produced a different room every run and the swatch the user tapped
         // described only part of the result. These are the three colours the
         // selector actually shows them.
-        colorPalette: paletteForRequest(colorTone),
+        colorPalette: paletteForRequest(colorTone, selectedColorPalette),
         customPrompt: prompt,
         // Gen-Klein fields. `preserveGeometry` is what keeps the model from
         // moving walls, windows and the camera; the rest feed the 60/30/10
@@ -466,7 +469,11 @@ export default function Interior() {
             />
 
             {/* Color Tone */}
-            <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
+            <ColorToneSelector
+              colorTone={colorTone}
+              setColorTone={setColorTone}
+              onPaletteChange={setSelectedColorPalette}
+            />
             
             {/* Custom Prompt (Optional) */}
             {/* <View style={styles.formGroup}>
@@ -575,11 +582,6 @@ export default function Interior() {
                 </LinearGradient>
               )}
             </TouchableOpacity>
-
-            {/* Banner ad for non-subscribed users */}
-            {/* {!isSubscribed  && (
-              <CreateBannerAd />
-            )} */}
 
           </View>
         </View>

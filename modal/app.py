@@ -58,6 +58,7 @@ except ImportError:  # pragma: no cover
 
 from prompt_engine import (
     NEGATIVE_PROMPT,
+    build_gen_klein_interior_prompt,
     build_prompt,
     build_short_prompt,
     resolve_mode,
@@ -71,6 +72,10 @@ app = modal.App("livinai-interior")
 
 CACHE_DIR = "/cache/huggingface"
 FLUX_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
+# The exact checkpoint cached by the standalone Gen_klein.py run. Following
+# mutable `main` would make the same prompt and seed drift after an upstream
+# model update.
+FLUX_MODEL_REVISION = "e7b7dc27f91deacad38e78976d1f2b499d76a294"
 
 # The ControlNet stack is pinned to the versions the guided path was validated
 # on; FLUX.2 [klein] needs a much newer diffusers, so the two paths deliberately
@@ -103,7 +108,12 @@ def _prefetch_flux():
     """
     from huggingface_hub import snapshot_download
 
-    snapshot_download(FLUX_MODEL_ID, cache_dir=CACHE_DIR, max_workers=8)
+    snapshot_download(
+        FLUX_MODEL_ID,
+        revision=FLUX_MODEL_REVISION,
+        cache_dir=CACHE_DIR,
+        max_workers=8,
+    )
 
 
 flux_image = (
@@ -118,6 +128,7 @@ flux_image = (
         "diffusers>=0.37,<1",
         "transformers>=4.57,<5",
         "accelerate>=1.4",
+        "bitsandbytes>=0.49,<1",
         "safetensors>=0.4.5",
         "sentencepiece",
         "protobuf",
@@ -356,9 +367,13 @@ class GenKlein:
     @modal.enter()
     def load(self):
         import torch
+        from huggingface_hub import snapshot_download
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import BitsAndBytesConfig as TransformersBnb4bit
 
         try:
-            from diffusers import Flux2KleinPipeline
+            from diffusers import Flux2KleinPipeline, Flux2Transformer2DModel
+            from diffusers import BitsAndBytesConfig as DiffusersBnb4bit
         except ImportError as error:  # pragma: no cover - surfaces a bad image
             raise RuntimeError(
                 "Flux2KleinPipeline is missing. It requires diffusers >= 0.37; "
@@ -366,10 +381,48 @@ class GenKlein:
             ) from error
 
         self.torch = torch
-        self.pipe = Flux2KleinPipeline.from_pretrained(
+        local_dir = snapshot_download(
             FLUX_MODEL_ID,
-            torch_dtype=torch.bfloat16,
+            revision=FLUX_MODEL_REVISION,
             cache_dir=CACHE_DIR,
+            allow_patterns=[
+                "model_index.json", "scheduler/*", "tokenizer/*",
+                "text_encoder/*", "transformer/*", "vae/*",
+            ],
+        )
+
+        # Match Gen_klein.py numerically: both Qwen3 and the FLUX transformer
+        # use NF4 weights with bf16 compute. The L40S can keep both quantized
+        # components resident, so requests do not need to reload either model.
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            os.path.join(local_dir, "tokenizer")
+        )
+        self.text_encoder = AutoModelForCausalLM.from_pretrained(
+            os.path.join(local_dir, "text_encoder"),
+            torch_dtype=torch.bfloat16,
+            quantization_config=TransformersBnb4bit(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            ),
+            device_map={"": 0},
+        )
+        transformer = Flux2Transformer2DModel.from_pretrained(
+            local_dir,
+            subfolder="transformer",
+            torch_dtype=torch.bfloat16,
+            quantization_config=DiffusersBnb4bit(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            ),
+        )
+        self.pipe = Flux2KleinPipeline.from_pretrained(
+            local_dir,
+            transformer=transformer,
+            text_encoder=None,
+            tokenizer=None,
+            torch_dtype=torch.bfloat16,
         )
         self.pipe.to("cuda")
         # Cheap insurance on peak VRAM for 1024px output; both are no-ops on
@@ -415,7 +468,7 @@ class GenKlein:
         creativity: int = 42,
         color_palette: dict | None = None,
     ):
-        from PIL import Image, ImageEnhance, ImageOps
+        from PIL import Image, ImageChops, ImageFilter, ImageOps
 
         source = ImageOps.exif_transpose(
             Image.open(io.BytesIO(_decode_base64_image_bytes(image)))
@@ -425,36 +478,91 @@ class GenKlein:
             source,
             preserve_aspect=resolved_mode == "exterior",
         )
-        prompt = build_prompt(
-            mode=resolved_mode,
-            space_type=room_type or ("Building" if resolved_mode == "exterior" else "Living Room"),
-            design_style=design_style or "Modern",
-            color_tone=color_tone or "Neutral",
-            material=material or "Natural oak",
-            lighting=lighting or "Natural daylight",
-            preserve_geometry=bool(preserve_geometry),
-            creativity=int(creativity or 42),
-            custom_prompt=(custom_prompt or "")[:280],
-            color_palette=color_palette,
-        )
+        if resolved_mode == "interior" and room_type.strip().lower() != "prompt only":
+            prompt = build_gen_klein_interior_prompt(
+                space_type=room_type or "Living Room",
+                design_style=design_style or "Modern",
+                color_tone=color_tone or "Neutral",
+                color_palette=color_palette,
+            )
+        elif room_type.strip().lower() == "prompt only" and custom_prompt.strip():
+            prompt = custom_prompt.strip()
+        else:
+            prompt = build_prompt(
+                mode=resolved_mode,
+                space_type=room_type or ("Building" if resolved_mode == "exterior" else "Living Room"),
+                design_style=design_style or "Modern",
+                color_tone=color_tone or "Neutral",
+                material=material or "Natural oak",
+                lighting=lighting or "Natural daylight",
+                preserve_geometry=bool(preserve_geometry),
+                creativity=int(creativity or 42),
+                custom_prompt=(custom_prompt or "")[:280],
+                color_palette=color_palette,
+            )
 
-        # A stable base seed with a controlled creativity offset keeps repeat
-        # runs comparable while letting the creative-freedom control matter.
-        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
+        # Gen_klein.py explicitly checks Qwen3's 512-token ceiling. Keep the
+        # same guard in production so the final architecture check can never be
+        # silently truncated—the most dangerous possible failure for this job.
+        chat_prompt = self.tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        prompt_tokens = len(self.tokenizer(chat_prompt)["input_ids"])
+        if prompt_tokens > 512:
+            raise ValueError(
+                f"Interior brief is {prompt_tokens} tokens; maximum is 512."
+            )
+
+        # Encode exactly as the standalone reference does, including its
+        # CPU round-trip before denoising.
+        with self.torch.no_grad():
+            prompt_embeds = self.pipe._get_qwen3_prompt_embeds(
+                text_encoder=self.text_encoder,
+                tokenizer=self.tokenizer,
+                prompt=prompt,
+                dtype=self.torch.bfloat16,
+                device="cuda",
+            ).cpu()
+
+        def structure_score(candidate):
+            """Recall of source structural edges in one generated candidate."""
+            source_gray = source.resize((width, height)).convert("L")
+            source_edges = source_gray.filter(ImageFilter.GaussianBlur(1.2)).filter(
+                ImageFilter.FIND_EDGES
+            ).point(lambda value: 255 if value >= 24 else 0)
+            candidate_edges = candidate.convert("L").filter(
+                ImageFilter.GaussianBlur(0.8)
+            ).filter(ImageFilter.FIND_EDGES).point(
+                lambda value: 255 if value >= 24 else 0
+            ).filter(ImageFilter.MaxFilter(7))
+            # Ignore the artificial image-boundary edge produced by FIND_EDGES.
+            source_edges = source_edges.crop((8, 8, width - 8, height - 8))
+            candidate_edges = candidate_edges.crop((8, 8, width - 8, height - 8))
+            source_count = source_edges.histogram()[255]
+            if not source_count:
+                return 0.0
+            kept = ImageChops.multiply(source_edges, candidate_edges).histogram()[255]
+            return kept / source_count
+
+        # Match Gen_klein.py's preferred output. Edge recall stays diagnostic:
+        # it cannot decide whether an opening is semantically correct, so it
+        # must not replace seed 7 with a visually worse composition.
+        embeds_gpu = prompt_embeds.to("cuda")
+        selected_seed = 7
         result = self.pipe(
-            prompt=prompt,
+            prompt=None,
+            prompt_embeds=embeds_gpu,
             image=[source],
             width=width,
             height=height,
             num_inference_steps=4,
             guidance_scale=1.0,
-            generator=self.torch.Generator(device="cuda").manual_seed(seed),
+            generator=self.torch.Generator(device="cuda").manual_seed(selected_seed),
         ).images[0].convert("RGB")
-
-        # Conservative finishing pass — improves delivery without changing
-        # geometry or inventing detail.
-        result = ImageEnhance.Contrast(result).enhance(1.025)
-        result = ImageEnhance.Sharpness(result).enhance(1.08)
+        score = structure_score(result)
 
         buf = io.BytesIO()
         result.save(buf, format="PNG", optimize=True)
@@ -462,6 +570,10 @@ class GenKlein:
             "message": "Image generated successfully",
             "generatedImage": base64.b64encode(buf.getvalue()).decode(),
             "prompt": prompt,
+            "prompt_tokens": prompt_tokens,
+            "structure_score": round(score, 4),
+            "seed": selected_seed,
+            "candidates": 1,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,
@@ -1120,7 +1232,7 @@ def health():
         # Bump whenever prompt_engine.py changes what the model is asked for, so
         # a deployed service can be told apart from the one before it without
         # reading a build log.
-        "promptEngine": "gen-klein-v2-building-lock-exact-colors",
+        "promptEngine": "gen-klein-designer-color-hierarchy-v8",
     }
 
 
@@ -1128,20 +1240,50 @@ def health():
 # LOCAL ENTRYPOINT (for quick CLI testing: `modal run app.py`)
 # ---------------------------------------------------------------------------
 @app.local_entrypoint()
-def main(image_path: str = "test.jpg", room_type: str = "living room", mode: str = "interior"):
+def main(
+    image_path: str = "test.jpg",
+    room_type: str = "living room",
+    design_style: str = "modern",
+    color_tone: str = "warm vanilla latte",
+    mode: str = "interior",
+):
     """Run a smoke test from the CLI using a local image file."""
     from pathlib import Path
 
-    b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
+    if image_path == "__synthetic__":
+        # Privacy-safe deployment smoke test: a valid landscape PPM generated
+        # in memory, so no user photograph leaves the workstation.
+        width, height = 1024, 768
+        header = f"P6\n{width} {height}\n255\n".encode()
+        row = b"".join(
+            bytes((205 - (x * 35 // width), 198 - (x * 25 // width), 184))
+            for x in range(width)
+        )
+        raw = header + row * height
+    else:
+        raw = Path(image_path).read_bytes()
+    b64 = base64.b64encode(raw).decode()
     result = GenKlein().run.remote(
         image=b64,
         room_type=room_type,
-        design_style="Scandinavian",
-        color_tone="warm neutral",
+        design_style=design_style,
+        color_tone=color_tone,
+        color_palette={
+            "colors": [
+                {"name": "Chenin", "hex": "#F3E5AB"},
+                {"name": "Sorrell Brown", "hex": "#AB9A61"},
+                {"name": "Chambray", "hex": "#354A73"},
+            ]
+        } if color_tone.lower() == "warm vanilla latte" else None,
         mode=mode,
     )
     out_path = Path("generated.png")
     out_path.write_bytes(base64.b64decode(result["generatedImage"]))
     print(f"Saved -> {out_path.resolve()}")
     print(f"Engine: {result['engine']}")
+    print(f"Prompt tokens: {result['prompt_tokens']}/512")
+    print(
+        f"Structure: {result['structure_score']:.4f} from "
+        f"{result['candidates']} candidates; seed {result['seed']}"
+    )
     print(f"Prompt: {result['prompt'][:200]}…")

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   FlatList,
@@ -24,10 +24,6 @@ import { apiUrl } from "../../configs/api";
 export default function Collection() {
   const { token } = useAuthStore();
   const insets = useSafeAreaInsets();
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
-  const [statusLoaded, setStatusLoaded] = useState(false);
-
   const [activeDesigns, setActiveDesigns] = useState(0);
   const [totalDesigns, setTotalDesigns] = useState(null);
 
@@ -36,6 +32,7 @@ export default function Collection() {
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedDesignId, setSelectedDesignId] = useState(null);
@@ -52,20 +49,18 @@ export default function Collection() {
         const data = await res.json();
 
         if (res.ok && data.user) {
-          setIsSubscribed(data.user.isSubscribed);
-          setIsPremium(data.user.isPremium);
           setActiveDesigns(data.user.activeDesigns || 0); // DB count
         }
       } catch {}
-      finally { setStatusLoaded(true); }
     };
 
     if (token) fetchStatus();
   }, [token]);
 
   // Fetch paginated designs
-  const fetchDesigns = async (pageNum = 1, refresh = false) => {
+  const fetchDesigns = useCallback(async (pageNum = 1, refresh = false) => {
     try {
+      setLoadError("");
       if (refresh) setRefreshing(true);
       else if (pageNum === 1) setLoading(true);
 
@@ -82,18 +77,19 @@ export default function Collection() {
       const newDesigns = data.output || [];
       setTotalDesigns(data.totalDesigns || newDesigns.length);  // use DB count
 
-      setDesigns(prev => refresh ? newDesigns : [...prev, ...newDesigns]);
+      setDesigns(prev => (refresh || pageNum === 1) ? newDesigns : [...prev, ...newDesigns]);
       setHasMore(pageNum < data.totalPages);
       setPage(pageNum);
-    } catch {}
-    finally {
-      refresh ? setRefreshing(false) : setLoading(false);
+    } catch {
+      setLoadError("We couldn't load your designs. Check your connection and try again.");
+    } finally {
+      if (refresh) setRefreshing(false);
+      else setLoading(false);
     }
-  };
-
+  }, [token]);
   useEffect(() => {
     fetchDesigns();
-  }, []);
+  }, [fetchDesigns]);
 
   // DELETE design
   const handleDeleteDesign = async () => {
@@ -275,6 +271,44 @@ export default function Collection() {
           <View style={styles.header}>
             <Text style={styles.title}>LIVINAI</Text>
           </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIcon}>
+              <Ionicons
+                name={loadError ? "cloud-offline-outline" : "images-outline"}
+                size={28}
+                color={COLORS.primaryDark}
+              />
+            </View>
+            <Text style={styles.emptyText}>
+              {loadError ? "Designs are unavailable" : "No designs yet"}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {loadError
+                ? loadError
+                : "Create your first design and it will be saved here automatically."}
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.emptyAction}
+              onPress={() => loadError ? fetchDesigns(1, true) : router.push("/create")}
+            >
+              <Ionicons
+                name={loadError ? "refresh-outline" : "add"}
+                size={18}
+                color={COLORS.white}
+              />
+              <Text style={styles.emptyActionText}>
+                {loadError ? "Try again" : "Create a design"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        }
+        ListFooterComponent={
+          loading && designs.length > 0 ? (
+            <ActivityIndicator style={styles.footerLoader} color={COLORS.primaryDark} />
+          ) : null
         }
       />
 

@@ -1,87 +1,36 @@
-import { IsIPAD } from "@/themes/app.constant";
-import { Dimensions, Image } from "react-native";
-import { scale, verticalScale } from "react-native-size-matters";
-
-import One from "@/assets/images/onboarding/i1.png";
-import Two from "@/assets/images/onboarding/i2.png";
-import Three from "@/assets/images/onboarding/i3.png";
-
-// Import after images for last slide
-const afterImages = [
-  require('@/assets/images/onboarding/1.jpg'),
-  require('@/assets/images/onboarding/2.jpg'),
-  require('@/assets/images/onboarding/3.jpg'),
-  require('@/assets/images/onboarding/4.jpg'),
-  require('@/assets/images/onboarding/5.jpg'),
-  require('@/assets/images/onboarding/6.jpg'),
-  require('@/assets/images/onboarding/7.jpg'),
-  require('@/assets/images/onboarding/8.jpg'),
-  require('@/assets/images/onboarding/9.jpg'),
-  require('@/assets/images/onboarding/10.jpg'),
-];
-
+import { Dimensions } from "react-native";
 import COLORS from "@/constants/colors";
 
+const showcaseImages = [
+  require("@/assets/images/onboarding/editorial-living-room.jpg"),
+  require("@/assets/images/onboarding/editorial-bedroom.jpg"),
+  require("@/assets/images/onboarding/editorial-kitchen.jpg"),
+  require("@/assets/images/onboarding/editorial-bathroom.jpg"),
+  require("@/assets/images/onboarding/editorial-villa-exterior.jpg"),
+  require("@/assets/images/onboarding/editorial-terrace-exterior.jpg"),
+];
+
+const showcaseImageLabels = [
+  "A warm contemporary living room in ivory, oak, and muted sage",
+  "A serene bedroom with soft arches and natural materials",
+  "A harmonious oak kitchen and dining space",
+  "A spa-like bathroom in limestone and warm oak",
+  "A contemporary Mediterranean villa at golden hour",
+  "A landscaped rooftop terrace overlooking the city",
+];
+
 export const onBoardingSlides = [
-  // {
-  //   color: COLORS.primary,
-  //   title: "Transform Your Space",
-  //   image: (
-  //     <Image
-  //       source={One}
-  //       style={{
-  //         width: IsIPAD ? verticalScale(285) : verticalScale(320),
-  //         height: IsIPAD ? verticalScale(345) : verticalScale(330),
-  //       }}
-  //     />
-  //   ),
-  //   secondTitle: "With AI Vision",
-  //   subTitle:
-  //     "Upload your room photo and let our AI visualize stunning interiors tailored to your space.",
-  // },
-  //  {
-  //   color: COLORS.cardBackground,
-  //   title: "Get Inspired",
-  //   image: (
-  //     <Image
-  //       source={Three}
-  //       style={{
-  //         width: IsIPAD ? scale(285) : scale(320),
-  //         height: IsIPAD ? verticalScale(345) : verticalScale(330),
-  //       }}
-  //     />
-  //   ),
-  //   secondTitle: "Design Instantly",
-  //   subTitle:
-  //     "Generate AI-powered interior visuals and bring your dream space to life in seconds.",
-  // },
-  // {
-  //   color: COLORS.secondary,
-  //   title: "Customize Your Design",
-  //   image: (
-  //     <Image
-  //       source={Two}
-  //       style={{
-  //         width: IsIPAD ? scale(285) : scale(320),
-  //         height: IsIPAD ? verticalScale(345) : verticalScale(330),
-  //       }}
-  //     />
-  //   ),
-  //   secondTitle: "Your Style, Your Rules",
-  //   subTitle:
-  //     "Choose your room type, preferred design style, and color tones for a personalized result.",
-  // },
   {
     color: COLORS.cardBackground,
-    title: "Transform Your Space",
-    images: afterImages, // last slide becomes slideshow
-    secondTitle: "With AI Vision",
+    title: "Reimagine Every Space",
+    images: showcaseImages,
+    imageLabels: showcaseImageLabels,
+    secondTitle: "Inside and Out",
     subTitle:
-      "Generate AI-powered designs and bring your dream space to life in seconds.",
+      "Create harmonious interiors and striking exteriors, tailored to your home in seconds.",
   },
 ];
 
-// Onboarding layout constants
 export const Side = {
   LEFT: "LEFT",
   RIGHT: "RIGHT",

@@ -68,8 +68,30 @@ See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for what to redeploy and in what order.
 
 4. **Start the Expo development server:**
    ```bash
-   npx expo start
+   npm start
    ```
+
+### Physical iPhone development from Windows
+
+The iPhone needs an EAS development build once per native dependency/configuration
+change. Register the device and create that build with:
+
+```bash
+npx --yes eas-cli@latest device:create
+npm run build:iphone-dev
+```
+
+Install the resulting IPA from its EAS QR code, enable Developer Mode on the
+iPhone, and then use the installed Livinai development client for UI work:
+
+```bash
+npm start
+```
+
+Keep the iPhone and Windows computer on the same network. If LAN discovery is
+blocked, use `npm run start:iphone` to connect through an Expo tunnel. JavaScript,
+JSX, and styling changes refresh without another EAS build; rebuild only after a
+native dependency or native app configuration changes.
 
 ## 📝 License
 

@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start --dev-client",
+    "start:iphone": "expo start --dev-client --tunnel",
+    "build:iphone-dev": "npx --yes eas-cli@latest build --platform ios --profile development-device",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",

@@ -8,7 +8,9 @@
     "icon": "./assets/images/icon-square.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/splash-icon.png"
+      "image": "./assets/images/splash-livinai.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#D9E1D6"
     },
     "ios": {
       "supportsTablet": true,
@@ -46,6 +48,15 @@
         }
       ],
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#D9E1D6",
+          "image": "./assets/images/splash-livinai.png",
+          "imageWidth": 220,
+          "resizeMode": "contain"
+        }
+      ],
       "expo-apple-authentication",
       "expo-web-browser",
       "expo-secure-store",

@@ -34,7 +34,7 @@ const SLIDE_DURATION = 3800; // Long enough to actually look at a room.
 const FADE_DURATION = 900; // Cross-dissolve between rooms, not a hard cut.
 
 export default function Slide({ slide, index, setIndex, totalSlides }) {
-  const { title, secondTitle, subTitle, color, image, images } = slide;
+  const { title, secondTitle, subTitle, color, image, images, imageLabels } = slide;
   const insets = useSafeAreaInsets();
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -119,7 +119,9 @@ export default function Slide({ slide, index, setIndex, totalSlides }) {
             transition={reduceMotion ? 0 : FADE_DURATION}
             cachePolicy="memory-disk"
             accessible
-            accessibilityLabel="Interior designed with Livinai"
+            accessibilityLabel={
+              imageLabels?.[currentIndex] || "A home space designed with Livinai"
+            }
           />
         </Animated.View>
 
@@ -142,18 +144,28 @@ export default function Slide({ slide, index, setIndex, totalSlides }) {
 
         {hasSlideshow && images.length > 1 && (
           <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
+            accessibilityRole="tablist"
             style={[styles.progressRow, { top: insets.top + verticalScale(10) }]}
           >
             {images.map((_, i) => (
-              <View
+              <Pressable
                 key={i}
-                style={[
-                  styles.progressSegment,
-                  i === currentIndex && styles.progressSegmentActive,
-                ]}
-              />
+                accessibilityRole="tab"
+                accessibilityLabel={`Show design ${i + 1} of ${images.length}${
+                  imageLabels?.[i] ? `, ${imageLabels[i]}` : ""
+                }`}
+                accessibilityState={{ selected: i === currentIndex }}
+                hitSlop={{ top: 5, bottom: 5 }}
+                style={styles.progressTarget}
+                onPress={() => setCurrentIndex(i)}
+              >
+                <View
+                  style={[
+                    styles.progressSegment,
+                    i === currentIndex && styles.progressSegmentActive,
+                  ]}
+                />
+              </Pressable>
             ))}
           </View>
         )}
@@ -216,11 +228,9 @@ export default function Slide({ slide, index, setIndex, totalSlides }) {
         animationType="fade"
         transparent={true}
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(!modalVisible)}
+        onRequestClose={() => setModalVisible(false)}
       >
-        <Pressable style={{ flex: 1 }} onPress={() => setModalVisible(false)}>
-          <AuthModal setModalVisible={setModalVisible} />
-        </Pressable>
+        <AuthModal setModalVisible={setModalVisible} />
       </Modal>
     </View>
   );
@@ -256,8 +266,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: scale(4),
   },
-  progressSegment: {
+  progressTarget: {
     flex: 1,
+    height: verticalScale(20),
+    minHeight: 20,
+    justifyContent: "center",
+  },
+  progressSegment: {
+    width: "100%",
     height: 3,
     borderRadius: 2,
     backgroundColor: "rgba(255,255,255,0.35)",
@@ -315,6 +331,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
   },
   ctaWrapper: {
+    width: "76%",
+    maxWidth: scale(250),
+    alignSelf: "center",
     borderRadius: scale(28),
     // Lifts the CTA off the warm background without a heavy drop shadow.
     shadowColor: COLORS.primaryDark,
@@ -328,8 +347,8 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.985 }],
   },
   cta: {
-    height: verticalScale(52), // >= 44pt touch target
-    minHeight: 48,
+    height: verticalScale(44),
+    minHeight: 44,
     borderRadius: scale(28),
     alignItems: "center",
     justifyContent: "center",

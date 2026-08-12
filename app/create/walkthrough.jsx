@@ -65,6 +65,7 @@ import {
 } from "../../lib/walkthroughScene";
 import { LIVINAI_WEB_RENDERER_REVISION } from "../../lib/exactWalkthroughScene";
 import {
+  ANONYMOUS_PLAN_OWNER,
   createProjectId,
   deleteProject as deleteStoredProject,
   loadLibrary,
@@ -282,7 +283,13 @@ const clonePlanSnapshot = ({ rooms, openings, roomConfigs, selectedRoom }) => ({
 
 export default function WalkthroughScreen() {
   const router = useRouter();
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
+  const authenticatedOwnerId = user?._id || user?.id;
+  const planOwnerId = authenticatedOwnerId
+    ? String(authenticatedOwnerId)
+    : token
+      ? null
+      : ANONYMOUS_PLAN_OWNER;
   const viewerRef = useRef(null);
 
   // ── Where we are ─────────────────────────────────────────────────────────
@@ -769,6 +776,9 @@ export default function WalkthroughScreen() {
   // Drawing a home takes real effort; geometry is saved in normalized canvas
   // coordinates so uploaded plans restore correctly on a different phone.
   const restored = useRef(false);
+  const previousPlanOwner = useRef(planOwnerId);
+  const currentPlanOwner = useRef(planOwnerId);
+  currentPlanOwner.current = planOwnerId;
 
   const restoreSavedPlan = useCallback((saved) => {
     if (!saved) return;
@@ -899,17 +909,42 @@ export default function WalkthroughScreen() {
 
   const refreshLibrary = useCallback(async () => {
     setLibraryLoading(true);
-    const { projects: found, synced } = await loadLibrary(token);
+    if (!planOwnerId) {
+      setProjects([]);
+      setCloudSynced(false);
+      setLibraryLoading(false);
+      return [];
+    }
+    const { projects: found, synced } = await loadLibrary(token, planOwnerId);
+    if (currentPlanOwner.current !== planOwnerId) return [];
     setProjects(found);
     setCloudSynced(synced);
     setLibraryLoading(false);
     return found;
-  }, [token]);
+  }, [planOwnerId, token]);
 
   useEffect(() => {
+    const ownerChanged = previousPlanOwner.current !== planOwnerId;
+    previousPlanOwner.current = planOwnerId;
+    if (ownerChanged) {
+      // A screen can survive logout/login navigation. Stop editing immediately
+      // so the previous account's open geometry cannot autosave or sync under
+      // the next account before the library refresh completes.
+      setView("library");
+      setProjectId(createProjectId());
+      setRemoteId(null);
+      setProjectTitle("Untitled 3D plan");
+      setRooms([]);
+      setOpenings([]);
+      setRoomConfigs([]);
+      setPlanImage(null);
+      setRenderGallery([]);
+      setActiveRenderId(null);
+      setProjects([]);
+    }
     restored.current = true;
     refreshLibrary();
-  }, [refreshLibrary]);
+  }, [planOwnerId, refreshLibrary]);
 
   /**
    * Autosave, on the device only.
@@ -922,14 +957,15 @@ export default function WalkthroughScreen() {
   useEffect(() => {
     if (view !== "editor" || !restored.current || detecting || rendering) return undefined;
     const timer = setTimeout(() => {
-      saveLocally(projectRecord()).catch(() => {});
+      saveLocally(planOwnerId, projectRecord()).catch(() => {});
     }, 700);
     return () => clearTimeout(timer);
-  }, [detecting, projectRecord, rendering, view]);
+  }, [detecting, planOwnerId, projectRecord, rendering, view]);
 
   const pushToCloud = useCallback(async ({ announce } = {}) => {
     const record = projectRecord();
-    await saveLocally(record).catch(() => {});
+    await saveLocally(planOwnerId, record).catch(() => {});
+    if (currentPlanOwner.current !== planOwnerId) return;
 
     if (!token) {
       if (announce) setNotice("Saved on this device. Sign in to keep this plan on your account.");
@@ -939,11 +975,13 @@ export default function WalkthroughScreen() {
 
     setSyncState("saving");
     try {
-      const saved = await syncProject(token, record);
+      const saved = await syncProject(token, planOwnerId, record);
+      if (currentPlanOwner.current !== planOwnerId) return;
       if (saved?.id) setRemoteId(saved.id);
       setSyncState("saved");
       if (announce) setNotice("3D plan saved to your account.");
     } catch (error) {
+      if (currentPlanOwner.current !== planOwnerId) return;
       setSyncState("idle");
       setNotice(
         error?.message === "offline"
@@ -952,7 +990,7 @@ export default function WalkthroughScreen() {
       );
     }
     await refreshLibrary();
-  }, [projectRecord, refreshLibrary, token]);
+  }, [planOwnerId, projectRecord, refreshLibrary, token]);
 
   // The tick on the save button is a confirmation, not a state to live in.
   useEffect(() => {
@@ -1287,7 +1325,8 @@ export default function WalkthroughScreen() {
 
   const openSavedProject = useCallback(async (project) => {
     try {
-      const data = await loadProjectData(token, project);
+      const data = await loadProjectData(token, planOwnerId, project);
+      if (currentPlanOwner.current !== planOwnerId) return;
       if (!data) {
         setNotice("That plan's drawing could not be found on this device or your account.");
         return;
@@ -1299,9 +1338,10 @@ export default function WalkthroughScreen() {
       restoreSavedPlan(data);
       setView("editor");
     } catch (error) {
+      if (currentPlanOwner.current !== planOwnerId) return;
       setNotice(error?.message || "That 3D plan could not be opened.");
     }
-  }, [resetEditor, restoreSavedPlan, token]);
+  }, [planOwnerId, resetEditor, restoreSavedPlan, token]);
 
   const removeSavedProject = useCallback(async (project) => {
     if (!project?.id) return;
@@ -1313,19 +1353,19 @@ export default function WalkthroughScreen() {
       setProjectId(createProjectId());
       setRemoteId(null);
     }
-    await deleteStoredProject(token, project);
+    await deleteStoredProject(token, planOwnerId, project);
     await refreshLibrary();
-  }, [projectId, refreshLibrary, token]);
+  }, [planOwnerId, projectId, refreshLibrary, token]);
 
   const renameSavedProject = useCallback(async (project, title) => {
     const trimmed = title.trim().slice(0, 60);
     if (!trimmed) return;
     if (project === "current" || project?.id === projectId) setProjectTitle(trimmed);
     if (project !== "current") {
-      await renameStoredProject(token, project, trimmed);
+      await renameStoredProject(token, planOwnerId, project, trimmed);
       await refreshLibrary();
     }
-  }, [projectId, refreshLibrary, token]);
+  }, [planOwnerId, projectId, refreshLibrary, token]);
 
   const uploadPlan = useCallback(async (targetProjectId = projectId) => {
     let result;
@@ -1620,7 +1660,7 @@ export default function WalkthroughScreen() {
           roomType,
           designStyle,
           colorTone,
-          colorPalette: paletteForRequest(colorTone),
+          colorPalette: renderBrief?.colorPalette || paletteForRequest(colorTone),
           // Interior's two constants, verbatim. See the note above.
           material: "Natural oak",
           lighting: "Natural daylight",
@@ -2001,6 +2041,7 @@ export default function WalkthroughScreen() {
                   a second full-bleed hairline inside it cut the bar in two and
                   drew the eye to a divider instead of to the progress it sits
                   above. Space separates them now. */}
+              {stage < STAGES.length - 1 && (
               <View style={styles.stageBar}>
                 <View style={styles.stageBarRow}>
                   <LinearGradient colors={COLORS.gradientBrandDeep} style={styles.stageBarMark}>
@@ -2039,6 +2080,7 @@ export default function WalkthroughScreen() {
                 })}
                 </View>
               </View>
+              )}
             </SafeAreaView>
           </LinearGradient>
 
@@ -2811,6 +2853,7 @@ function WalkthroughStage({
   onSaveRender,
 }) {
   const insets = useSafeAreaInsets();
+  const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const showingAi = outputMode === "ai" && !!activeRender;
   const sheetOpen = !!inspected || panel === "ai" || panel === "renders";
   const showStick = viewMode === "walk" && !showingAi && !sheetOpen;
@@ -2831,6 +2874,13 @@ function WalkthroughStage({
   const showHint = !showingAi && !sheetOpen && !coached.current.has(viewMode);
 
   const status = describeScene(sceneInfo);
+  const selectedRoomConfig = roomConfigs[selectedRoom] || roomConfigs[0];
+  const selectedRoomLabel =
+    selectedRoomConfig?.name || selectedRoomConfig?.roomType || `Room ${selectedRoom + 1}`;
+
+  useEffect(() => {
+    if (!showRooms || showingAi || sheetOpen) setRoomPickerOpen(false);
+  }, [sheetOpen, showRooms, showingAi]);
 
   return (
     <View style={styles.viewerWrap}>
@@ -2925,7 +2975,6 @@ function WalkthroughStage({
               onPress={onBackToDesign}
             >
               <Ionicons name="chevron-back" size={18} color={COLORS.textPrimary} />
-              <Text style={styles.viewerBackText} numberOfLines={1}>Style</Text>
             </Pressable>
 
             <View style={styles.segmented} accessibilityRole="tablist">
@@ -2946,13 +2995,37 @@ function WalkthroughStage({
                     onPress={() => onChangeMode(item.key)}
                   >
                     <Ionicons name={item.icon} size={16} color={active ? COLORS.white : COLORS.textSecondary} />
-                    <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
-                      {item.label}
-                    </Text>
                   </Pressable>
                 );
               })}
             </View>
+
+            {showRooms && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Current room, ${selectedRoomLabel}`}
+                accessibilityHint="Shows the room selector"
+                accessibilityState={{ expanded: roomPickerOpen }}
+                style={({ pressed }) => [
+                  styles.roomJump,
+                  roomPickerOpen && styles.roomJumpOpen,
+                  pressed && styles.pressedSurface,
+                ]}
+                onPress={() => setRoomPickerOpen((open) => !open)}
+              >
+                <Ionicons
+                  name={roomIcon(selectedRoomConfig?.roomType)}
+                  size={15}
+                  color={COLORS.primaryDark}
+                />
+                <Text style={styles.roomJumpText} numberOfLines={1}>{selectedRoomLabel}</Text>
+                <Ionicons
+                  name={roomPickerOpen ? "chevron-up" : "chevron-down"}
+                  size={14}
+                  color={COLORS.textTertiary}
+                />
+              </Pressable>
+            )}
 
             {/* The time of day, named.
                 This was a bare icon in a circle, and a circle holding a moon is
@@ -2980,17 +3053,18 @@ function WalkthroughStage({
                 size={16}
                 color={night ? COLORS.white : COLORS.accent}
               />
-              <Text
-                style={[styles.lightToggleText, night && styles.lightToggleTextNight]}
-                numberOfLines={1}
-              >
-                {night ? "Night" : "Day"}
-              </Text>
             </Pressable>
           </View>
 
-          {showRooms && (
-            <RoomStrip rooms={roomConfigs} selected={selectedRoom} onSelect={onFocusRoom} />
+          {showRooms && roomPickerOpen && (
+            <RoomStrip
+              rooms={roomConfigs}
+              selected={selectedRoom}
+              onSelect={(index) => {
+                onFocusRoom(index);
+                setRoomPickerOpen(false);
+              }}
+            />
           )}
 
           {showHint && (
@@ -3359,6 +3433,7 @@ function RenderSheet({
   const [roomType, setRoomType] = useState(defaultRoomType || "Living Room");
   const [designStyle, setDesignStyle] = useState(defaultDesignStyle || "Modern");
   const [colorTone, setColorTone] = useState(defaultColorTone || "Neutral");
+  const [selectedColorPalette, setSelectedColorPalette] = useState(null);
 
   // Start each render from the room and whole-home choices already made. The
   // brief stays local until Render is pressed, so exploring options here does
@@ -3368,6 +3443,7 @@ function RenderSheet({
     setRoomType(defaultRoomType || "Living Room");
     setDesignStyle(defaultDesignStyle || "Modern");
     setColorTone(defaultColorTone || "Neutral");
+    setSelectedColorPalette(null);
   }, [defaultColorTone, defaultDesignStyle, defaultRoomType, visible]);
 
   const submitRender = () => {
@@ -3375,6 +3451,7 @@ function RenderSheet({
       roomType: bird ? "Floor Plan" : roomType,
       designStyle,
       colorTone,
+      colorPalette: paletteForRequest(colorTone, selectedColorPalette),
     });
   };
 
@@ -3449,7 +3526,11 @@ function RenderSheet({
                 shows each tone as the 60/30/10 trio it resolves to, names the
                 three colours, and lets someone add their own hex. Two ways to
                 choose a colour in one app is one too many. */}
-            <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
+            <ColorToneSelector
+              colorTone={colorTone}
+              setColorTone={setColorTone}
+              onPaletteChange={setSelectedColorPalette}
+            />
 
             {/* One line, and only the line that answers "what will I get?". */}
             <View style={styles.sheetNoteRow}>
@@ -6023,7 +6104,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: SPACING.base,
   },
-  overlayTop: { gap: SPACING.sm },
+  // Keep a small but deliberate pause below the top control bar before the
+  // optional room selector or coach hint begins.
+  overlayTop: { gap: SPACING.md },
   overlayBottom: { gap: SPACING.md },
 
   // One row, one height. Back, the view switcher and the light toggle were 48,
@@ -6034,15 +6117,15 @@ const styles = StyleSheet.create({
   // the control the step is for is never the one that gets squeezed.
   viewControls: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
   viewerBack: {
-    flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 1,
-    height: ms(46), paddingLeft: SPACING.xs + 2, paddingRight: SPACING.md,
+    flexShrink: 0, width: ms(44), height: ms(44),
+    alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
   viewerBackText: { ...TYPE.caption, color: COLORS.textPrimary },
   lightToggle: {
-    flexShrink: 0, flexDirection: "row", alignItems: "center", gap: SPACING.xs + 1,
-    height: ms(46), paddingHorizontal: SPACING.sm + 2,
+    flexShrink: 0, width: ms(44), height: ms(44),
+    alignItems: "center", justifyContent: "center",
     borderRadius: RADIUS.lg, backgroundColor: COLORS.surface,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
@@ -6053,7 +6136,7 @@ const styles = StyleSheet.create({
   lightToggleText: { ...TYPE.caption, color: COLORS.textPrimary },
   lightToggleTextNight: { color: COLORS.white },
   segmented: {
-    flex: 1, minWidth: 0, flexDirection: "row", padding: 4,
+    flexShrink: 0, width: ms(88), flexDirection: "row", padding: 4,
     backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
     borderWidth: 1, borderColor: COLORS.borderSubtle, ...SHADOW.sm,
   },
@@ -6061,19 +6144,29 @@ const styles = StyleSheet.create({
   // buttons either side of it.
   segment: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, height: ms(36), borderRadius: RADIUS.md,
+    height: ms(34), borderRadius: RADIUS.md,
   },
   segmentActive: { backgroundColor: COLORS.primaryDark },
   segmentPressed: { backgroundColor: COLORS.surfaceSunken },
   segmentText: { ...TYPE.caption, color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.white },
 
+  roomJump: {
+    flex: 1, minWidth: 0, height: ms(44),
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACING.xs,
+    paddingHorizontal: SPACING.sm, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.borderSubtle,
+    ...SHADOW.sm,
+  },
+  roomJumpOpen: { backgroundColor: COLORS.primaryTint, borderColor: COLORS.brand300 },
+  roomJumpText: { flex: 1, minWidth: 0, ...TYPE.caption, color: COLORS.textPrimary },
+
   // Negative margins let the strip bleed to the screen edges so a long room
   // list scrolls off the side instead of stopping inside the gutter. The
   // vertical padding is what stops SHADOW.sm being clipped by the ScrollView.
   roomStrip: { marginHorizontal: -SPACING.base, flexGrow: 0 },
   roomStripContent: {
-    paddingHorizontal: SPACING.base, paddingVertical: SPACING.xs, gap: SPACING.sm,
+    paddingHorizontal: SPACING.base, paddingVertical: 2, gap: SPACING.sm,
   },
   // Was 34pt tall — below the 44pt touch minimum, and these sit in a row where
   // a mis-tap jumps the camera into the wrong room. 40 plus hitSlop clears it.

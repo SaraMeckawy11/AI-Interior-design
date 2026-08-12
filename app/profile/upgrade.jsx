@@ -98,10 +98,9 @@ export default function Upgrade() {
     [offerings],
   );
 
-  // Play/RevenueCat owns the displayed currency. For an Egyptian Play account
-  // this is an EGP string (for example, "EGP 109.99"). Never replace a missing
-  // store response with a hardcoded USD price; that can show the wrong currency
-  // and amount immediately beside a button that charges something else.
+  // StoreKit/Play Billing owns the displayed currency. For an Egyptian store
+  // account this is an EGP string. Never replace a missing store response with
+  // a converted USD price: the label must exactly match the purchase sheet.
   const priceFor = useCallback(
     (_entry, storePackage) => storePackage?.product?.priceString || 'Unavailable',
     [],
