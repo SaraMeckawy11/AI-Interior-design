@@ -1,24 +1,39 @@
 import React, { useEffect } from "react";
 import { Redirect } from "expo-router";
-import { useAuthStore } from "@/authStore"; // Update if needed
-import Loader from "@/components/Loader"; // Optional loader
-import mobileAds from "react-native-google-mobile-ads"; // ✅ Import SDK
+import { Platform } from "react-native";
+import { requestTrackingPermissionsAsync } from "expo-tracking-transparency";
+import { useAuthStore } from "@/authStore";
+import Loader from "@/components/Loader";
+import mobileAds from "react-native-google-mobile-ads";
 
 export default function Index() {
   const { token, isCheckingAuth, checkAuth } = useAuthStore();
 
   useEffect(() => {
-    // Initialize AdMob SDK once on app startup
-    mobileAds()
-      .initialize()
-      .then(adapterStatuses => {
-        console.log("✅ AdMob initialized", adapterStatuses);
-      });
+    let cancelled = false;
 
-    checkAuth(); // This loads token & user from AsyncStorage
-  }, []);
+    const initializeAds = async () => {
+      // On iOS, ask before AdMob can access the advertising identifier. AdMob
+      // still works with limited signals when permission is denied, so
+      // declining never blocks the app.
+      if (Platform.OS === "ios") {
+        await requestTrackingPermissionsAsync().catch(() => undefined);
+      }
 
-  if (isCheckingAuth) return <Loader />; // or return null;
+      if (!cancelled) await mobileAds().initialize();
+    };
+
+    initializeAds().catch((error) => {
+      if (__DEV__) console.info("AdMob initialization failed:", error?.message);
+    });
+
+    checkAuth();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkAuth]);
+
+  if (isCheckingAuth) return <Loader />;
 
   return <Redirect href={token ? "/create" : "/(routes)/onboarding"} />;
 }

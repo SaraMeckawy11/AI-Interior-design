@@ -1,8 +1,12 @@
 import express from 'express';
 import { isAuthenticated } from '../middleware/auth.middleware.js';
 import CoinGrant from '../models/CoinGrant.js';
+import Design from '../models/Design.js';
 import Order from '../models/Order.js';
+import PrePremium from '../models/PrePremium.js';
 import User from '../models/User.js';
+import WalkthroughPlan from '../models/WalkthroughPlan.js';
+import cloudinary from '../lib/cloudinary.js';
 import {
   AD_COIN_REWARD,
   AD_DEDUPE_WINDOW_MS,
@@ -71,6 +75,62 @@ router.get('/me', isAuthenticated, async (req, res) => {
   } catch (err) {
     console.error('/api/users/me error:', err);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * Permanently delete the signed-in account and its user-owned data.
+ * Shared walkthrough scene cache rows contain no user identity and are kept.
+ */
+router.delete('/me', isAuthenticated, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const email = req.user.email;
+
+    const [designs, plans] = await Promise.all([
+      Design.find({ user: userId })
+        .select('imagePublicId generatedImagePublicId')
+        .lean(),
+      WalkthroughPlan.find({ user: userId })
+        .select('planImagePublicId thumbnailPublicId')
+        .lean(),
+    ]);
+
+    const publicIds = new Set([
+      ...designs.flatMap((design) => [
+        design.imagePublicId,
+        design.generatedImagePublicId,
+      ]),
+      ...plans.flatMap((plan) => [
+        plan.planImagePublicId,
+        plan.thumbnailPublicId,
+      ]),
+    ].filter(Boolean));
+
+    if (publicIds.size) {
+      const results = await Promise.allSettled(
+        [...publicIds].map((publicId) => cloudinary.uploader.destroy(publicId)),
+      );
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      if (failed) console.warn(`Account deletion could not remove ${failed} media assets.`);
+    }
+
+    await Promise.all([
+      CoinGrant.deleteMany({ user: userId }),
+      Design.deleteMany({ user: userId }),
+      Order.deleteMany({ user: userId }),
+      WalkthroughPlan.deleteMany({ user: userId }),
+      PrePremium.deleteMany({ email }),
+    ]);
+    await User.deleteOne({ _id: userId });
+
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Account deletion failed:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Your account could not be deleted. Please try again.',
+    });
   }
 });
 

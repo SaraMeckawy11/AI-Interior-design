@@ -54,6 +54,12 @@
       "expo-file-system",
       "expo-localization",
       [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Allow Livinai to use app activity to provide more relevant ads and measure advertising performance."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
