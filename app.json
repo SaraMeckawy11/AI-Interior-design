@@ -42,7 +42,7 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-4470538534931449~7850095110",
-          "iosAppId": "ca-app-pub-4470538534931449~7850095110"
+          "iosAppId": "ca-app-pub-4470538534931449~6178305198"
         }
       ],
       "expo-router",

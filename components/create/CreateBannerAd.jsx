@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { InteractionManager, View, Text, StyleSheet } from "react-native";
-import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
+import { InteractionManager, Platform, View, Text, StyleSheet } from "react-native";
+import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
 import COLORS from "../../constants/colors";
 
-// const AD_UNIT_ID = __DEV__ ? TestIds.BANNER : "ca-app-pub-4470538534931449/9120930286"; // real unit ID
-  const AD_UNIT_ID = "ca-app-pub-4470538534931449/9120930286"; // real unit ID
+const AD_UNIT_ID = __DEV__
+  ? TestIds.BANNER
+  : Platform.select({
+      android: "ca-app-pub-4470538534931449/9120930286",
+      ios: "ca-app-pub-4470538534931449/3114630339",
+    });
 
 /** 300 x 250, the MEDIUM_RECTANGLE this renders. */
 const AD_HEIGHT = 250;

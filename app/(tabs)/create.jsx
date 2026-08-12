@@ -4,6 +4,7 @@ import {
   Easing,
   Image,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +29,10 @@ import { AppOpenAd, AdEventType, TestIds } from "react-native-google-mobile-ads"
 
 const APP_OPEN_AD_UNIT_ID = __DEV__
   ? TestIds.APP_OPEN
-  : "ca-app-pub-4470538534931449/1696483792";
+  : Platform.select({
+      android: "ca-app-pub-4470538534931449/1696483792",
+      ios: "ca-app-pub-4470538534931449/9217004258",
+    });
 
 const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
   requestNonPersonalizedAdsOnly: false,

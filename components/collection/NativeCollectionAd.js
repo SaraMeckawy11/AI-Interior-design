@@ -1,11 +1,14 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
+import { Platform, View, Text, StyleSheet } from "react-native";
+import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
 
 
-const AD_UNIT_ID = __DEV__? "ca-app-pub-3940256099942544/6300978111" : "ca-app-pub-4470538534931449/9120930286";
-
-// const AD_UNIT_ID = "ca-app-pub-4470538534931449/9120930286";
+const AD_UNIT_ID = __DEV__
+  ? TestIds.BANNER
+  : Platform.select({
+      android: "ca-app-pub-4470538534931449/9120930286",
+      ios: "ca-app-pub-4470538534931449/3114630339",
+    });
 
 export default function NativeCollectionAd() {
   return (
