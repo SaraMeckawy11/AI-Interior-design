@@ -28,7 +28,9 @@ export default function LoginForm({ setModalVisible }) {
       return;
     }
     setModalVisible(false);
-    router.push("/create"); // ✅ redirect after login
+    // `replace` so back from Create leaves the app rather than returning to the
+    // login form the user has already cleared.
+    router.replace("/create");
   };
 
   return (

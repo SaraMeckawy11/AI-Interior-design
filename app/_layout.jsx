@@ -3,6 +3,7 @@ import { Stack } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useAuthStore } from "../authStore";
 import { ensureRevenueCatConfigured } from "../lib/revenueCat";
+import AndroidBackGuard from "../components/navigation/AndroidBackGuard";
 
 import {
   Poppins_600SemiBold,
@@ -57,9 +58,21 @@ export default function RootLayout() {
     };
   }, [fetchUser, isCheckingAuth, token, user]);
 
+  // Where back lands when a screen has nothing under it. Signing out is a
+  // `replace` to onboarding, so an unauthenticated session's home is that
+  // screen, not a Create tab the user cannot use.
+  const home = token ? "/create" : "/(routes)/onboarding";
+
   return (
     <SafeAreaProvider>
-      <Stack screenOptions={{ headerShown: false }}>
+      <AndroidBackGuard home={home} />
+      {/*
+        `gestureEnabled` is the iOS swipe back. It is the default for a stack,
+        but every screen here draws its own header with `headerShown: false`, so
+        the gesture is the only affordance the platform contributes — worth
+        stating rather than inheriting.
+      */}
+      <Stack screenOptions={{ headerShown: false, gestureEnabled: true }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(routes)/onboarding/index" />
         <Stack.Screen name="(tabs)" />

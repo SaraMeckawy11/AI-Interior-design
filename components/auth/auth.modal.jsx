@@ -45,7 +45,10 @@ export default function AuthModal({ setModalVisible }) {
     if (!result?.success) throw new Error(result?.error || "Could not save your login.");
 
     setModalVisible(false);
-    router.push("/create");
+    // `replace`, not `push`: signing in is not a step to go back from. Pushing
+    // left onboarding under the tabs, so the first back press after a sign-in
+    // dropped the user onto the sign-in screen they had just finished with.
+    router.replace("/create");
   };
 
   const describeGoogleError = (error) => {

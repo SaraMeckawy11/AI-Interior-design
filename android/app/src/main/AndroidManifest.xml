@@ -15,6 +15,27 @@
     </intent>
   </queries>
 
+  <!--
+    `enableOnBackInvokedCallback="false"` is what keeps the back gesture inside
+    the app.
+
+    At targetSdk 36 Android 16 turns predictive back on by default, and it then
+    stops calling `Activity.onBackPressed` and stops dispatching KEYCODE_BACK.
+    React Native 0.79 still routes the hardware back press through exactly those
+    two, so with predictive back on, JavaScript never hears about the gesture at
+    all: React Navigation cannot pop, `BackHandler` listeners never fire, and the
+    system does the only thing left to it and closes the activity. Every back
+    swipe left the app instead of moving one screen back inside it.
+
+    Opting out restores the legacy dispatch, which is still supported on Android
+    16 (`OnBackPressedCallback` keeps working; only the platform's
+    `OnBackInvokedCallback` is ignored). The cost is the predictive back preview
+    animation, which the app never had.
+
+    This is a stopgap tied to the React Native version, not a preference: RN 0.81
+    handles the new callback, so drop this line on that upgrade. AdMob's own
+    AdActivity already ships the same opt-out, so nothing regresses there.
+  -->
   <application
     android:name=".MainApplication"
     android:label="@string/app_name"
@@ -25,7 +46,8 @@
     android:supportsRtl="true"
     android:requestLegacyExternalStorage="true"
     android:fullBackupContent="@xml/secure_store_backup_rules"
-    android:dataExtractionRules="@xml/secure_store_data_extraction_rules">
+    android:dataExtractionRules="@xml/secure_store_data_extraction_rules"
+    android:enableOnBackInvokedCallback="false">
 
     <!--
       At targetSdk 36 Android ignores android:screenOrientation on displays of

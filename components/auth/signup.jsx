@@ -34,7 +34,9 @@ export default function SignupForm({ setModalVisible }) {
         Alert.alert("Error", result.error);
       } else {
         setModalVisible(false);
-        router.push("/create");
+        // `replace` so back from Create leaves the app rather than returning to
+        // the signup form for an account that now exists.
+        router.replace("/create");
       }
     } catch (err) {
       console.error("Manual signup error:", err.message);

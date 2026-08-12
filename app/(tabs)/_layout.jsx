@@ -18,11 +18,16 @@ const TABS = [
  * navigator reserves no space for it. Each tab screen therefore pads its own
  * scrollable content by `TAB_BAR_CLEARANCE` — see that module for why the
  * clearance is defined in one place instead of per screen.
+ *
+ * `backBehavior="history"` because back should undo the last thing the user did.
+ * The default jumps straight to Create from any tab, which loses a step: from
+ * Profile opened out of Collection, back belongs on Collection.
  */
 export default function TabLayout() {
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
+      backBehavior="history"
       screenOptions={{ headerShown: false }}
     >
       {TABS.map((tab) => (
