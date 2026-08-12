@@ -6294,13 +6294,18 @@ const styles = StyleSheet.create({
   renderBody: { ...TYPE.small, color: "rgba(255,255,255,0.80)", textAlign: "center" },
 
   // ── Movement stick ───────────────────────────────────────────────────────
-  // Bottom left, not bottom right. Looking around is a drag anywhere on the
-  // room, so putting the stick under the same thumb meant one hand doing both
-  // jobs and neither of them well. On the left it belongs to the left thumb and
-  // the right one is free to look, which is how every phone app that asks for
-  // both has laid this out for fifteen years.
+  // Bottom right, under the thumb most people steer with.
+  //
+  // It sat on the left on the games convention — move with the left thumb, look
+  // with the right — but that convention assumes two thumbs already on the
+  // screen, which is how a game is held and not how this is. Livinai is used one
+  // handed, in a room, phone in the dominant hand, and reaching the far bottom
+  // corner with that hand means shifting grip every time you want to take a
+  // step. Looking is a drag anywhere on the room, so it does not need a corner
+  // of its own; walking does, and it should be the corner the thumb is already
+  // resting in.
   stickBase: {
-    alignSelf: "flex-start", width: STICK_BASE, height: STICK_BASE, borderRadius: RADIUS.pill,
+    alignSelf: "flex-end", width: STICK_BASE, height: STICK_BASE, borderRadius: RADIUS.pill,
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.80)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", ...SHADOW.md,
