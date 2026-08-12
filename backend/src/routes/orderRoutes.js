@@ -6,7 +6,10 @@ import { isAuthenticated } from "../middleware/auth.middleware.js";
 import axios from "axios";
 import { packForProductId } from "../config/pricing.js";
 import { grantCoins, purchaseReference, refundReference } from "../services/coins.js";
-import { getActiveSubscription } from "../services/revenuecat.js";
+import {
+  getActiveSubscription,
+  getAnyActiveSubscription,
+} from "../services/revenuecat.js";
 
 const router = express.Router();
 
@@ -29,6 +32,36 @@ async function syncSubscriptionFlag(userId) {
     endDate: { $gt: new Date() },
   });
   await User.findByIdAndUpdate(userId, { isSubscribed: Boolean(active) });
+}
+
+async function saveVerifiedSubscription(userId, verified, price = 0) {
+  let order = await Order.findOne({
+    user: userId,
+    transactionId: verified.transactionId,
+  });
+
+  if (!order) {
+    await Order.updateMany(
+      { user: userId, isActive: true },
+      { $set: { isActive: false } },
+    );
+    order = new Order({ user: userId });
+  }
+
+  order.plan = verified.productId;
+  order.price = Number.isFinite(Number(price)) ? Number(price) : 0;
+  order.billingCycle = billingCycleForProduct(verified.productId);
+  order.paymentStatus = "paid";
+  order.startDate = new Date(verified.purchaseDate);
+  order.endDate = new Date(verified.expiresDate);
+  order.transactionId = verified.transactionId;
+  order.entitlementId = verified.entitlementId;
+  order.autoRenew = true;
+  order.isActive = true;
+
+  await order.save();
+  await User.findByIdAndUpdate(userId, { isSubscribed: true });
+  return order;
 }
 
 async function orderForEvent(userId, event, { allowProductFallback = true } = {}) {
@@ -74,31 +107,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       });
     }
 
-    let order = await Order.findOne({
-      user: req.user._id,
-      transactionId: verified.transactionId,
-    });
-    if (!order) {
-      await Order.updateMany(
-        { user: req.user._id, isActive: true },
-        { $set: { isActive: false } },
-      );
-      order = new Order({ user: req.user._id });
-    }
-
-    order.plan = verified.productId;
-    order.price = Number.isFinite(Number(price)) ? Number(price) : 0;
-    order.billingCycle = billingCycleForProduct(verified.productId);
-    order.paymentStatus = "paid";
-    order.startDate = new Date(verified.purchaseDate);
-    order.endDate = new Date(verified.expiresDate);
-    order.transactionId = verified.transactionId;
-    order.entitlementId = verified.entitlementId;
-    order.autoRenew = true;
-    order.isActive = true;
-
-    await order.save();
-    await User.findByIdAndUpdate(req.user._id, { isSubscribed: true });
+    const order = await saveVerifiedSubscription(req.user._id, verified, price);
 
     res.status(201).json({ success: true, order });
   } catch (err) {
@@ -110,6 +119,45 @@ router.post("/", isAuthenticated, async (req, res) => {
       message: unavailable
         ? "Store verification is temporarily unavailable. Pro will activate automatically if you were charged."
         : "Order creation failed.",
+    });
+  }
+});
+
+/**
+ * RESTORE an existing App Store / Play subscription after reinstall or login.
+ * RevenueCat is the source of truth; the client cannot choose what to restore.
+ */
+router.post("/restore", isAuthenticated, async (req, res) => {
+  try {
+    const verified = await getAnyActiveSubscription(req.user._id);
+    if (!verified) {
+      await syncSubscriptionFlag(req.user._id);
+      return res.status(404).json({
+        success: false,
+        message: "No active subscription was found for this account.",
+      });
+    }
+
+    const existing = await Order.findOne({
+      user: req.user._id,
+      transactionId: verified.transactionId,
+    }).sort({ createdAt: -1 });
+    const order = await saveVerifiedSubscription(
+      req.user._id,
+      verified,
+      existing?.price || 0,
+    );
+
+    return res.status(200).json({ success: true, order });
+  } catch (err) {
+    console.error("Subscription restore failed:", err);
+    const unavailable =
+      err?.code === "REVENUECAT_NOT_CONFIGURED" || err?.response?.status >= 500;
+    return res.status(unavailable ? 503 : 500).json({
+      success: false,
+      message: unavailable
+        ? "The store could not be reached. Please try restoring again in a moment."
+        : "Subscription restore failed.",
     });
   }
 });

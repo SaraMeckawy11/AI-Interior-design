@@ -1626,9 +1626,10 @@ export default function WalkthroughScreen() {
           product: "walkthrough",
           // The one piece of text that is the user's own — the Notes field on
           // the Style step — exactly as Interior sends its optional prompt.
-          // The note written for this render, falling back to the plan's own
-          // notes so a plan saved under the old Style step keeps its brief.
-          customPrompt: (renderBrief?.note || settings.notes || "").trim(),
+          // There is no free-text field any more, on either surface. A plan
+          // saved while the Style step still had one keeps its brief, so an
+          // older plan renders the way it always did.
+          customPrompt: (settings.notes || "").trim(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2526,12 +2527,13 @@ export default function WalkthroughScreen() {
                             the way to a home, to arrive at the answer the
                             default was going to give.
 
-                            The notes box has moved to the Render sheet. In 3D it
-                            was a fourteen-word keyword match — nine colours plus
-                            walnut, oak, minimal and luxury — so "calm lighting,
-                            no glossy surfaces" did nothing at all. Where it is
-                            read properly is the AI brief, which is written next
-                            to the button that pays for it. */}
+                            The notes box is gone from here and from the render
+                            sheet. In 3D it was a fourteen-word keyword match —
+                            nine colours plus walnut, oak, minimal and luxury —
+                            so "calm lighting, no glossy surfaces" did nothing
+                            at all. A plan saved while it existed keeps its text
+                            and still sends it, so an older plan renders the way
+                            it always did. */}
                         <ChipRow label="Floor finish" options={FLOOR_FINISHES} value={settings.floorFinish} onChange={(v) => updateSetting("floorFinish", v)} />
                         <ChipRow label="Wall finish" options={WALL_FINISHES} value={settings.wallFinish} onChange={(v) => updateSetting("wallFinish", v)} />
 
@@ -3351,7 +3353,6 @@ function RenderSheet({
   const [roomType, setRoomType] = useState(defaultRoomType || "Living Room");
   const [designStyle, setDesignStyle] = useState(defaultDesignStyle || "Modern");
   const [colorTone, setColorTone] = useState(defaultColorTone || "Neutral");
-  const [note, setNote] = useState("");
 
   // Start each render from the room and whole-home choices already made. The
   // brief stays local until Render is pressed, so exploring options here does
@@ -3361,7 +3362,6 @@ function RenderSheet({
     setRoomType(defaultRoomType || "Living Room");
     setDesignStyle(defaultDesignStyle || "Modern");
     setColorTone(defaultColorTone || "Neutral");
-    setNote("");
   }, [defaultColorTone, defaultDesignStyle, defaultRoomType, visible]);
 
   const submitRender = () => {
@@ -3369,7 +3369,6 @@ function RenderSheet({
       roomType: bird ? "Floor Plan" : roomType,
       designStyle,
       colorTone,
-      note: note.trim(),
     });
   };
 
@@ -3445,29 +3444,6 @@ function RenderSheet({
                 three colours, and lets someone add their own hex. Two ways to
                 choose a colour in one app is one too many. */}
             <ColorToneSelector colorTone={colorTone} setColorTone={setColorTone} />
-
-            {/* The one place free text is read properly.
-                This lived on the Style step, where the 3D exporter matched it
-                against fourteen words — nine colours plus walnut, oak, minimal
-                and luxury — so most of what anyone wrote there did nothing. It
-                reaches the image model in full, as the client note in the brief,
-                which is why it belongs next to the button that pays for one. */}
-            <View style={styles.notesHead}>
-              <Text style={styles.fieldLabel}>Anything else? (optional)</Text>
-              {/* The field silently stopped accepting characters at 240 with
-                  nothing to say it had. */}
-              <Text style={styles.notesCount}>{note.length}/240</Text>
-            </View>
-            <TextInput
-              style={styles.notes}
-              value={note}
-              accessibilityLabel="Notes for this render"
-              onChangeText={setNote}
-              placeholder="Keep the olive tree · warm evening feel · nothing glossy"
-              placeholderTextColor={COLORS.placeholderText}
-              multiline
-              maxLength={240}
-            />
 
             {/* One line, and only the line that answers "what will I get?". */}
             <View style={styles.sheetNoteRow}>
@@ -5819,12 +5795,6 @@ const styles = StyleSheet.create({
   },
   switchKnobOn: { alignSelf: "flex-end" },
 
-  notesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  notesCount: { ...TYPE.caption, fontSize: 10.5, color: COLORS.textTertiary, marginBottom: SPACING.sm },
-  notes: {
-    minHeight: ms(92), borderRadius: RADIUS.md, backgroundColor: COLORS.surfaceSunken,
-    padding: SPACING.md, ...TYPE.small, color: COLORS.textPrimary, textAlignVertical: "top",
-  },
 
   empty: {
     alignItems: "center", gap: SPACING.md, paddingVertical: SPACING.xxl,

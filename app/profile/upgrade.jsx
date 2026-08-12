@@ -192,6 +192,53 @@ export default function Upgrade() {
     }
   };
 
+  const restorePurchases = async () => {
+    setBusy('restore');
+    try {
+      const user = await fetchUser();
+      if (!user?._id) throw new Error('Sign in to restore purchases.');
+
+      const storeReady = await ensureRevenueCatConfigured(user._id);
+      if (!storeReady) throw new Error('The store is not available on this device.');
+
+      const customerInfo = await purchases.restorePurchases();
+      const activeEntitlements = customerInfo?.entitlements?.active || {};
+      if (!Object.keys(activeEntitlements).length) {
+        setDialog({
+          title: 'No active purchases found',
+          message: 'Make sure you are signed in with the Apple ID or Google account that made the purchase.',
+        });
+        return;
+      }
+
+      const response = await fetch(apiUrl('/api/orders/restore'), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Your subscription could not be restored.');
+      }
+
+      await fetchUser();
+      setIsSubscribed(true);
+      setDialog({
+        title: 'Purchases restored',
+        message: 'Your Livinai Pro access is active on this device again.',
+      });
+    } catch (error) {
+      setDialog({
+        title: 'Could not restore purchases',
+        message: error?.message || 'Check your connection and try again.',
+      });
+    } finally {
+      setBusy('');
+    }
+  };
+
   const buyCoins = async () => {
     const pack = packs.find((item) => item.id === selection.id);
     if (!pack?.storePackage) {
@@ -273,6 +320,7 @@ export default function Upgrade() {
       onCloseDialog={() => setDialog(null)}
       onManageSubscription={() => router.push('/profile/manageSubscription')}
       onPurchase={buyingPlan ? handleUpgrade : buyCoins}
+      onRestorePurchases={restorePurchases}
       packs={packs}
       plans={plans}
       priceFor={priceFor}

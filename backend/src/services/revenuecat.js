@@ -54,11 +54,12 @@ export async function hasNonSubscriptionPurchase(appUserId, productId, transacti
 }
 
 /** Return RevenueCat-verified subscription data, or null while it is absent/inactive. */
-export async function getActiveSubscription(appUserId, productId, transactionId) {
+async function findActiveSubscription(appUserId, { productId, transactionId } = {}) {
   const subscriber = await getRevenueCatCustomer(appUserId);
   const subscriptions = subscriber?.subscriptions || {};
   const match = Object.entries(subscriptions).find(([storedProductId, subscription]) => {
-    if (!sameStoreProduct(storedProductId, productId) || subscription?.refunded_at) return false;
+    if (productId && !sameStoreProduct(storedProductId, productId)) return false;
+    if (subscription?.refunded_at) return false;
     if (
       transactionId
       && subscription?.store_transaction_id
@@ -87,4 +88,14 @@ export async function getActiveSubscription(appUserId, productId, transactionId)
     expiresDate: subscription.expires_date,
     entitlementId: entitlement[0],
   };
+}
+
+/** Verify one just-purchased product before recording it locally. */
+export function getActiveSubscription(appUserId, productId, transactionId) {
+  return findActiveSubscription(appUserId, { productId, transactionId });
+}
+
+/** Find any active entitled subscription when a customer restores purchases. */
+export function getAnyActiveSubscription(appUserId) {
+  return findActiveSubscription(appUserId);
 }

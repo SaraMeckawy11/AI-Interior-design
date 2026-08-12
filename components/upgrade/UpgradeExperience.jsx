@@ -49,6 +49,7 @@ export default function UpgradeExperience({
   onCloseDialog,
   onManageSubscription,
   onPurchase,
+  onRestorePurchases,
   packs,
   plans,
   priceFor,
@@ -178,6 +179,8 @@ export default function UpgradeExperience({
             priceFor={priceFor}
             setSelection={setSelection}
             onManageSubscription={onManageSubscription}
+            onRestorePurchases={onRestorePurchases}
+            restoring={busy === 'restore'}
           />
         ) : (
           <CoinOptions
@@ -259,7 +262,16 @@ function PurchaseTab({ active, label, onPress }) {
   );
 }
 
-function PlanOptions({ isSelected, isSubscribed, plans, priceFor, setSelection, onManageSubscription }) {
+function PlanOptions({
+  isSelected,
+  isSubscribed,
+  plans,
+  priceFor,
+  setSelection,
+  onManageSubscription,
+  onRestorePurchases,
+  restoring,
+}) {
   return (
     <>
       <View style={styles.sectionHeadingRow}>
@@ -304,6 +316,24 @@ function PlanOptions({ isSelected, isSubscribed, plans, priceFor, setSelection, 
           <Ionicons name="chevron-forward" size={16} color={COLORS.textSecondary} />
         </Pressable>
       ) : null}
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Restore previous purchases"
+        accessibilityState={{ busy: restoring, disabled: restoring }}
+        disabled={restoring}
+        style={({ pressed }) => [styles.manageButton, pressed && styles.pressed]}
+        onPress={onRestorePurchases}
+      >
+        {restoring ? (
+          <ActivityIndicator size="small" color={COLORS.textSecondary} />
+        ) : (
+          <Ionicons name="refresh-outline" size={16} color={COLORS.textSecondary} />
+        )}
+        <Text style={styles.manageButtonText}>
+          {restoring ? 'Restoring purchases…' : 'Restore purchases'}
+        </Text>
+      </Pressable>
     </>
   );
 }
