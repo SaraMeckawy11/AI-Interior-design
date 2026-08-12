@@ -494,6 +494,70 @@ backArrow: {
   padding: moderateScale(4),  // touch area, but invisible
 },
 
+/**
+ * Create-path navigation bar.
+ *
+ * The brand and the back arrow used to be positioned independently, and on a
+ * notched iPhone neither landed where it should: the title scrolled inside the
+ * ScrollView with no top inset, so it sat behind the camera cutout, and the
+ * arrow was an absolutely positioned SafeAreaView that added the inset *on top
+ * of* its own 18pt offset — pushing it past the title and onto the form. One
+ * bar owns both now: arrow in the leading position, brand optically centred
+ * against it, at the 44pt bar height, 44pt touch target and ~16pt leading
+ * margin iOS expects. The screen applies the top inset to `createHeader`.
+ */
+createHeader: {
+  backgroundColor: COLORS.background,
+  paddingHorizontal: moderateScale(8),
+  paddingBottom: verticalScale(6),
+  zIndex: 10,
+},
+
+createHeaderBar: {
+  minHeight: moderateScale(44),
+  flexDirection: "row",
+  alignItems: "center",
+},
+
+/** Centred against the bar itself, so the coins pill can't shift the brand. */
+createHeaderTitleWrap: {
+  ...StyleSheet.absoluteFillObject,
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+createHeaderButton: {
+  width: moderateScale(44),
+  height: moderateScale(44),
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+createHeaderSpacer: {
+  flex: 1,
+},
+
+createHeaderCoins: {
+  backgroundColor: COLORS.roomCard,
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  paddingHorizontal: moderateScale(10),
+  paddingVertical: verticalScale(4),
+  borderRadius: moderateScale(999),
+  marginRight: moderateScale(8),
+  shadowColor: "#000",
+  shadowOpacity: 0.06,
+  shadowRadius: 6,
+  elevation: 2,
+},
+
+createHeaderCoinsText: {
+  fontSize: moderateScale(12),
+  fontWeight: "500",
+  color: COLORS.primaryDark,
+  fontFamily: "Poppins_500Medium",
+},
+
   // Floor plan screen — optional second line under brand
   planHeaderTagline: {
     fontSize: moderateScale(12),

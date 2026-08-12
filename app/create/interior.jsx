@@ -27,7 +27,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import RoomTypeSelector from '../../components/create/RoomTypeSelector';
 import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { apiUrl } from '../../configs/api';
@@ -56,6 +56,9 @@ export default function Interior() {
   // Back means "return to Create", in one press, however many copies of this
   // screen the hub happened to push. See lib/useCreateFlowExit.js.
   const exitToCreate = useCreateFlowExit();
+  // The header is a real bar, not a floating arrow, so it owns the top inset
+  // itself. See createHeader in assets/styles/create/create.styles.js.
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const revealFocusedInput = useCallback((nodeHandle) => {
     setTimeout(() => {
@@ -372,18 +375,32 @@ export default function Interior() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        {/* 🔙 Floating Back Button */}
-        <SafeAreaView style={styles.backButtonContainer}>
-        <TouchableOpacity
-          onPress={exitToCreate}
-          style={styles.backArrow}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Back to Create"
-        >
+      {/* Navigation bar: back, brand, balance — clear of the camera cutout. */}
+      <View style={[styles.createHeader, { paddingTop: insets.top }]}>
+        <View style={styles.createHeaderBar}>
+          <View pointerEvents="none" style={styles.createHeaderTitleWrap}>
+            <Text style={styles.title} numberOfLines={1}>LIVINAI</Text>
+          </View>
+
+          <TouchableOpacity
+            onPress={exitToCreate}
+            style={styles.createHeaderButton}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back to Create"
+          >
             <Ionicons name="chevron-back" size={26} color={COLORS.textPrimary} />
-        </TouchableOpacity>
-        </SafeAreaView>
+          </TouchableOpacity>
+
+          <View style={styles.createHeaderSpacer} />
+
+          {!isSubscribed && !isPremium && freeDesignsUsed >= FREE_DESIGNS && (
+            <View style={styles.createHeaderCoins}>
+              <Text style={styles.createHeaderCoinsText}>{coins} Coins</Text>
+            </View>
+          )}
+        </View>
+      </View>
 
       <ScrollView
         ref={scrollRef}
@@ -394,16 +411,6 @@ export default function Interior() {
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
         <View>
-          <View style={styles.titleHeader}>
-            <Text style={styles.title}>LIVINAI</Text>
-
-            {!isSubscribed && !isPremium && freeDesignsUsed >= FREE_DESIGNS && (
-              <View style={styles.coinsContainer}>
-                <Text style={styles.coinsText}>{coins} Coins</Text>
-              </View>
-            )}
-          </View>
-
           <View style={styles.form}>
             <View style={styles.formGroup}>
               <View style={styles.labelRow}>
