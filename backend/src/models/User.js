@@ -76,9 +76,31 @@ const userSchema = new mongoose.Schema(
       type: Number, 
       default: 0 
     },
-    adCoins: { 
-      type: Number, 
-      default: 0 
+    adCoins: {
+      type: Number,
+      default: 0
+    },
+
+    // ── Fair use ───────────────────────────────────────────────────────────
+    // Written only by `services/renderLimits.js`, and only through atomic
+    // updates — never by `user.save()`, which would let two requests arriving
+    // together each write the count they read.
+
+    /** When the render running on this account took the slot; null when idle. */
+    renderLeaseAt: {
+      type: Date,
+      default: null,
+    },
+    /** The UTC day `rendersToday` is counting, as `YYYY-MM-DD`. */
+    renderDay: {
+      type: String,
+      default: "",
+    },
+    /** Renders started on `renderDay`. Counted for every account, capped only
+     *  for subscriptions — coins meter themselves. */
+    rendersToday: {
+      type: Number,
+      default: 0,
     },
   },
   { timestamps: true }

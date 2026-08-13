@@ -1705,6 +1705,17 @@ export default function WalkthroughScreen() {
         router.push("/profile/upgrade");
         return;
       }
+      // A fair-use stop: one render at a time, and a ceiling on the day. Not a
+      // paywall and not a failure — the account is already paid, so it gets the
+      // reason here and no trip to a screen that sells it what it has.
+      if (response.status === 429) {
+        setNotice(
+          data.reason
+            || data.message
+            || "You have reached today's fair-use limit on renders.",
+        );
+        return;
+      }
       if (!response.ok) throw new Error(data.message || "The AI render could not be generated.");
       const result = data.generatedImage || data.image;
       if (!result) throw new Error("The AI service returned no image.");
@@ -1726,7 +1737,12 @@ export default function WalkthroughScreen() {
       setActiveRenderId(entry.id);
       setOutputMode("ai");
     } catch (error) {
-      setNotice(error.message || "The AI render could not be generated.");
+      // The coin comes back for a render that did not arrive, so say so — a
+      // failure that leaves somebody counting their balance to find out whether
+      // they were charged is the same distrust as charging them.
+      setNotice(
+        `${error.message || "The AI render could not be generated."} You have not been charged.`,
+      );
     } finally {
       pendingRenderBrief.current = null;
       setRendering(false);

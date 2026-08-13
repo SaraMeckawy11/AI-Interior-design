@@ -1335,6 +1335,16 @@ export default function PlanEditor() {
         router.push("/profile/upgrade");
         return;
       }
+      // A fair-use stop: one render at a time, and a ceiling on the day. Not a
+      // paywall and not a failure — the account is already paid, so it gets the
+      // reason rather than being sent to buy what it has.
+      if (response.status === 429) {
+        showModal(
+          data.limitKind === "busy" ? "One at a time" : "That's today's limit",
+          data.reason || data.message || "You have reached today's fair-use limit on renders.",
+        );
+        return;
+      }
       if (!response.ok) throw new Error(data.message || "Something went wrong");
 
       const imageUri =
@@ -1363,14 +1373,14 @@ export default function PlanEditor() {
       } else {
         showModal(
           "Generation Failed",
-          "There was a problem generating your design. Please try again later.",
+          "There was a problem generating your design. You have not been charged for it — please try again.",
         );
       }
     } catch (error) {
       console.error("Error generating design:", error);
       showModal(
         "Generation Failed",
-        "There was a problem generating your design. Please try again later.",
+        "There was a problem generating your design. You have not been charged for it — please try again.",
       );
     } finally {
       setLoading(false);

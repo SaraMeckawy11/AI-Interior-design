@@ -515,8 +515,18 @@ function PurchaseFooter({ activePack, activePlan, busy, buyingPlan, insets, isSu
             )}
           </LinearGradient>
         </Pressable>
+        {/*
+          "Unlimited" is true for anybody who uses the app, and there is a
+          fair-use ceiling behind it that a real evening of redecorating never
+          reaches — one render at a time, and a limit on the day. Saying so here
+          is the difference between a disclosed policy and an unlimited plan that
+          quietly is not one, which is the version that gets refund requests and
+          store complaints.
+        */}
         <Text style={styles.footerNote}>
-          {buyingPlan ? 'Renews automatically. Cancel anytime.' : 'One-time purchase. Coins never expire.'}
+          {buyingPlan
+            ? 'Renews automatically. Cancel anytime. Unlimited subject to fair use.'
+            : 'One-time purchase. Coins never expire.'}
         </Text>
       </View>
     </View>

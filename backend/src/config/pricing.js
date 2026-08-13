@@ -85,3 +85,51 @@ export const MAX_AD_COINS_PER_DAY = 20;
  * time bucket, so two calls inside the same ten seconds are the same ad.
  */
 export const AD_DEDUPE_WINDOW_MS = 10_000;
+
+/**
+ * Fair use, on the side of the ledger that has no meter.
+ *
+ * Coins bound themselves: a render costs one, and an account that has none
+ * cannot start another. A subscription deliberately has no such stop — it is
+ * sold as unlimited and should feel that way — which leaves every render a
+ * subscriber starts billing an L40S against a fixed $9.99, or against a yearly
+ * plan that nets nearer $4 a month. Nothing about an account being paid stops it
+ * being scripted or shared.
+ *
+ * Neither number below is a price and neither is meant to be reached. Somebody
+ * redecorating renders ten or twenty rooms in a month, one at a time, waiting for
+ * each; a day that runs to forty is not that person, and two at once is not that
+ * person either. They cap the worst case at a known figure and are invisible to
+ * everyone else.
+ */
+
+/**
+ * Renders one subscription may run in a day, counted per UTC day.
+ *
+ * Not applied to coin or free renders — those are already paid for one at a
+ * time, and refusing somebody who bought a hundred coins the fiftieth render
+ * they paid for would be taking their money and then rationing it. Their
+ * renders are still counted, so the real distribution is on record before this
+ * number is ever tuned.
+ */
+export const MAX_RENDERS_PER_DAY = 40;
+
+/**
+ * How long one account may hold the single render slot before the hold is
+ * treated as abandoned.
+ *
+ * The slot is the limit that actually bites, and it does so on both sides of the
+ * ledger. A day's ceiling bounds what a shared or scripted login can spend, but
+ * only afterwards, and only for a subscription — it does nothing about ten
+ * requests arriving at the same instant, each reading the same one-coin balance
+ * and each finding it sufficient. One render in flight is what makes a balance
+ * mean something, and it is free: nobody redecorating renders two rooms at once.
+ *
+ * A hold has to expire, because the process that took it can die — a deploy
+ * mid-render, an unhandled throw — and a hold that outlived its request would
+ * lock the account out of the app permanently. Ten minutes is longer than any
+ * honest render (a warm one answers in seconds; the RunPod fallback is budgeted
+ * 150s after Modal has already given up) and short enough that a person who hit
+ * the one crash that leaks a hold is not locked out for the evening.
+ */
+export const RENDER_LEASE_MS = 10 * 60 * 1000;

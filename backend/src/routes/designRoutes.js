@@ -5,6 +5,11 @@ import Design from "../models/Design.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { FREE_DESIGNS, coinCost } from "../config/pricing.js";
+import {
+  claimRenderSlot,
+  refundRender,
+  releaseRenderSlot,
+} from "../services/renderLimits.js";
 
 const router = express.Router();
 
@@ -218,6 +223,23 @@ async function generateWithModal(payload) {
 }
 
 router.post("/", isAuthenticated, async (req, res) => {
+  /**
+   * What this request is holding: the account's render slot, and whatever it was
+   * charged before it had a picture to show for it.
+   *
+   * The charge has to happen before the GPU is asked — otherwise an account with
+   * one coin can start ten renders — so it is a hold, and every way out of this
+   * handler that is not a delivered image releases it. Tracking it here rather
+   * than refunding at each `return` is deliberate: there are five ways to fail in
+   * this route and there will be more, and the one that forgets to refund is the
+   * one that takes somebody's coin for nothing.
+   *
+   * The slot comes back either way, delivered or not. The money only comes back
+   * if it was not earned.
+   */
+  const held = { lease: null, coins: 0, freeDesign: false, day: null };
+  let delivered = false;
+
   try {
     const {
       roomType,
@@ -269,6 +291,52 @@ router.post("/", isAuthenticated, async (req, res) => {
     }
 
     /**
+     * The render slot and the day's count, before anything is charged.
+     *
+     * Taken first because it is what makes the charge below safe: two requests
+     * arriving together used to both read the same balance, both find it
+     * sufficient, and both spend it. Only one of them gets the slot now.
+     *
+     * The day is counted before the render for the same reason — two requests
+     * cannot both be the fortieth. A render that fails gives the count back with
+     * everything else it took; a day's allowance is for pictures delivered.
+     *
+     * The daily ceiling only applies where nothing else counts, which is a
+     * subscription. Coin and free renders are metered by the coins.
+     */
+    const slot = await claimRenderSlot(user._id, {
+      capped: Boolean(user.isSubscribed || user.isPremium),
+    });
+
+    if (!slot.ok) {
+      if (slot.reason === "missing") {
+        return res.status(404).json({ message: slot.message });
+      }
+      console.log(
+        `Render refused for user ${user._id}:`,
+        slot.reason === "busy"
+          ? "a render is already in flight"
+          : `fair-use day spent (${slot.used}/${slot.limit})`,
+      );
+      // 429, not 403. The app sends a 403 to the paywall, and this account has
+      // already paid — asking it for money again is the wrong answer to "wait" or
+      // to "that is enough for today".
+      res.set("Retry-After", String(slot.retryAfterSeconds));
+      return res.status(429).json({
+        message: slot.message,
+        reason: slot.detail,
+        limitKind: slot.reason,
+        retryAfterSeconds: slot.retryAfterSeconds,
+        adCoins: user.adCoins || 0,
+        freeDesignsUsed: user.freeDesignsUsed || 0,
+      });
+    }
+
+    held.lease = slot.lease;
+    held.day = slot.day;
+    console.log(`Render slot taken by user ${user._id} (${slot.rendersToday} today)`);
+
+    /**
      * ✅ Free allowance, then coins, then the paywall.
      *
      * The price comes from the price list by product name, so a walkthrough
@@ -288,6 +356,8 @@ router.post("/", isAuthenticated, async (req, res) => {
         if ((user.adCoins || 0) >= price) {
           user.adCoins -= price;
           await user.save();
+          // A hold, not a sale, until there is a picture to show for it.
+          held.coins = price;
           console.log(`Deducted ${price} coin(s) from user ${user._id}. Remaining: ${user.adCoins}`);
         } else {
           console.log("User has no free designs and insufficient coins:", user._id);
@@ -305,6 +375,7 @@ router.post("/", isAuthenticated, async (req, res) => {
         // Still inside the free allowance → consume one, charge nothing.
         user.freeDesignsUsed += 1;
         await user.save();
+        held.freeDesign = true;
         console.log(`Used one free design for user ${user._id}. Total used: ${user.freeDesignsUsed}`);
       }
     }
@@ -341,8 +412,9 @@ router.post("/", isAuthenticated, async (req, res) => {
       render_source: typeof renderSource === "string" ? renderSource : "",
     };
 
-    // Modal first, RunPod second. The design credit was already spent above and
-    // is not refunded if both fail — same as before this fallback existed.
+    // Modal first, RunPod second. Whatever was held above is given back on every
+    // path out of here that does not end in a picture, including this one — the
+    // GPU bill for a failed render is ours, not the customer's.
     //
     // RunPod is a fallback for a Modal that *could not take the work*: not
     // configured, unreachable, or it rejected the request. Once Modal has
@@ -378,6 +450,17 @@ router.post("/", isAuthenticated, async (req, res) => {
     }
 
     const generatedImageBase64 = result.generatedImage;
+
+    // Both engines throw rather than answer with an empty image, so this is a
+    // belt-and-braces check — but it has to be a failure rather than a design row
+    // with nothing in it. An answer with no picture used to come back as a 201
+    // that the app then reported as "Design Generation Failed", which is a charge
+    // for a render the person was told had failed.
+    if (!generatedImageBase64) {
+      console.error(`${host} returned no generated image`);
+      return res.status(502).json({ message: "AI service failed. Please try again." });
+    }
+
     console.log(
       `Design generated by ${host}:`,
       `engine=${result.engine || "unknown"}`,
@@ -386,18 +469,13 @@ router.post("/", isAuthenticated, async (req, res) => {
     );
 
     // Upload AI-generated image to Cloudinary
-    let generatedImageUrl = null;
-    let generatedImagePublicId = null;
-
-    if (generatedImageBase64) {
-      const dataUri = `data:image/png;base64,${generatedImageBase64}`;
-      const generatedResponse = await cloudinary.uploader.upload(dataUri, {
-        folder: "generated_images",
-      });
-      generatedImageUrl = generatedResponse.secure_url;
-      generatedImagePublicId = generatedResponse.public_id;
-      console.log("Uploaded AI-generated image to Cloudinary:", { generatedImageUrl, generatedImagePublicId });
-    }
+    const dataUri = `data:image/png;base64,${generatedImageBase64}`;
+    const generatedResponse = await cloudinary.uploader.upload(dataUri, {
+      folder: "generated_images",
+    });
+    const generatedImageUrl = generatedResponse.secure_url;
+    const generatedImagePublicId = generatedResponse.public_id;
+    console.log("Uploaded AI-generated image to Cloudinary:", { generatedImageUrl, generatedImagePublicId });
 
     // Save design to DB
     const newDesign = new Design({
@@ -421,6 +499,9 @@ router.post("/", isAuthenticated, async (req, res) => {
 
     await user.save();
 
+    // There is a picture, saved, with a URL. The hold above is now earned.
+    delivered = true;
+
     res.status(201).json({
       image: newDesign.image,
       generatedImage: newDesign.generatedImage,
@@ -439,6 +520,29 @@ router.post("/", isAuthenticated, async (req, res) => {
   } catch (error) {
     console.error("POST /designs error:", error);
     res.status(500).json({ message: error.message || "Something went wrong" });
+  } finally {
+    // No picture, no charge. This covers the ways out that are known — a refused
+    // paywall, both engines down, an answer with no image, a Cloudinary or
+    // database throw — and, more to the point, the ones added later, because a
+    // new `return` in this handler now refunds by default instead of by being
+    // remembered.
+    if (!delivered) {
+      const owed = held.coins || held.freeDesign || held.day;
+      if (owed) {
+        console.log(
+          `Refunding a failed render for user ${req.user._id}:`,
+          held.coins ? `${held.coins} coin(s)` : held.freeDesign ? "1 free design" : "no charge",
+          held.day ? `and its count against ${held.day}` : "",
+        );
+      }
+      await refundRender(req.user._id, held);
+    }
+
+    // The next render on this account waits on this line, so it runs whether or
+    // not there was a picture. The answer above has already been sent, and a slot
+    // held past the response is an account that cannot render again until the
+    // lease expires.
+    await releaseRenderSlot(req.user._id, held.lease);
   }
 });
 

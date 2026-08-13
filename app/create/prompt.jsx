@@ -271,6 +271,18 @@ export default function Prompt() {
         router.push('/profile/upgrade');
         return;
       }
+      // A fair-use stop: one render at a time, and a ceiling on the day. Not a
+      // paywall and not a failure — the account is already paid, so it gets the
+      // reason and stays where it is rather than being sent to buy what it has.
+      if (response.status === 429) {
+        setModalData({
+          title: data.limitKind === 'busy' ? 'One at a time' : "That's today's limit",
+          message:
+            data.reason || data.message || "You have reached today's fair-use limit on renders.",
+        });
+        setModalVisible(true);
+        return;
+      }
       if (!response.ok) throw new Error(data.message || 'Something went wrong');
 
       const imageUri =
@@ -295,7 +307,7 @@ export default function Prompt() {
         setModalData({
           title: 'Design Generation Failed',
           message:
-            'There was a problem generating your design from the server. Please try again later.',
+            'There was a problem generating your design from the server. You have not been charged for it — please try again.',
         });
         setModalVisible(true);
       }
@@ -310,7 +322,8 @@ export default function Prompt() {
       console.error('Error generating design:', error);
       setModalData({
         title: 'Design Generation Failed',
-        message: 'There was a problem generating your design. Please try again later.',
+        message:
+          'There was a problem generating your design. You have not been charged for it — please try again.',
       });
       setModalVisible(true);
     } finally {
