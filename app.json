@@ -46,8 +46,8 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#D9E1D6",
-          "image": "./assets/images/livinai-mark.png",
+          "backgroundColor": "#EDE4DB",
+          "image": "./assets/images/splash-icon.jpg",
           "imageWidth": 200,
           "resizeMode": "contain"
         }

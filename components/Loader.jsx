@@ -17,12 +17,11 @@ import COLORS from '../constants/colors';
  * as loading. So the default is a spinner on the background the list underneath
  * is painted in, and nothing moves when the content arrives.
  */
-export const SPLASH_BACKGROUND = '#D9E1D6';
+export const SPLASH_BACKGROUND = '#EDE4DB';
 
-// The asset is 643 x 774; the height keeps that ratio so the lockup is never
-// stretched.
-const MARK_WIDTH = 168;
-const MARK_HEIGHT = Math.round(MARK_WIDTH * (774 / 643));
+// Match the square native launch artwork exactly so the transition into the
+// first React frame does not swap logos or change proportions.
+const MARK_SIZE = 200;
 
 export default function Loader({ size = 'large', branded = false, background }) {
   const surface = background || (branded ? SPLASH_BACKGROUND : COLORS.background);
@@ -31,7 +30,7 @@ export default function Loader({ size = 'large', branded = false, background }) 
     <View style={[styles.container, { backgroundColor: surface }]}>
       {branded && (
         <Image
-          source={require('../assets/images/livinai-mark.png')}
+          source={require('../assets/images/splash-icon.jpg')}
           style={styles.logo}
           resizeMode="contain"
           accessibilityLabel="Livinai"
@@ -50,7 +49,7 @@ const styles = StyleSheet.create({
     gap: 24,
   },
   logo: {
-    width: MARK_WIDTH,
-    height: MARK_HEIGHT,
+    width: MARK_SIZE,
+    height: MARK_SIZE,
   },
 });
