@@ -62,3 +62,8 @@ livinai-privacy-policy.pdf
 
 # Legacy/reset-project output
 app-example/
+
+# Store-listing artwork is uploaded separately in App Store Connect and must
+# not inflate the native build source archive.
+assets/store/
+play-store-assets/
