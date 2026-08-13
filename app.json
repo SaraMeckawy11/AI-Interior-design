@@ -8,7 +8,7 @@
     "icon": "./assets/images/icon-square.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.livinai.app",
       "usesAppleSignIn": true,
       "infoPlist": {
