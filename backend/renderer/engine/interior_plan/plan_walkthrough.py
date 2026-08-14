@@ -1576,6 +1576,52 @@ def build_room_edges(room_m):
     return merge_edges(raw)
 
 
+#: The openings in this build that have no door in them, as world-metre lines.
+#:
+#: A cased opening reaches the wall builder as a door, because that is what it
+#: is to a wall — the same hole, cut through every coincident edge. What it is
+#: not is a doorway: no leaf, no casing and no lintel, since the point of one is
+#: to open a room into the next rather than to give it a door.
+#:
+#: `build_walls` and the finish-skin builder are module-level and take no
+#: config, so the list is published here for the length of one build instead of
+#: being threaded through their signatures — which are also implemented a second
+#: time in the web exporter's overrides. Empty for every caller that does not
+#: draw them, which is every path except the walkthrough exporter.
+_ACTIVE_WALL_OPENINGS = ContextVar("livinai_wall_openings", default=())
+
+
+def cased_opening_at(centre) -> bool:
+    """Whether the opening centred here is a cased opening, not a doorway."""
+    segments = _ACTIVE_WALL_OPENINGS.get()
+    if not segments:
+        return False
+    point = Point(float(centre[0]), float(centre[1]))
+    return any(line.distance(point) <= 0.40 for line in segments)
+
+
+#: The doors in this build with a room on one side only, as world-metre lines.
+#:
+#: That is the front door, and in a flat it is the only one. Every other door
+#: joins two rooms the plan contains, so `assign_openings` cuts it into both of
+#: them and both know it is there. A door that reaches exactly one room opens
+#: onto something outside the drawing — the landing, the street — and it is the
+#: one doorway that has to keep its floor clear, because there is nowhere on the
+#: far side for anyone coming through to be.
+#:
+#: Set by `assign_openings`, which is where the room count is known.
+_ACTIVE_ENTRANCE_DOORS = ContextVar("livinai_entrance_doors", default=())
+
+
+def entrance_door_at(centre) -> bool:
+    """Whether the doorway centred here is the way into the home."""
+    segments = _ACTIVE_ENTRANCE_DOORS.get()
+    if not segments:
+        return False
+    point = Point(float(centre[0]), float(centre[1]))
+    return any(line.distance(point) <= 0.40 for line in segments)
+
+
 def assign_openings(all_room_edges, doors_m, windows_m):
     """Cut door/window spans into EVERY wall edge they touch.
 
@@ -1609,6 +1655,8 @@ def assign_openings(all_room_edges, doors_m, windows_m):
         return (lo, hi)
 
     door_infos = []
+    # Doors that reached exactly one room. See _ACTIVE_ENTRANCE_DOORS.
+    entrance_doors = []
     for a, b in doors_m:
         seg = LineString([a, b])
         seg_len = float(np.linalg.norm(np.array(b) - np.array(a)))
@@ -1637,6 +1685,9 @@ def assign_openings(all_room_edges, doors_m, windows_m):
                         rooms_with_door.add(room_index)
         if placed_any:
             door_infos.append((np.array(a), np.array(b)))
+            if len(rooms_with_door) <= 1:
+                entrance_doors.append(LineString([tuple(a[:2]), tuple(b[:2])]))
+    _ACTIVE_ENTRANCE_DOORS.set(tuple(entrance_doors))
     for item in windows_m:
         a, b = item[0], item[1]
         seg = LineString([a, b])
@@ -1716,30 +1767,6 @@ def _door_frame(op1, op2, wall_angle, frame_color=None):
     return [bar(-0.015, 0.055, 0.0, DOOR_HEIGHT + 0.055),
             bar(L - 0.055, L + 0.015, 0.0, DOOR_HEIGHT + 0.055),
             bar(-0.015, L + 0.015, DOOR_HEIGHT - 0.02, DOOR_HEIGHT + 0.055)]
-
-
-#: The openings in this build that have no door in them, as world-metre lines.
-#:
-#: A cased opening reaches the wall builder as a door, because that is what it
-#: is to a wall — the same hole, cut through every coincident edge. What it is
-#: not is a doorway: no leaf, no casing and no lintel, since the point of one is
-#: to open a room into the next rather than to give it a door.
-#:
-#: `build_walls` and the finish-skin builder are module-level and take no
-#: config, so the list is published here for the length of one build instead of
-#: being threaded through their signatures — which are also implemented a second
-#: time in the web exporter's overrides. Empty for every caller that does not
-#: draw them, which is every path except the walkthrough exporter.
-_ACTIVE_WALL_OPENINGS = ContextVar("livinai_wall_openings", default=())
-
-
-def cased_opening_at(centre) -> bool:
-    """Whether the opening centred here is a cased opening, not a doorway."""
-    segments = _ACTIVE_WALL_OPENINGS.get()
-    if not segments:
-        return False
-    point = Point(float(centre[0]), float(centre[1]))
-    return any(line.distance(point) <= 0.40 for line in segments)
 
 
 def build_walls(edges, wall_color, material_name=None, trim_color=None):
@@ -2618,44 +2645,37 @@ class RoomFurnisher:
         self.placed = []          # blocking footprints (shapely)
         self.editable_objects = []
         self._editable_mesh_assets = {}
-        # Keep-clear zones in front of doors.
-        #
-        # This used to be a 0.95 m circle centred on the doorway, which models
-        # the swing of the door and nothing else. A dining table set 1.2 m into
-        # the room clears that circle completely and still stands squarely in
-        # the path of anyone coming through — which is exactly what a table does
-        # in a living room whose door opens onto the dining end.
-        #
-        # What a doorway actually needs is the corridor in front of it: as wide
-        # as the opening, running into the room far enough to walk clear of it
-        # before turning. The circle stays for the swing; the corridor is added
-        # on top and is what stops furniture landing in the entry path.
+        # Floor that furniture may not stand on. Only the front door reserves
+        # any — see the loop below.
         self.door_zones = []
         # The line of sight straight in from each doorway, kept separately from
-        # the keep-clear zones above.
+        # the keep-clear zones above and recorded for every door.
         #
-        # Clearing the corridor is not the same as being out of the way. The
-        # corridor reaches at most 1.40 m into the room, so a dining table can
-        # clear it by a centimetre and still be the first thing you walk into
-        # coming through the front door — which is what happens, because the
-        # scoring below pulls groups toward the centroid and a door's axis
-        # usually runs straight through it. These axes let `find_open_pose`
-        # push a group sideways out of the entry sightline while the doorway
-        # itself stays clear.
+        # Being clear of a doorway is not the same as being out of the way of
+        # it: a group can miss the threshold by a centimetre and still be the
+        # first thing you walk into. These axes let `find_open_pose` push a
+        # group sideways out of the entry sightline — as a score rather than a
+        # veto, so a room with only one place for its table still gets one.
         self.door_axes = []
-        # Some of these cuts have no door in them.
+        # Only the front door is guarded.
         #
-        # A cased opening reaches this loop as a door, because that is what it
-        # is to a wall — the same hole, cut through every coincident edge. But
-        # it has no leaf to swing and no jamb to step around, and guarding it
-        # like a doorway is what emptied the end of a room around it: the swing
-        # circle plus a corridor as wide as the hole is nearly five square
-        # metres of protected floor on a 3 m opening, which is why a dining
-        # room with an open wall was getting a table sized for whatever was
-        # left rather than for the room.
+        # Every opening used to reserve floor: a swing circle on the threshold
+        # and an approach corridor into the room, in both of the rooms a door
+        # joins. Between them, a normal flat spent several square metres of
+        # every room protecting doorways, and the dining table — the largest
+        # thing placed, and the last — is what paid for it. A room with a wide
+        # opening in it got a table sized for the scraps.
         #
-        # What it actually needs kept clear is the route through it, and a
-        # route is one person wide however wide the hole around it is.
+        # An internal door does not need it. The rooms it joins are both drawn,
+        # both furnished, and both leave the walking routes between their own
+        # pieces clear; a door in the middle of that is a place you pass
+        # through, not a place that has to stay empty. The same goes double for
+        # a cased opening, which has no leaf to swing at all.
+        #
+        # The front door is the exception, and it is the only one: it is the
+        # single doorway with a room on one side and the landing on the other,
+        # so nothing beyond it belongs to the plan and there is nowhere for
+        # somebody coming through it to be. That one keeps its floor.
         for e in edges:
             p1, p2 = np.array(e["p1"], dtype=float), np.array(e["p2"], dtype=float)
             for typ, t0, t1 in e.get("openings", []):
@@ -2664,19 +2684,6 @@ class RoomFurnisher:
                 a = p1 + (p2 - p1) * t0
                 b = p1 + (p2 - p1) * t1
                 c = (a + b) / 2.0
-                cased = cased_opening_at(c)
-                # No leaf, no swing, nothing to keep clear for one.
-                #
-                # For a doorway that does have one: 0.55 m, not 0.95. The circle
-                # is centred on the threshold and applies in *both* rooms, so at
-                # 0.95 it was a 1.9 m disc of protected floor either side of
-                # every internal door — around three square metres each, on top
-                # of the corridor below. A door leaf is 0.9 m long and sweeps a
-                # quarter turn from one jamb; what has to stay clear is the
-                # threshold and the arc, not a circle you could park a sofa in.
-                if not cased:
-                    self.door_zones.append(Point(c[0], c[1]).buffer(0.55))
-
                 span = b - a
                 width = float(np.hypot(span[0], span[1]))
                 if width < 1e-6:
@@ -2690,27 +2697,25 @@ class RoomFurnisher:
                     if not self.poly.contains(Point(*(c + normal * 0.35))):
                         continue
 
-                # Scaled to the room. A fixed corridor is right in a living
-                # room and eats a box room alive, and a keep-clear zone that
-                # leaves nowhere to put anything just makes the fallback passes
-                # drop it again.
-                #
-                # It used to reach up to 1.40 m into the room and run 0.15 m
-                # wider than the doorway on each side. That is a room's worth of
-                # approach for a door you step through: between it, the swing
-                # circle and the exporter's own corridor on top, one internal
-                # door could take four square metres out of the middle of a
-                # room, and it was the dining table — the largest thing being
-                # placed, and the last — that paid for it. What a doorway needs
-                # is its own width, and enough depth to be through it.
-                reach = float(min(0.95, max(0.60, math.sqrt(self.poly.area) * 0.26)))
+                # The sightline straight in from the doorway is recorded for
+                # every door, front or not. It is a score rather than a block —
+                # it nudges a group sideways out of the entry axis when there is
+                # a choice — so it costs a room nothing when there is not.
+                self.door_axes.append({
+                    "c": c.astype(float),
+                    "normal": normal.astype(float),
+                    "tangent": tangent.astype(float),
+                    "half": max(width, MIN_DOOR_W) / 2.0,
+                })
+
+                if cased_opening_at(c) or not entrance_door_at(c):
+                    continue
+
+                # The way in. A leaf swings across its own width, and you need
+                # to be through the doorway and clear of it before turning.
+                reach = float(min(1.05, max(0.70, math.sqrt(self.poly.area) * 0.28)))
                 half = max(width, MIN_DOOR_W) / 2.0
-                if cased:
-                    # The passage, not the hole: a person-and-a-bit wide, down
-                    # the middle of the opening, and no deeper than the step it
-                    # takes to be through it.
-                    half = min(half, PASSAGE_W / 2.0)
-                    reach = min(reach, 0.85)
+                self.door_zones.append(Point(c[0], c[1]).buffer(0.55))
                 corners = [
                     c + tangent * half,
                     c + tangent * half + normal * reach,
@@ -2720,13 +2725,6 @@ class RoomFurnisher:
                 corridor = Polygon([(p[0], p[1]) for p in corners])
                 if corridor.is_valid and not corridor.is_empty:
                     self.door_zones.append(corridor)
-
-                self.door_axes.append({
-                    "c": c.astype(float),
-                    "normal": normal.astype(float),
-                    "tangent": tangent.astype(float),
-                    "half": half,
-                })
 
     @property
     def layered(self):

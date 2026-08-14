@@ -2007,16 +2007,25 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
             opening_width = float(np.linalg.norm(opening_b - opening_a))
             inward = self._inward_normal(p1, p2)
             is_balcony = kind in ("balcony", "balcony_hole")
-            # Keep-clear corridors were so deep/wide (1.85 m x opening+0.72)
-            # that a single doorway sterilised ~4-5 m2 and several openings
-            # together fragmented a living room so badly that no dining zone
-            # could fit in front of a balcony. That was cut once; this is the
-            # rest of it. A doorway does not need floor kept clear either side
-            # of itself — walking through one uses its own width — and 1.05 m
-            # of approach is a stride and a half. The room is furnished for
-            # living in, not for standing in a doorway looking at it.
+            # This corridor stacks on the engine's own keep-clear zones, and
+            # between them a single doorway used to sterilise four or five
+            # square metres. The engine now guards the front door and nothing
+            # else; this follows it, for the same reason. An internal door
+            # joins two rooms that are both drawn and both furnished with their
+            # own routes kept clear — it is a place you pass through, not a
+            # place that has to stay empty — and a cased opening has no leaf to
+            # swing at all.
+            #
+            # The corridor is still measured for every opening, because
+            # `circulation_zones` is a soft score used when the room has a
+            # choice. Only the hard block below is now the front door's alone.
             cased = not is_balcony and original.cased_opening_at(center)
-            corridor_depth = 1.15 if is_balcony else 0.80 if cased else 0.85
+            entrance = (
+                not is_balcony
+                and not cased
+                and original.entrance_door_at(center)
+            )
+            corridor_depth = 1.15 if is_balcony else 0.80 if cased else 0.95
             corridor_width = (
                 min(opening_width, original.PASSAGE_W) + 0.10
                 if cased
@@ -2056,7 +2065,11 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                         "corridor": corridor,
                     }
                 )
-                self.door_zones.append(corridor)
+                # The front door, and only the front door. Everything else has
+                # a furnished room on its far side and needs no floor reserved
+                # on this one.
+                if entrance:
+                    self.door_zones.append(corridor)
 
 
 def _build_bedside_commode(palette, w=0.42, d=0.38):
