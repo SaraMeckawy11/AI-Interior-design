@@ -346,6 +346,17 @@ export default function WalkthroughScreen() {
   const [confirmRebuild, setConfirmRebuild] = useState(false);
   const [pendingRoomDelete, setPendingRoomDelete] = useState(null);
   const draftStepsRef = useRef([]);
+  /**
+   * True while a finger is down on the drawing canvas.
+   *
+   * The step scrolls and the canvas draws, and a vertical stroke belongs to
+   * exactly one of them. It was going to the scroll view: drawing a wall
+   * downward, or nudging a corner down a few pixels, moved the page instead
+   * and cut the stroke off partway through — so nothing vertical could be
+   * placed precisely. The canvas owns a gesture that starts on it, and the
+   * page holds still for as long as that gesture lasts.
+   */
+  const [drawing, setDrawing] = useState(false);
 
   // ── Viewer state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("walk");
@@ -2185,6 +2196,7 @@ export default function WalkthroughScreen() {
               contentContainerStyle={styles.body}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              scrollEnabled={!drawing}
             >
               {/* Every step opens with what it is for. The title used to live in
                   the header as a 10.5pt overline and the copy appeared on three
@@ -2283,6 +2295,7 @@ export default function WalkthroughScreen() {
                       onSetCurveControl={setCurveControl}
                       onBeginEdit={rememberPlan}
                       onStartDrawing={() => setTool("rect")}
+                      onGestureChange={setDrawing}
                     />
                   </View>
 

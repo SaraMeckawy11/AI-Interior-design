@@ -392,7 +392,7 @@ export default function Interior() {
       <View style={[styles.createHeader, { paddingTop: insets.top }]}>
         <View style={styles.createHeaderBar}>
           <View pointerEvents="none" style={styles.createHeaderTitleWrap}>
-            <Text style={styles.title} numberOfLines={1}>LIVINAI</Text>
+            <Text style={[styles.title, styles.createHeaderTitle]} numberOfLines={1}>LIVINAI</Text>
           </View>
 
           <TouchableOpacity

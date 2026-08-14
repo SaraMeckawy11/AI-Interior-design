@@ -422,6 +422,7 @@ export default function PlanCanvas({
   onSetCurveControl,
   onBeginEdit,
   onStartDrawing,
+  onGestureChange,
 }) {
   const [pointer, setPointer] = useState(null);
   const [rectDraft, setRectDraft] = useState(null);
@@ -446,6 +447,33 @@ export default function PlanCanvas({
     viewport: null,
     pinch: null,
   });
+
+  /**
+   * Tell the page a finger is on the canvas.
+   *
+   * The canvas sits inside a vertically scrolling step, and both wanted the
+   * same gesture. A stroke drawn downward — a vertical wall, a door dragged
+   * along a vertical wall, a corner nudged down a few pixels — was read by the
+   * scroll view as a scroll after about ten pixels of travel, which scrolled
+   * the page out from under the drawing and terminated the stroke partway
+   * through. Precise work in the vertical axis was effectively impossible.
+   *
+   * A drawing surface owns the gestures that land on it, the way a map does;
+   * the page still scrolls from the toolbar, the hint bar and everything below
+   * it. The parent stops scrolling for exactly as long as a finger is down
+   * here, so this never blocks the page for longer than the stroke itself.
+   *
+   * Held in a ref, and read rather than closed over, so that a parent
+   * re-render cannot rebuild the responder in the middle of a drag.
+   */
+  const gestureChange = useRef(onGestureChange);
+  useEffect(() => {
+    gestureChange.current = onGestureChange;
+  }, [onGestureChange]);
+  const reportGesture = (active) => gestureChange.current?.(active);
+  // A stroke that ends while the component is unmounting must not leave the
+  // page unable to scroll.
+  useEffect(() => () => gestureChange.current?.(false), []);
 
   const pixelsPerMeter = suppliedPixelsPerMeter || PLAN_PIXELS_PER_METER;
   const gridStep = pixelsPerMeter * GRID_METERS;
@@ -640,11 +668,15 @@ export default function PlanCanvas({
         onStartShouldSetPanResponder: () => true,
         onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
+        // Claim the move before it can bubble to the scroll view above. Without
+        // the capture variant the page could still take a drag that began here.
+        onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderTerminationRequest: () => false,
 
         onPanResponderGrant: (event) => {
           const { locationX, locationY } = event.nativeEvent;
           const point = screenToPlan(locationX, locationY);
+          reportGesture(true);
           gesture.current = {
             moved: 0,
             drag: null,
@@ -863,6 +895,7 @@ export default function PlanCanvas({
           setRectDraft(null);
           setOpeningDraft(null);
           setPointer(null);
+          reportGesture(false);
         },
 
         onPanResponderTerminate: () => {
@@ -873,6 +906,7 @@ export default function PlanCanvas({
           setRectDraft(null);
           setOpeningDraft(null);
           setPointer(null);
+          reportGesture(false);
         },
       }),
     // Recreated whenever the drawing context changes so the closure never

@@ -505,11 +505,25 @@ backArrow: {
  * bar owns both now: arrow in the leading position, brand optically centred
  * against it, at the 44pt bar height, 44pt touch target and ~16pt leading
  * margin iOS expects. The screen applies the top inset to `createHeader`.
+ *
+ * The inset alone is not the margin, though, and putting the bar straight onto
+ * it is what made these two screens sit higher than everything around them.
+ * Android runs edge-to-edge here, so the inset ends exactly at the bottom edge
+ * of the status bar: the brand's cap line came up against the clock and the
+ * back chevron against the signal bars, with no air between them. Every other
+ * header in the app leaves some — the walkthrough 8pt, the collection 12 — and
+ * these had none, which is what reads as "the title is too high" rather than
+ * as a considered flush alignment.
+ *
+ * `createHeaderBar` therefore carries the gap itself, above its own 44pt
+ * height, so it stacks on whatever inset the device reports instead of being
+ * overwritten by it. The bottom is the same 8, so the bar is optically even
+ * top and bottom before the form's own padding continues below it.
  */
 createHeader: {
   backgroundColor: COLORS.background,
   paddingHorizontal: moderateScale(8),
-  paddingBottom: verticalScale(6),
+  paddingBottom: verticalScale(8),
   zIndex: 10,
 },
 
@@ -517,6 +531,7 @@ createHeaderBar: {
   minHeight: moderateScale(44),
   flexDirection: "row",
   alignItems: "center",
+  marginTop: verticalScale(8),
 },
 
 /** Centred against the bar itself, so the coins pill can't shift the brand. */
@@ -524,6 +539,19 @@ createHeaderTitleWrap: {
   ...StyleSheet.absoluteFillObject,
   alignItems: "center",
   justifyContent: "center",
+},
+
+/**
+ * The brand inside the bar.
+ *
+ * Android pads a Text with the font's own ascent and descent on top of the
+ * line box, and Poppins carries a lot of both — so a 25pt all-caps word
+ * centred in a 44pt bar came to rest below the middle of it, and below the
+ * back chevron sitting beside it. Dropping that padding centres the letters
+ * themselves, which is what the eye is lining up against the arrow.
+ */
+createHeaderTitle: {
+  includeFontPadding: false,
 },
 
 createHeaderButton: {

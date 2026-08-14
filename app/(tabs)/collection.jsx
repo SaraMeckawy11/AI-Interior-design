@@ -261,10 +261,29 @@ export default function Collection() {
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         refreshControl={
+          /**
+           * The spinner drops from the top of the list, not the top of the
+           * screen.
+           *
+           * The list runs full-bleed under the status bar - the top inset is
+           * padding on its content, not on the view - so the pull-to-refresh
+           * circle was drawn from y=0 and spent the first half of its travel
+           * behind the clock and the notch. On a tall phone it barely cleared
+           * them before the gesture ended, which is why pulling down looked
+           * like it had done nothing.
+           *
+           * Offsetting it by the same inset the content uses starts it just
+           * under the status bar, level with the brand, where the gesture can
+           * be seen to work.
+           */
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => fetchDesigns(1, true)}
-            colors={[COLORS.primary]}
+            progressViewOffset={insets.top + 12}
+            // `colors` is Android's and `tintColor` is iOS's, so naming only
+            // one left the spinner the platform grey on the other platform.
+            colors={[COLORS.primaryDark]}
+            tintColor={COLORS.primaryDark}
           />
         }
         ListHeaderComponent={
