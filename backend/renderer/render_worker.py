@@ -67,6 +67,12 @@ def build(payload):
     doors = payload.get("doors") or []
     windows = payload.get("windows") or []
     balconies = payload.get("balconies") or []
+    # Openings with no door in them. They are cut into walls exactly like doors
+    # — the exporter merges them back into the door list to do it — and travel
+    # separately only so the furnisher knows which cuts have no leaf to swing
+    # and no jamb to walk around. A client that does not send them, which is
+    # every build before this one, behaves exactly as it did.
+    wall_openings = payload.get("wallOpenings") or []
     settings = payload.get("settings") or {}
     configs = room_configs(payload.get("roomConfigs") or [], settings)
     if len(configs) != len(rooms):
@@ -77,10 +83,11 @@ def build(payload):
         "doors": doors,
         "windows": windows,
         "balconies": balconies,
+        "wallOpenings": wall_openings,
         "pixelsPerMeter": payload.get("pixelsPerMeter"),
         "configs": configs,
         "rendererRevision": payload.get("rendererRevision"),
-        "format": "interior-plan-gltf-v40-wardrobe-first-bedrooms",
+        "format": "interior-plan-gltf-v41-cased-openings",
         "interiorPlanSource": interior_plan_source_version(),
     }
     cache_id = scene_cache_key(cache_payload)
@@ -103,6 +110,7 @@ def build(payload):
             balconies,
             configs,
             payload.get("pixelsPerMeter"),
+            wall_openings=wall_openings,
         )
         temporary_metadata.write_text(
             json.dumps(metadata, separators=(",", ":")),

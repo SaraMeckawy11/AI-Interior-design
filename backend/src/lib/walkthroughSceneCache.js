@@ -90,6 +90,10 @@ export function sceneCacheKey(payload = {}) {
     doors: payload.doors || [],
     windows: payload.windows || [],
     balconies: payload.balconies || [],
+    // Two plans with identical geometry can still differ here — the same gap in
+    // the same wall is furnished around differently depending on whether it has
+    // a door in it — so it has to be part of what identifies a scene.
+    wallOpenings: payload.wallOpenings || [],
     pixelsPerMeter: payload.pixelsPerMeter ?? null,
     configs: roomConfigsForKey(payload.roomConfigs, payload.settings || {}),
     rendererRevision: payload.rendererRevision ?? null,

@@ -95,7 +95,7 @@ const STAGES = [
     icon: "grid-outline",
     label: "Draw",
     title: "Draw the floor plan",
-    copy: "Place rooms, then add the doors, windows and balconies between them.",
+    copy: "Place rooms, then add the doors, openings, windows and balconies between them.",
   },
   {
     key: "rooms",
@@ -139,22 +139,24 @@ const TOOLS = [
   { key: "room", icon: "shapes-outline", label: "Outline" },
   { key: "select", icon: "move-outline", label: "Edit" },
   { key: "door", icon: "log-in-outline", label: "Door" },
+  { key: "wallOpening", icon: "swap-horizontal-outline", label: "Opening" },
   { key: "window", icon: "browsers-outline", label: "Window" },
   { key: "balcony", icon: "sunny-outline", label: "Balcony" },
 ];
 
 
 /** The tools that need a wall to aim at. */
-const OPENING_TOOLS = new Set(["door", "window", "balcony"]);
+const OPENING_TOOLS = new Set(["door", "wallOpening", "window", "balcony"]);
 
 const TOOL_HINTS = {
   pan: "Drag to move around the plan. Two fingers pan and pinch in any tool.",
   rect: "Drag on the grid to draw a rectangular room. Its size in metres shows as you drag.",
   room: "Tap each corner, then tap the first corner again to close the room.",
   door: "Tap a wall for a standard door, or drag along it for a wider opening.",
+  wallOpening: "Drag along a wall to open one room into the next. No door, no frame — just the gap.",
   window: "Tap a wall for a standard window, or drag along it to set its length.",
   balcony: "Tap an outside wall for a balcony door, or drag along it for a wide slider.",
-  select: "Tap a room or opening, then drag the shape or one of its handles.",
+  select: "Tap a room or opening, then drag the shape or one of its end handles to resize it.",
 };
 
 /**
@@ -217,6 +219,23 @@ const INTERIOR_ROOM_TYPES = {
 const interiorRoomType = (roomType) => {
   const value = String(roomType || "").trim();
   return INTERIOR_ROOM_TYPES[value] || value || "Living Room";
+};
+
+/**
+ * A plan drawn before wall openings had a control of their own.
+ *
+ * "Wall opening" was the fourth door variant, and being a door is what made the
+ * renderer guard it like one — with the floor a swinging leaf needs and an
+ * approach corridor as wide as the hole. On a wide opening that is most of a
+ * room, which is why a dining room with an open wall got a table sized for the
+ * scraps. The variant is its own kind now, and a saved plan that used it opens
+ * as one, so those plans are fixed by reopening them rather than by redrawing.
+ */
+const migrateOpeningKind = (opening) => {
+  if (opening?.kind === "door" && opening?.variant === "Wall opening") {
+    return { ...opening, kind: "wallOpening", variant: "Wall opening" };
+  }
+  return opening;
 };
 
 /**
@@ -514,6 +533,7 @@ export default function WalkthroughScreen() {
         doors: openings.filter((opening) => opening.kind === "door"),
         windows: openings.filter((opening) => opening.kind === "window"),
         balconies: openings.filter((opening) => opening.kind === "balcony"),
+        wallOpenings: openings.filter((opening) => opening.kind === "wallOpening"),
         width: sheetWidth,
         height: sheetHeight,
         pixelsPerMeter,
@@ -571,6 +591,7 @@ export default function WalkthroughScreen() {
       doors: layout.doors.map((opening) => opening.slice(0, 2)),
       windows: layout.windows.map((opening) => opening.slice(0, 2)),
       balconies: layout.balconies.map((opening) => opening.slice(0, 2)),
+      wallOpenings: layout.wallOpenings.map((opening) => opening.slice(0, 2)),
       pixelsPerMeter: layout.pixelsPerMeter,
       configs: sceneRoomConfigs.map((room) => [room.name, room.roomType, room.style, room.kitchenType || ""]),
       // The design fields the exporter reads. `freeExplore` is not among them:
@@ -708,6 +729,10 @@ export default function WalkthroughScreen() {
             doors: planLayout.doors.map((opening) => opening.slice(0, 2)),
             windows: planLayout.windows.map((opening) => opening.slice(0, 2)),
             balconies: planLayout.balconies.map((opening) => opening.slice(0, 2)),
+            // Cut like doors, guarded like corridors. The exporter needs both
+            // facts, so it gets the segments twice: once in `doors` for the
+            // geometry, and once here to say which of them have no door in them.
+            wallOpenings: planLayout.wallOpenings.map((opening) => opening.slice(0, 2)),
             pixelsPerMeter: planLayout.pixelsPerMeter,
             roomConfigs: configs,
             settings: { ...brief, useCatalog: true },
@@ -809,11 +834,14 @@ export default function WalkthroughScreen() {
     setPlanImage(saved.planImage || null);
     setRooms((saved.rooms || []).map((room) => room.map(toPixels)));
     setRoomConfigs((saved.roomConfigs || []).map((room) => ({ ...room })));
-    setOpenings((saved.openings || []).map((opening) => ({
-      ...openingDefaults(opening.kind, opening.variant),
-      ...opening,
-      points: opening.points.map(toPixels),
-    })));
+    setOpenings((saved.openings || []).map((opening) => {
+      const migrated = migrateOpeningKind(opening);
+      return {
+        ...openingDefaults(migrated.kind, migrated.variant),
+        ...migrated,
+        points: opening.points.map(toPixels),
+      };
+    }));
     // Plans saved while the style was still asked per room have no home style at
     // all, so the first room's answer becomes the home's. Taking the default
     // instead would silently re-decorate a plan someone had already finished.
@@ -1194,7 +1222,21 @@ export default function WalkthroughScreen() {
       if (openingIndex !== index) return opening;
       const raw = opening.points.map((value, valueIndex) => (valueIndex === pointIndex ? point : value));
       const placed = snapOpeningToNearestWall(raw, rooms, opening.kind, pixelsPerMeter);
-      return placed ? { ...opening, points: placed } : opening;
+      if (!placed) return opening;
+      // Dragging an end changes the width, and the width is what decides the
+      // section. Without this a door dragged out to 2.6 m stayed a "Single"
+      // door and was still built at 2.1 m high with a lintel over it — the
+      // width control beside the canvas has always re-derived this, and the
+      // handle had no reason to behave differently.
+      const meters = Math.hypot(
+        placed[1][0] - placed[0][0],
+        placed[1][1] - placed[0][1],
+      ) / pixelsPerMeter;
+      return {
+        ...opening,
+        points: placed,
+        ...openingDefaults(opening.kind, variantForWidth(opening.kind, meters)),
+      };
     }));
   }, [pixelsPerMeter, rooms]);
 
@@ -2390,7 +2432,7 @@ export default function WalkthroughScreen() {
                         <View style={styles.openingEditor}>
                           <ChipRow
                             label="Type"
-                            options={["door", "window", "balcony"]}
+                            options={["door", "wallOpening", "window", "balcony"]}
                             value={openings[selection.index].kind}
                             formatOption={(option) => (OPENING_SPECS[option] || OPENING_SPECS.door).label}
                             onChange={(kind) => editOpening(selection.index, { kind })}
@@ -5126,7 +5168,7 @@ function ToolPalette({ tool, onChange, snapToGrid, onToggleSnap, hasRooms }) {
 
       {openingLocked && (
         <Text style={styles.paletteLocked}>
-          Doors, windows and balconies go into a wall — draw a room first.
+          Doors, openings, windows and balconies go into a wall — draw a room first.
         </Text>
       )}
 

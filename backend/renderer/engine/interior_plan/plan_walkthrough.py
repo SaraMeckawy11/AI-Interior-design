@@ -26,6 +26,7 @@ import os
 import random
 import statistics
 import time
+from contextvars import ContextVar
 
 import numpy as np
 import open3d as o3d
@@ -59,6 +60,12 @@ MIN_DOOR_W = 1.0           # every doorway is at least this wide (m) so the
 MIN_WINDOW_W = 0.7
 OPENING_EDGE_TOL = 0.6     # door/window is assigned to every wall closer than this
 WALL_GAP = 0.16            # furniture stand-off from the wall line
+PASSAGE_W = 1.10           # the walking route kept clear through an opening
+                           # that has no door in it. A doorway is guarded by
+                           # its own width because a leaf swings across it; a
+                           # cased opening is guarded by this instead, because
+                           # people walk through the middle of a 3 m gap, not
+                           # across the whole of it.
 
 SCALE_BOOST = 1.15         # enlarge the building shell relative to the walker
                            # (rooms feel bigger; furniture stays real-size)
@@ -1711,6 +1718,30 @@ def _door_frame(op1, op2, wall_angle, frame_color=None):
             bar(-0.015, L + 0.015, DOOR_HEIGHT - 0.02, DOOR_HEIGHT + 0.055)]
 
 
+#: The openings in this build that have no door in them, as world-metre lines.
+#:
+#: A cased opening reaches the wall builder as a door, because that is what it
+#: is to a wall — the same hole, cut through every coincident edge. What it is
+#: not is a doorway: no leaf, no casing and no lintel, since the point of one is
+#: to open a room into the next rather than to give it a door.
+#:
+#: `build_walls` and the finish-skin builder are module-level and take no
+#: config, so the list is published here for the length of one build instead of
+#: being threaded through their signatures — which are also implemented a second
+#: time in the web exporter's overrides. Empty for every caller that does not
+#: draw them, which is every path except the walkthrough exporter.
+_ACTIVE_WALL_OPENINGS = ContextVar("livinai_wall_openings", default=())
+
+
+def cased_opening_at(centre) -> bool:
+    """Whether the opening centred here is a cased opening, not a doorway."""
+    segments = _ACTIVE_WALL_OPENINGS.get()
+    if not segments:
+        return False
+    point = Point(float(centre[0]), float(centre[1]))
+    return any(line.distance(point) <= 0.40 for line in segments)
+
+
 def build_walls(edges, wall_color, material_name=None, trim_color=None):
     """Wall meshes with door/window cutouts, at walkthrough wall height.
 
@@ -1755,17 +1786,21 @@ def build_walls(edges, wall_color, material_name=None, trim_color=None):
                 add_wall(w)
             op1, op2 = p1 + (p2 - p1) * t0, p1 + (p2 - p1) * t1
             if typ in ("door", "door_hole"):
-                w = wall_segment(op1, op2, DOOR_HEIGHT, WALL_H, wall_color)
-                add_wall(w)
-                if typ == "door":
-                    meshes.extend(
-                        _door_frame(
-                            op1,
-                            op2,
-                            wall_angle,
-                            frame_color=trim_color,
+                # A cased opening runs to the ceiling and carries no casing.
+                # Building the lintel and the frame over it is what made the
+                # explicit control indistinguishable from a very wide door.
+                if not cased_opening_at((op1 + op2) / 2.0):
+                    w = wall_segment(op1, op2, DOOR_HEIGHT, WALL_H, wall_color)
+                    add_wall(w)
+                    if typ == "door":
+                        meshes.extend(
+                            _door_frame(
+                                op1,
+                                op2,
+                                wall_angle,
+                                frame_color=trim_color,
+                            )
                         )
-                    )
             else:
                 w = wall_segment(op1, op2, 0, WINDOW_SILL, wall_color)
                 add_wall(w)
@@ -1905,7 +1940,10 @@ def build_wall_finish_skins(room_m, edges, wall_color, material_name):
             opening_a = p1 + (p2 - p1) * t0
             opening_b = p1 + (p2 - p1) * t1
             if typ in ("door", "door_hole"):
-                add_skin(opening_a, opening_b, DOOR_HEIGHT, WALL_H)
+                # Nothing above a cased opening to carry a finish — see
+                # `build_walls`, which does not build the lintel either.
+                if not cased_opening_at((opening_a + opening_b) / 2.0):
+                    add_skin(opening_a, opening_b, DOOR_HEIGHT, WALL_H)
             else:
                 add_skin(opening_a, opening_b, 0.0, WINDOW_SILL)
                 add_skin(
@@ -2581,6 +2619,19 @@ class RoomFurnisher:
         # push a group sideways out of the entry sightline while the doorway
         # itself stays clear.
         self.door_axes = []
+        # Some of these cuts have no door in them.
+        #
+        # A cased opening reaches this loop as a door, because that is what it
+        # is to a wall — the same hole, cut through every coincident edge. But
+        # it has no leaf to swing and no jamb to step around, and guarding it
+        # like a doorway is what emptied the end of a room around it: the swing
+        # circle plus a corridor as wide as the hole is nearly five square
+        # metres of protected floor on a 3 m opening, which is why a dining
+        # room with an open wall was getting a table sized for whatever was
+        # left rather than for the room.
+        #
+        # What it actually needs kept clear is the route through it, and a
+        # route is one person wide however wide the hole around it is.
         for e in edges:
             p1, p2 = np.array(e["p1"], dtype=float), np.array(e["p2"], dtype=float)
             for typ, t0, t1 in e.get("openings", []):
@@ -2589,7 +2640,10 @@ class RoomFurnisher:
                 a = p1 + (p2 - p1) * t0
                 b = p1 + (p2 - p1) * t1
                 c = (a + b) / 2.0
-                self.door_zones.append(Point(c[0], c[1]).buffer(0.95))
+                cased = cased_opening_at(c)
+                # No leaf, no swing, nothing to keep clear for one.
+                if not cased:
+                    self.door_zones.append(Point(c[0], c[1]).buffer(0.95))
 
                 span = b - a
                 width = float(np.hypot(span[0], span[1]))
@@ -2610,6 +2664,12 @@ class RoomFurnisher:
                 # passes drop it again.
                 reach = float(min(1.40, max(0.70, math.sqrt(self.poly.area) * 0.40)))
                 half = max(width, MIN_DOOR_W) / 2.0 + 0.15
+                if cased:
+                    # The passage, not the hole: a person-and-a-bit wide, down
+                    # the middle of the opening, and no deeper than the step it
+                    # takes to be through it.
+                    half = min(half, PASSAGE_W / 2.0)
+                    reach = min(reach, 0.85)
                 corners = [
                     c + tangent * half,
                     c + tangent * half + normal * reach,
@@ -4133,7 +4193,7 @@ def _configure_pbr_lighting(open3d_scene, lights):
 
 
 def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None,
-                furnished=True):
+                furnished=True, wall_openings_px=None):
     """Full 3D scene from plan pixels.
 
     px_per_m=None auto-calibrates the scale from the plan itself (door
@@ -4165,9 +4225,26 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
                for a, b in doors_px]
     windows_m = [(px_to_m_real(w[0], px_per_m), px_to_m_real(w[1], px_per_m))
                  for w in windows_px]
+    # Which of the door cuts are cased openings with nothing hung in them. They
+    # are already in `doors_px` — the caller merges them there so the walls are
+    # cut identically — and this list only says which ones they were.
+    wall_openings_m = [
+        (px_to_m_real(w[0], px_per_m), px_to_m_real(w[1], px_per_m))
+        for w in (wall_openings_px or [])
+    ]
 
     if room_configs is None:
         room_configs = [{} for _ in rooms_m]
+
+    # Published for the wall builders, which take no config. Set on the way in
+    # and released on the way out; a build that raises in between leaves the
+    # value behind, which is harmless because the next build overwrites it here
+    # before anything reads it.
+    wall_opening_token = _ACTIVE_WALL_OPENINGS.set(tuple(
+        LineString([tuple(a[:2]), tuple(b[:2])])
+        for a, b in wall_openings_m
+        if float(np.hypot(b[0] - a[0], b[1] - a[1])) > 1e-6
+    ))
 
     # Whole-plan context computed once and shared with every room furnisher.
     _plan_has_dining_room = any(
@@ -4385,6 +4462,7 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
     ]
 
     bounds = unary_union(room_polys).bounds
+    _ACTIVE_WALL_OPENINGS.reset(wall_opening_token)
     return dict(
         meshes=meshes,
         allowed=allowed,

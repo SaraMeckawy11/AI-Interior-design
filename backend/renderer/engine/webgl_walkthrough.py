@@ -1688,24 +1688,28 @@ def _build_walls_with_balconies(edges, wall_color, material_name=None, trim_colo
                         )
                     )
             elif kind in ("door", "door_hole"):
-                add_wall(
-                    original.wall_segment(
-                        opening_a,
-                        opening_b,
-                        original.DOOR_HEIGHT,
-                        original.WALL_H,
-                        wall_color,
-                    )
-                )
-                if kind == "door":
-                    meshes.extend(
-                        original._door_frame(
+                # A cased opening runs to the ceiling and carries no casing.
+                # Building the lintel and the frame over it is what made the
+                # explicit control indistinguishable from a very wide door.
+                if not original.cased_opening_at((opening_a + opening_b) / 2.0):
+                    add_wall(
+                        original.wall_segment(
                             opening_a,
                             opening_b,
-                            wall_angle,
-                            frame_color=trim_color,
+                            original.DOOR_HEIGHT,
+                            original.WALL_H,
+                            wall_color,
                         )
                     )
+                    if kind == "door":
+                        meshes.extend(
+                            original._door_frame(
+                                opening_a,
+                                opening_b,
+                                wall_angle,
+                                frame_color=trim_color,
+                            )
+                        )
             else:
                 add_wall(
                     original.wall_segment(
@@ -1846,12 +1850,15 @@ def _build_wall_finish_skins_with_balconies(
                     original.WALL_H,
                 )
             elif kind in ("door", "door_hole"):
-                add_skin(
-                    opening_a,
-                    opening_b,
-                    original.DOOR_HEIGHT,
-                    original.WALL_H,
-                )
+                # Nothing above a cased opening to carry a finish — see the
+                # wall builder, which does not build the lintel either.
+                if not original.cased_opening_at((opening_a + opening_b) / 2.0):
+                    add_skin(
+                        opening_a,
+                        opening_b,
+                        original.DOOR_HEIGHT,
+                        original.WALL_H,
+                    )
             else:
                 add_skin(
                     opening_a,
@@ -1939,6 +1946,11 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
     self.balcony_access_zones = []
     self.circulation_zones = []
     self.door_access_entries = []
+    # The second half of the cased-opening guard. The engine's own keep-clear
+    # zones are sized in `RoomFurnisher.__init__`; this pass adds an approach
+    # corridor on top, and it was the wider of the two — `opening_width + 0.34`
+    # means a 3 m opening reserved a 3.34 m x 1.05 m slab of floor. Down the
+    # middle instead, at the width of the route through it.
     for edge in self.edges:
         p1 = np.asarray(edge["p1"], dtype=float)
         p2 = np.asarray(edge["p2"], dtype=float)
@@ -1960,8 +1972,13 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
             # a single doorway sterilised ~4-5 m2 and several openings together
             # fragmented a living room so badly that no dining zone could fit in
             # front of a balcony. Real circulation only needs ~1 m of approach.
-            corridor_depth = 1.15 if is_balcony else 1.05
-            corridor_width = opening_width + (0.34 if is_balcony else 0.34)
+            cased = not is_balcony and original.cased_opening_at(center)
+            corridor_depth = 1.15 if is_balcony else 0.85 if cased else 1.05
+            corridor_width = (
+                min(opening_width, original.PASSAGE_W) + 0.14
+                if cased
+                else opening_width + 0.34
+            )
             corridor_center = center + inward * corridor_depth / 2
             corridor = original.footprint_poly(
                 corridor_center,
@@ -5517,7 +5534,16 @@ def plan_kitchen_openings(rooms, doors, configs, pixels_per_meter=None):
     return planned, summaries
 
 
-def build_realtime_scene(output_path: Path, rooms, doors, windows, balconies, configs, pixels_per_meter):
+def build_realtime_scene(
+    output_path: Path,
+    rooms,
+    doors,
+    windows,
+    balconies,
+    configs,
+    pixels_per_meter,
+    wall_openings=None,
+):
     measured_pixels_per_meter = (
         float(pixels_per_meter)
         if pixels_per_meter
@@ -5530,6 +5556,20 @@ def build_realtime_scene(output_path: Path, rooms, doors, windows, balconies, co
         configs,
         scene_pixels_per_meter,
     )
+    # A cased opening is a doorway as far as the walls are concerned: the same
+    # cut, through every coincident edge, so the walkthrough can pass. Merging
+    # them here rather than giving them an opening type of their own is what
+    # keeps that true — a new type would have had to be taught to the wall
+    # builder, the frame builder, the hole merger and the slot finder, and a
+    # single missed check is a wall left standing across a 3 m opening.
+    #
+    # What they are *not* is a door, and the furnisher is told so separately.
+    cased_openings = [
+        [list(segment[0]), list(segment[1])]
+        for segment in (wall_openings or [])
+        if segment and len(segment) >= 2
+    ]
+    scene_doors = list(scene_doors) + cased_openings
     balcony_scale = scene_pixels_per_meter / original.SCALE_BOOST
     normalized_balconies = _normalize_balcony_door_segments(
         balconies,
@@ -5549,6 +5589,7 @@ def build_realtime_scene(output_path: Path, rooms, doors, windows, balconies, co
             px_per_m=scene_pixels_per_meter,
             room_configs=configs,
             furnished=True,
+            wall_openings_px=cased_openings,
         )
     scale = scene_pixels_per_meter / original.SCALE_BOOST
     room_shapes = []

@@ -89,6 +89,21 @@ export const OPENING_SPECS = {
   door: { meters: 0.9, minimumMeters: 0.4, color: "#AE6740", label: "Door" },
   window: { meters: 1.2, minimumMeters: 0.3, color: "#2C6089", label: "Window" },
   balcony: { meters: 1.8, minimumMeters: 0.4, color: "#2E7350", label: "Balcony" },
+  /**
+   * A hole in a wall, with no door in it.
+   *
+   * This used to be the fourth *door* variant, and being a door is what broke
+   * it. The furnisher guards every doorway with the floor a swinging leaf needs
+   * plus an approach corridor as wide as the opening — correct for a door,
+   * nonsense for a 3 m cased opening, where it sterilises the entire end of the
+   * room. The variant was also dropped from the payload sent to the renderer,
+   * so even a plan that said "wall opening" arrived at the server as a door.
+   *
+   * As its own kind it survives the trip, and the renderer can guard it for
+   * what it is: a route people walk through, one person wide, however wide the
+   * hole around it happens to be.
+   */
+  wallOpening: { meters: 2.6, minimumMeters: 0.6, color: "#6B5E8C", label: "Wall opening" },
 };
 
 export const OPENING_MIN_METERS = 0.3;
@@ -98,9 +113,13 @@ export const OPENING_VARIANTS = {
     { label: "Single", meters: 0.9, height: 2.1 },
     { label: "Double", meters: 1.6, height: 2.1 },
     { label: "Open passage", meters: 1.4, height: 2.18 },
-    // Floor to ceiling, so no lintel is built: this is how a room is opened
-    // into the next one rather than given a door.
+  ],
+  // Floor to ceiling, so no lintel is built: this is how a room is opened into
+  // the next one rather than given a door.
+  wallOpening: [
+    { label: "Cased opening", meters: 1.4, height: 2.18 },
     { label: "Wall opening", meters: 2.6, height: 2.8 },
+    { label: "Full width", meters: 3.6, height: 2.8 },
   ],
   window: [
     { label: "Slot", meters: 0.5, sillHeight: 1.2, height: 0.7 },
@@ -622,15 +641,43 @@ export default function PlanCanvas({
   };
 
   /**
+   * Which end of a selected opening a touch is reaching for, or -1 for its body.
+   *
+   * This used to take the *first* endpoint within the touch tolerance, and the
+   * tolerance is 20px against a standard door only 40px wide — so every point
+   * on the door was within reach of both ends and the first one always won.
+   * Grabbing the right end to widen a door dragged its left end over to your
+   * finger instead, which flipped the door inside out and made it narrower.
+   * Resizing by dragging was effectively impossible on anything door-sized.
+   *
+   * Two rules make it behave: take the *nearer* end, and only treat it as a
+   * grab when the finger is nearer to that end than to the middle. The outer
+   * thirds resize, the middle moves, and a finger past the end of the opening
+   * always resizes — which is exactly the direction you pull to make it wider.
+   */
+  const openingHandleAt = (opening, point) => {
+    if (!opening?.points?.[0] || !opening?.points?.[1]) return -1;
+    const [from, to] = opening.points;
+    const distances = opening.points.map(
+      (value) => Math.hypot(value[0] - point[0], value[1] - point[1]),
+    );
+    const nearest = distances[0] <= distances[1] ? 0 : 1;
+    if (distances[nearest] > touchSlop) return -1;
+    const centre = Math.hypot(
+      (from[0] + to[0]) / 2 - point[0],
+      (from[1] + to[1]) / 2 - point[1],
+    );
+    return distances[nearest] < centre ? nearest : -1;
+  };
+
+  /**
    * What is under the finger, in priority order. A vertex handle beats the room
    * it belongs to, and an opening beats the room it is cut into — otherwise
    * neither would ever be grabbable, since both sit inside a room's area.
    */
   const hitTest = (point) => {
     if (selection?.kind === "opening" && openings[selection.index]) {
-      const endpoint = openings[selection.index].points.findIndex(
-        (value) => Math.hypot(value[0] - point[0], value[1] - point[1]) <= touchSlop,
-      );
+      const endpoint = openingHandleAt(openings[selection.index], point);
       if (endpoint >= 0) return { kind: "openingEndpoint", index: selection.index, pointIndex: endpoint };
     }
     const room = rooms[selectedRoom];
@@ -1098,10 +1145,17 @@ export default function PlanCanvas({
           </G>
         )}
 
+        {/* The two ends of a selected opening, as grips rather than dots: this
+            is the control that changes its width, and it has to look grabbable
+            to be found. The inner mark is what distinguishes them at a glance
+            from a room's corner handles. */}
         {tool === "select" && selection?.kind === "opening" && openings[selection.index] && (
           <G>
             {openings[selection.index].points.map((point, index) => (
-              <Circle key={`opening-handle-${index}`} cx={point[0]} cy={point[1]} r={px(9)} fill={COLORS.surface} stroke={COLORS.accent} strokeWidth={px(2.5)} />
+              <G key={`opening-handle-${index}`}>
+                <Circle cx={point[0]} cy={point[1]} r={px(10)} fill={COLORS.surface} stroke={COLORS.accent} strokeWidth={px(2.5)} />
+                <Circle cx={point[0]} cy={point[1]} r={px(3)} fill={COLORS.accent} />
+              </G>
             ))}
           </G>
         )}
