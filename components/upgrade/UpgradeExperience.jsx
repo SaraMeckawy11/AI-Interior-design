@@ -483,37 +483,9 @@ function PurchaseFooter({
   const actionLabel = buyingPlan
     ? `${isSubscribed ? 'Switch to' : 'Start'} ${activePlan?.title}`
     : `Buy ${activePack?.coins ?? 0} coins`;
-  const summaryTitle = buyingPlan
-    ? `Livinai Pro ${activePlan?.title ?? ''}`.trim()
-    : coinLabel(activePack?.coins ?? 0);
-  const summaryDetail = buyingPlan
-    ? `Auto-renews until canceled · Up to ${PRO_RENDER_LIMIT_PER_DAY} renders per day`
-    : 'One-time purchase · Coins never expire';
-
   return (
     <View style={[styles.purchaseFooter, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <View style={styles.footerInner}>
-        <View style={styles.checkoutSummary} accessibilityRole="summary">
-          <View style={styles.checkoutCopy}>
-            <Text style={styles.checkoutTitle}>{summaryTitle}</Text>
-            <Text style={styles.checkoutDetail} numberOfLines={1}>
-              {summaryDetail}
-            </Text>
-          </View>
-          <View style={styles.checkoutPriceWrap}>
-            <Text
-              style={styles.checkoutPrice}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-            >
-              {price}
-            </Text>
-            {buyingPlan && activePlan?.period ? (
-              <Text style={styles.checkoutPeriod}>per {activePlan.period}</Text>
-            ) : null}
-          </View>
-        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={
@@ -542,17 +514,32 @@ function PurchaseFooter({
             ) : unavailable ? (
               <Text style={styles.primaryButtonTextDisabled}>Store unavailable</Text>
             ) : (
-              <Text
-                style={styles.primaryButtonText}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.82}
-              >
-                {actionLabel}
-              </Text>
+              <>
+                <Text
+                  style={styles.primaryButtonText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                >
+                  {actionLabel}
+                </Text>
+                <View style={styles.primaryButtonPriceWrap}>
+                  <Text style={styles.primaryButtonPrice}>{price}</Text>
+                </View>
+              </>
             )}
           </LinearGradient>
         </Pressable>
+        <Text
+          style={styles.footerNote}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.86}
+        >
+          {buyingPlan
+            ? `Auto-renews until canceled · Up to ${PRO_RENDER_LIMIT_PER_DAY} renders per day`
+            : 'One-time purchase · Coins never expire'}
+        </Text>
         {buyingPlan ? (
           <View style={styles.legalLinks}>
             <Pressable
