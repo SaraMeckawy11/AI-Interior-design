@@ -336,7 +336,6 @@ export default function WalkthroughScreen() {
   const [planImage, setPlanImage] = useState(null);
   const [canvasAspect, setCanvasAspect] = useState(CANVAS_RATIO);
   const [detectedPixelsPerMeter, setDetectedPixelsPerMeter] = useState(null);
-  const [detecting, setDetecting] = useState(false);
   const [planError, setPlanError] = useState("");
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
@@ -994,12 +993,12 @@ export default function WalkthroughScreen() {
    * and the server, so that happens when they save or leave the editor.
    */
   useEffect(() => {
-    if (view !== "editor" || !restored.current || detecting || rendering) return undefined;
+    if (view !== "editor" || !restored.current || rendering) return undefined;
     const timer = setTimeout(() => {
       saveLocally(planOwnerId, projectRecord()).catch(() => {});
     }, 700);
     return () => clearTimeout(timer);
-  }, [detecting, planOwnerId, projectRecord, rendering, view]);
+  }, [planOwnerId, projectRecord, rendering, view]);
 
   const pushToCloud = useCallback(async ({ announce } = {}) => {
     const record = projectRecord();
@@ -1465,55 +1464,22 @@ export default function WalkthroughScreen() {
     setHistory([]);
     setFuture([]);
     setFurnitureEdits({});
-    setDetecting(true);
     setPlanError("");
-
-    let detectionTimeout;
-    try {
-      const image = await FileSystem.readAsStringAsync(stableUri, { encoding: FileSystem.EncodingType.Base64 });
-      const controller = new AbortController();
-      detectionTimeout = setTimeout(() => controller.abort(), 60000);
-      const response = await fetch(apiUrl("/api/floorplans/detect"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ image, mimeType: asset.mimeType || "image/jpeg" }),
-        signal: controller.signal,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || data.message || "The plan could not be detected.");
-
-      const detectedWidth = Math.max(1, Number(data.width) || sourceWidth);
-      const detectedHeight = Math.max(1, Number(data.height) || sourceHeight);
-      const detectedAspect = Math.max(CANVAS_RATIO, Math.min(3, detectedHeight / detectedWidth));
-      const displayScale = sheetWidth / detectedWidth;
-      const toDisplay = (point) => [point[0] * displayScale, point[1] * displayScale];
-      const detectedRooms = (data.rooms || []).map((room) => room.map(toDisplay));
-      const detectedOpenings = [
-        ...(data.doors || []).map((points) => ({ kind: "door", points: points.slice(0, 2).map(toDisplay), ...openingDefaults("door") })),
-        ...(data.windows || []).map((points) => ({ kind: "window", points: points.slice(0, 2).map(toDisplay), ...openingDefaults("window") })),
-        ...(data.balconies || []).map((points) => ({ kind: "balcony", points: points.slice(0, 2).map(toDisplay), ...openingDefaults("balcony") })),
-      ];
-
-      setCanvasAspect(detectedAspect);
-      setDetectedPixelsPerMeter(Math.max(8, (Number(data.pixelsPerMeter) || detectedWidth / 15) * displayScale));
-      setRooms(detectedRooms);
-      setOpenings(detectedOpenings);
-      setRoomConfigs(detectedRooms.map((_, index) => configFor(index)));
-      setSelection(detectedRooms.length ? { kind: "room", index: 0 } : null);
-      setTool("select");
-      setPlanError(detectedRooms.length ? "" : "No closed rooms were detected. Trace them directly over the uploaded plan.");
-    } catch (error) {
-      setTool("room");
-      setPlanError(`${error.name === "AbortError" ? "Detection timed out." : error.message} The uploaded image is ready—trace the rooms directly over it.`);
-    } finally {
-      if (detectionTimeout) clearTimeout(detectionTimeout);
-      setDetecting(false);
-    }
+    // An uploaded plan is a tracing backdrop, and nothing else.
+    //
+    // It used to be sent to a detector first, which read rooms, doors, windows
+    // and a scale out of the picture and drew them for you. What it actually
+    // produced was somebody else’s rough draft to correct: rooms a little off
+    // the walls, openings in approximately the right places, and a scale guessed
+    // from the image — all of it needing checking, and all of it harder to fix
+    // than to draw. It also meant a minute of waiting, an upload of the whole
+    // image, and a failure mode of its own on a slow connection.
+    //
+    // Tracing is quick, exact, and the drawing tools are already good at it.
+    // The image goes straight under the grid and the room tool is armed.
+    setTool("room");
     return true;
-  }, [projectId, sheetWidth, token]);
+  }, [projectId]);
 
   /**
    * Start a new plan.
@@ -2250,7 +2216,6 @@ export default function WalkthroughScreen() {
                 <>
                   <PlanSourceBar
                     planImage={planImage}
-                    detecting={detecting}
                     error={planError}
                     onUpload={() => uploadPlan()}
                     onClear={() => {
@@ -2311,7 +2276,6 @@ export default function WalkthroughScreen() {
                       sheetHeight={sheetHeight}
                       pixelsPerMeter={pixelsPerMeter}
                       imageUri={planImage}
-                      detecting={detecting}
                       tool={tool}
                       rooms={rooms}
                       roomLabels={roomConfigs.map((room) => room.name)}
@@ -5027,23 +4991,19 @@ function PlanActionSheet({ project, onClose, onRename, onDelete }) {
  * a button and a clear button; four of those five described something the user
  * can see for themselves on the canvas directly below.
  */
-function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
+function PlanSourceBar({ planImage, error, onUpload, onClear }) {
   return (
     <View style={styles.sourceBar}>
       <View style={styles.sourceBarRow}>
-        {detecting
-          ? <ActivityIndicator size="small" color={COLORS.primaryDark} />
-          : <Ionicons name={planImage ? "image" : "grid-outline"} size={16} color={COLORS.primaryDark} />}
+        <Ionicons name={planImage ? "image" : "grid-outline"} size={16} color={COLORS.primaryDark} />
         <Text style={styles.sourceBarTitle} numberOfLines={1}>
-          {detecting ? "Reading your plan…" : planImage ? "Tracing your plan" : "Blank grid"}
+          {planImage ? "Tracing your plan" : "Blank grid"}
         </Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ disabled: detecting }}
           android_ripple={{ color: "rgba(51,96,74,0.14)" }}
           style={({ pressed }) => [styles.sourceBarButton, pressed && styles.pressedSurface]}
           onPress={onUpload}
-          disabled={detecting}
           hitSlop={LAYOUT.hitSlop}
         >
           <Text style={styles.sourceBarButtonText}>{planImage ? "Replace" : "Trace a photo"}</Text>
@@ -5061,8 +5021,8 @@ function PlanSourceBar({ planImage, detecting, error, onUpload, onClear }) {
           </Pressable>
         )}
       </View>
-      {/* Announced, not just coloured: this is the only place the plan reader
-          can report that it could not measure the photo. */}
+      {/* Announced, not just coloured: the one place this bar can say the
+          photo library refused, or that the file could not be copied. */}
       {!!error && (
         <Text style={styles.sourceBarError} accessibilityRole="alert" accessibilityLiveRegion="polite">
           {error}

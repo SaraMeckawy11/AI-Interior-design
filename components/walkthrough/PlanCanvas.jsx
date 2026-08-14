@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, {
   Circle,
   G,
@@ -415,7 +415,6 @@ export default function PlanCanvas({
   sheetHeight = SHEET_HEIGHT,
   pixelsPerMeter: suppliedPixelsPerMeter,
   imageUri,
-  detecting = false,
   tool,
   rooms,
   roomLabels = [],
@@ -1398,13 +1397,6 @@ export default function PlanCanvas({
         </View>
       )}
 
-      {detecting && (
-        <View style={styles.detecting} pointerEvents="none">
-          <ActivityIndicator color={COLORS.white} />
-          <Text style={styles.detectingText}>Detecting editable rooms and openings…</Text>
-        </View>
-      )}
-
       <View style={styles.scaleBadge} pointerEvents="none">
         <View style={[styles.scaleBar, { width: Math.max(12, Math.min(width * 0.34, pixelsPerMeter * zoom)) }]} />
         <Text style={styles.scaleLabel}>1 m</Text>
@@ -1487,12 +1479,4 @@ const styles = StyleSheet.create({
   },
   scaleBar: { height: 3, backgroundColor: COLORS.textSecondary, borderRadius: 2 },
   scaleLabel: { ...TYPE.caption, color: COLORS.textSecondary },
-  detecting: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: "rgba(24,35,31,0.62)",
-  },
-  detectingText: { ...TYPE.small, color: COLORS.white },
 });

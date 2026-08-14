@@ -2648,6 +2648,10 @@ class RoomFurnisher:
         # Floor that furniture may not stand on. Only the front door reserves
         # any — see the loop below.
         self.door_zones = []
+        # The entry zones alone, kept separately from `door_zones` so the one
+        # thing that must never end up in front of the front door can check for
+        # it even on the path that ignores every other guard.
+        self.entrance_zones = []
         # The line of sight straight in from each doorway, kept separately from
         # the keep-clear zones above and recorded for every door.
         #
@@ -2711,11 +2715,26 @@ class RoomFurnisher:
                 if cased_opening_at(c) or not entrance_door_at(c):
                     continue
 
-                # The way in. A leaf swings across its own width, and you need
-                # to be through the doorway and clear of it before turning.
-                reach = float(min(1.05, max(0.70, math.sqrt(self.poly.area) * 0.28)))
-                half = max(width, MIN_DOOR_W) / 2.0
-                self.door_zones.append(Point(c[0], c[1]).buffer(0.55))
+                # The way in, and the one place in the home that has to stay
+                # properly empty.
+                #
+                # Everything else in a flat opens onto another room you can
+                # stand in. The front door opens onto the landing, and everyone
+                # who comes through it arrives here: with the shopping, with a
+                # pushchair, with a coat to take off, turning to close the door
+                # behind them. A doorway's worth of clearance is not enough for
+                # that, and a dining table set just outside it — which is what
+                # kept happening, because a table is the biggest thing the
+                # furnisher places and the entry hall is usually the widest
+                # clear floor left — makes the room unusable at the one moment
+                # everybody uses it.
+                #
+                # So this one is generous on purpose: a real entry zone, not a
+                # threshold. It is the only guard left in the plan, so it can
+                # afford to be the size the job actually needs.
+                reach = float(min(2.60, max(1.70, math.sqrt(self.poly.area) * 0.55)))
+                half = max(width, MIN_DOOR_W) / 2.0 + 0.45
+                self.door_zones.append(Point(c[0], c[1]).buffer(1.15))
                 corners = [
                     c + tangent * half,
                     c + tangent * half + normal * reach,
@@ -2725,6 +2744,7 @@ class RoomFurnisher:
                 corridor = Polygon([(p[0], p[1]) for p in corners])
                 if corridor.is_valid and not corridor.is_empty:
                     self.door_zones.append(corridor)
+                    self.entrance_zones.append(corridor)
 
     @property
     def layered(self):

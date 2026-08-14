@@ -516,15 +516,53 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
             return None
         forced = np.asarray(position, dtype=float) if position is not None else self.centroid
         forced_yaw = structural_yaws[0]
+        forced_footprint = original.footprint_poly(
+            forced,
+            forced_yaw,
+            selected["zone_width"],
+            selected["zone_depth"],
+        )
+        # Anywhere but the front door.
+        #
+        # This path exists to guarantee a table, and it gets one by ignoring
+        # every keep-clear zone in the room. There is exactly one it must not
+        # ignore: a table standing in the entry is the single placement that
+        # makes a home unusable rather than merely awkward, and the entry is
+        # often the widest clear floor left, which is why the forced position
+        # lands there. Walk the set off the entrance zone along the room's own
+        # axes before falling back to standing it on the spot.
+        entrance_zones = [
+            zone.buffer(0.20)
+            for zone in getattr(self, "entrance_zones", ())
+        ]
+        if entrance_zones and any(
+            forced_footprint.intersects(zone) for zone in entrance_zones
+        ):
+            axis_x = np.array([math.cos(forced_yaw), math.sin(forced_yaw)])
+            axis_y = np.array([-math.sin(forced_yaw), math.cos(forced_yaw)])
+            safe_room = self.poly.buffer(-0.10)
+            for step in (0.40, 0.80, 1.20, 1.60, 2.00, 2.60, 3.20):
+                for axis in (axis_y, -axis_y, axis_x, -axis_x):
+                    shifted = forced + axis * step
+                    candidate = original.footprint_poly(
+                        shifted,
+                        forced_yaw,
+                        selected["zone_width"],
+                        selected["zone_depth"],
+                    )
+                    if candidate.within(safe_room) and not any(
+                        candidate.intersects(zone) for zone in entrance_zones
+                    ):
+                        forced = shifted
+                        forced_footprint = candidate
+                        break
+                else:
+                    continue
+                break
         pose = {
             "pos": forced,
             "yaw": forced_yaw,
-            "footprint": original.footprint_poly(
-                forced,
-                forced_yaw,
-                selected["zone_width"],
-                selected["zone_depth"],
-            ),
+            "footprint": forced_footprint,
         }
 
     # Once a valid open-plan pose is found, slide the complete set toward the
@@ -610,50 +648,72 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
 
     placed_chair_count = 0
 
-    def place_dining_chair(position, chair_yaw):
-        nonlocal placed_chair_count
-        placed = self.add(
-            chair_builder(self.P),
-            position,
-            chair_yaw,
-            block=False,
-            avoid_doors=True,
-            check=True,
-        )
-        if placed:
-            placed_chair_count += 1
-        return placed
+    # Chairs go down in facing pairs, or not at all.
+    #
+    # Each one used to be offered to the room on its own and dropped if it did
+    # not fit, so a table against a slightly tight wall came out with three
+    # chairs, or five: one side of the table seated and the other side bare.
+    # Nobody lays a table like that. A dining table is symmetrical furniture and
+    # it is read as symmetrical, so an odd chair count is the first thing that
+    # looks wrong about the room, well before anybody counts the seats.
+    #
+    # The two chairs facing each other across the table are therefore one
+    # decision. Both fit, or neither is placed, and the count is always even.
+    def chair_candidate(position, chair_yaw):
+        built = chair_builder(self.P)
+        _meshes, chair_w, chair_d = built
+        footprint = original.footprint_poly(position, chair_yaw, chair_w, chair_d)
+        return {
+            "built": built,
+            "pos": position,
+            "yaw": chair_yaw,
+            "fits": self._ok(footprint, block=False, avoid_doors=True),
+        }
 
-    if table_shape == "round":
-        chair_radius = table_width / 2 + 0.36
-        for index in range(chair_count):
-            angle = table_yaw + (2 * math.pi * index / chair_count)
-            chair_pos = center + np.array([math.cos(angle), math.sin(angle)]) * chair_radius
-            facing = center - chair_pos
-            place_dining_chair(
-                chair_pos,
-                original.yaw_facing(facing),
+    def place_chair_pair(one, two, force=False):
+        nonlocal placed_chair_count
+        if not force and not (one["fits"] and two["fits"]):
+            return False
+        for entry in (one, two):
+            self.add(
+                entry["built"],
+                entry["pos"],
+                entry["yaw"],
+                block=False,
+                avoid_doors=False,
+                check=False,
             )
-    elif table_shape == "square":
+            placed_chair_count += 1
+        return True
+
+    def radial_candidate(angle, radius):
+        chair_pos = center + np.array([math.cos(angle), math.sin(angle)]) * radius
+        return chair_candidate(chair_pos, original.yaw_facing(center - chair_pos))
+
+    first_pair = None
+    if table_shape in ("round", "square"):
         chair_radius = table_width / 2 + 0.36
-        chair_layout = (
-            ((0.0, chair_radius), (0.0, -chair_radius))
-            if chair_count == 2
-            else (
-                (chair_radius, 0.0),
-                (-chair_radius, 0.0),
-                (0.0, chair_radius),
-                (0.0, -chair_radius),
-            )
+        # A square top seats its covers on the four sides; a round one spaces
+        # them evenly. Either way they come in opposite pairs.
+        angles = (
+            [table_yaw + math.pi * index / 2 for index in range(4)]
+            if table_shape == "square" and chair_count > 2
+            else [table_yaw + math.pi / 2, table_yaw - math.pi / 2]
+            if table_shape == "square"
+            else [
+                table_yaw + (2 * math.pi * index / chair_count)
+                for index in range(chair_count)
+            ]
         )
-        local_x = np.array([math.cos(table_yaw), math.sin(table_yaw)])
-        local_y = np.array([-math.sin(table_yaw), math.cos(table_yaw)])
-        for x, y in chair_layout:
-            chair_pos = center + local_x * x + local_y * y
-            place_dining_chair(
-                chair_pos,
-                original.yaw_facing(center - chair_pos),
+        half = len(angles) // 2
+        for index in range(half):
+            pair = (
+                radial_candidate(angles[index], chair_radius),
+                radial_candidate(angles[index + half], chair_radius),
             )
+            if first_pair is None:
+                first_pair = pair
+            place_chair_pair(*pair)
     else:
         local_x = np.array([math.cos(table_yaw), math.sin(table_yaw)])
         local_y = np.array([-math.sin(table_yaw), math.cos(table_yaw)])
@@ -678,21 +738,35 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                 table_width * 0.345,
             )
         )
-        for side in (-1, 1):
-            for offset in longitudinal_positions:
-                chair_pos = center + local_y * side * side_offset + local_x * offset
-                place_dining_chair(
-                    chair_pos,
+        # Across the table, not along it: a pair is a seat and the seat facing
+        # it, so a side that cannot take a chair takes its partner with it and
+        # the setting stays symmetrical.
+        for offset in longitudinal_positions:
+            pair = tuple(
+                chair_candidate(
+                    center + local_y * side * side_offset + local_x * offset,
                     original.yaw_facing(-local_y * side),
                 )
+                for side in (-1, 1)
+            )
+            if first_pair is None:
+                first_pair = pair
+            place_chair_pair(*pair)
         if chair_count >= 6:
             end_offset = table_width / 2 + 0.38
-            for side in (-1, 1):
-                chair_pos = center + local_x * side * end_offset
-                place_dining_chair(
-                    chair_pos,
+            place_chair_pair(*(
+                chair_candidate(
+                    center + local_x * side * end_offset,
                     original.yaw_facing(-local_x * side),
                 )
+                for side in (-1, 1)
+            ))
+
+    # A table with nothing at it is not a dining set. If the room was too tight
+    # for any pair to pass the check, seat the first one anyway: two chairs a
+    # little into a walkway still read as a place to eat, and both can be moved.
+    if not placed_chair_count and first_pair is not None:
+        place_chair_pair(*first_pair, force=True)
 
     reserved_dining_zone = pose["footprint"].buffer(
         0.10 if open_plan_dining else 0.18
@@ -2025,10 +2099,17 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                 and not cased
                 and original.entrance_door_at(center)
             )
-            corridor_depth = 1.15 if is_balcony else 0.80 if cased else 0.95
+            corridor_depth = (
+                1.15 if is_balcony
+                else 0.80 if cased
+                else 1.90 if entrance
+                else 0.95
+            )
             corridor_width = (
                 min(opening_width, original.PASSAGE_W) + 0.10
                 if cased
+                else opening_width + 0.90
+                if entrance
                 else min(opening_width, 1.30) + 0.10
             )
             corridor_center = center + inward * corridor_depth / 2
@@ -2070,6 +2151,7 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                 # on this one.
                 if entrance:
                     self.door_zones.append(corridor)
+                    self.entrance_zones.append(corridor)
 
 
 def _build_bedside_commode(palette, w=0.42, d=0.38):
