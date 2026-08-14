@@ -250,51 +250,59 @@ def is_floor_plan(space_type) -> bool:
 def build_floor_plan_prompt(*, design_style: str, color_rule: str) -> str:
     """Return the brief for a plan-view render of a whole home.
 
-    This is a re-skin, and it has to read as one, because the plan is the
-    whole point of the picture.
+    The plan is locked. The furniture is not.
 
-    Two things were wrong with the brief this replaces. It described an image
-    that was not the one being sent: the walkthrough's plan view is an orbit
-    camera looking down at an angle the person chooses, anywhere from 15 to 75
-    degrees off vertical, and telling the model it was receiving a top-down
-    plan with "walls cut off at wall height" invited it to redraw the view it
-    had actually been given. And under that it asked, in detail, for every room
-    to be furnished — seating and rugs, beds and nightstands, fitted kitchen
-    runs. Over a four-step edit that reads as "produce this scene", and the
-    layout is what gets spent producing it.
+    Getting this right has meant missing it from both sides. The first version
+    asked for every room to be furnished from scratch, which over a four-step
+    edit reads as "produce this scene" — and the layout was what got spent
+    producing it. The correction locked everything: same contents, same sizes,
+    change the surfaces and only the surfaces. That held the plan perfectly and
+    left the rooms full of what the walkthrough actually draws, which is
+    boxes — a sofa is a slab with a slab behind it, a bed is a slab with two
+    smaller slabs on top. Re-skinned in oak and linen they are still slabs, and
+    the picture reads as a massing study rather than a home.
 
-    But the frame already *has* all of that. The walkthrough drew the walls the
-    person laid out and furnished every room from them; what it cannot do is
-    make oak look like oak. So the brief now asks for exactly that difference
-    and nothing else: same layout, same contents, same camera, real materials.
-    Preservation is most of the text because preservation is most of the job.
+    Both halves matter, and they are different halves. The architecture and the
+    camera are the person's own drawing and are reproduced exactly. The blocks
+    standing in the rooms are placeholders — they say *sofa here, facing this
+    way, this big*, and that is all they are for. So the brief keeps the first
+    and rebuilds the second: same position, same footprint, same facing, but
+    modelled as the real piece, and styled the way a designer would finish the
+    room around it.
     """
     style = design_style or "Modern"
     return (
-        "Re-render this image as a photorealistic architectural model. It is a "
-        "3D cutaway model of one apartment with the ceilings removed, seen from "
-        "above, and it is already finished: every wall, room and piece of "
-        "furniture is where it belongs.\n\n"
-        "COPY THE MODEL EXACTLY - HIGHEST PRIORITY:\n"
-        "- Same layout: the same outline, the same walls in the same places, "
-        "the same rooms at the same sizes and proportions, the same doors and "
-        "windows in the same openings.\n"
-        "- Same contents: every piece of furniture stays the same piece, in the "
-        "same place, at the same size and the same angle. Add nothing, remove "
-        "nothing, move nothing, resize nothing.\n"
+        "Photorealistic architectural visualisation of this apartment, "
+        f"designed and finished by a senior {style} interior designer. The "
+        "ceilings are removed and the whole home is seen from above. The plain "
+        "blocks standing in the rooms are placeholders for real furniture.\n\n"
+        "KEEP THE PLAN EXACTLY - HIGHEST PRIORITY:\n"
+        "- Same architecture: the same outline, the same walls in the same "
+        "places, the same rooms at the same sizes and proportions, the same "
+        "doors and windows in the same openings. Add no room, wall or opening, "
+        "remove none, move none.\n"
         "- Same view: keep the camera, angle, framing, scale and orientation "
         "identical. Do not rotate, re-centre, crop or level it. No roof and no "
-        "ceilings — every room stays open from above.\n\n"
-        "CHANGE THE SURFACES, AND ONLY THE SURFACES:\n"
-        f"- Give the flat model shapes real materials in a refined {style} "
-        "style: believable floors, painted walls, upholstery, timber, stone, "
-        "metal and glass, with visible weave, grain and edge detail.\n"
+        "ceilings — every room stays open from above.\n"
+        "- Same arrangement: each piece keeps its own place, its footprint and "
+        "the way it faces. Nothing is added to a room, taken out of it or "
+        "slid across it.\n\n"
+        "BUILD THE FURNITURE FOR REAL:\n"
+        "- Replace every placeholder block with the actual piece it stands "
+        "for, properly modelled at that exact spot and size: sofas with "
+        "cushions, seams and legs; beds with layered bedding and pillows; a "
+        "dining table with real chairs drawn up to it; kitchen runs with "
+        "doors, handles and worktops; wardrobes and shelving with real "
+        "fronts.\n"
+        "- Finish the rooms as one scheme: honest timber, stone, fabric and "
+        "metal with visible grain, weave and edge detail; rugs under the "
+        "seating and the beds; cushions and throws; art on the walls; a few "
+        "plants; lamps that read as lamps.\n"
         f"- COLOR: {color_rule} — lightest over floors and walls, mid-tones on "
         "upholstery and rugs, the deepest color in a few small touches.\n"
-        "- Light it like a photographed architectural model: soft even daylight "
-        "from above, a contact shadow under every object, no hard sun.\n"
-        "- No text, labels, dimensions, arrows, people, watermark, and no "
-        "second copy of the plan anywhere in the frame."
+        "- Light it like a top-end architectural visual: soft even daylight, a "
+        "contact shadow under every leg, crisp material detail, no hard sun.\n"
+        "- No text, labels, dimensions, arrows, people or watermark."
     )
 
 
