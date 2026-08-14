@@ -151,47 +151,51 @@ def is_floor_plan(space_type) -> bool:
 def build_floor_plan_prompt(*, design_style: str, color_rule: str) -> str:
     """Return the brief for a plan-view render of a whole home.
 
-    A plan and a room photograph are two different jobs, and the plan was
-    being given the room's brief. "Redesign this Floor Plan… photorealistic
-    editorial interior, natural light" over a top-down view of a whole home
-    reads as an instruction to produce a room — so the model picked one corner
-    of the plan, invented an eye-level camera and a ceiling for it, and
-    returned an interior shot that had lost the layout the person drew.
+    This is a re-skin, and it has to read as one, because the plan is the
+    whole point of the picture.
 
-    Everything below therefore names what the image *is* before it asks for
-    anything: a plan, kept as a plan, still seen from above, still open to the
-    sky, with every room furnished at once.
+    Two things were wrong with the brief this replaces. It described an image
+    that was not the one being sent: the walkthrough's plan view is an orbit
+    camera looking down at an angle the person chooses, anywhere from 15 to 75
+    degrees off vertical, and telling the model it was receiving a top-down
+    plan with "walls cut off at wall height" invited it to redraw the view it
+    had actually been given. And under that it asked, in detail, for every room
+    to be furnished — seating and rugs, beds and nightstands, fitted kitchen
+    runs. Over a four-step edit that reads as "produce this scene", and the
+    layout is what gets spent producing it.
+
+    But the frame already *has* all of that. The walkthrough drew the walls the
+    person laid out and furnished every room from them; what it cannot do is
+    make oak look like oak. So the brief now asks for exactly that difference
+    and nothing else: same layout, same contents, same camera, real materials.
+    Preservation is most of the text because preservation is most of the job.
     """
     style = design_style or "Modern"
     return (
-        f"Render this floor plan as a photorealistic 3D cutaway floor plan of "
-        f"the whole home in a refined {style} style. It is a plan seen from "
-        "above, not a photograph taken inside a room.\n\n"
-        "PLAN - HIGHEST PRIORITY:\n"
-        "- Keep the layout exactly as drawn: same outline, wall lines, room "
-        "count, room sizes and proportions, and the same door and window "
-        "openings. Never add, remove, move, resize or merge a room, a wall or "
-        "an opening.\n"
-        "- Keep the overhead camera, angle, framing and orientation identical. "
-        "No roof and no ceilings: every room stays open to the camera and fully "
-        "visible from above, walls cut off at wall height.\n\n"
-        "DESIGN DIRECTION:\n"
-        "- Furnish every room for the function its existing furniture already "
-        "shows, and furnish all of them: seating around a rug in the living "
-        "room, a bed and bedsides in each bedroom, a table and chairs in the "
-        "dining room, fitted runs in the kitchen, fixtures in the bathroom.\n"
-        "- Designer furniture, clean silhouettes, honest materials, correctly "
-        "scaled to the room it stands in and squared to its walls.\n"
-        "- Keep every doorway and the route between rooms clear; no furniture "
-        "on a wall, in a doorway or outside the plan outline.\n"
-        "- Choose all floors, walls and finishes as one scheme across the whole "
-        "home; force no predetermined material or color.\n"
-        f"- COLOR: {color_rule}, weighted as a designer would: lightest or most "
-        "muted over floors and walls, mid-tones on upholstery and rugs, the "
-        "deepest color in a few small touches.\n"
-        "- Finish as a photorealistic architectural model: even soft daylight "
-        "from above, believable scale, contact shadows, crisp material detail. "
-        "No text, labels, dimensions, arrows, people or watermark."
+        "Re-render this image as a photorealistic architectural model. It is a "
+        "3D cutaway model of one apartment with the ceilings removed, seen from "
+        "above, and it is already finished: every wall, room and piece of "
+        "furniture is where it belongs.\n\n"
+        "COPY THE MODEL EXACTLY - HIGHEST PRIORITY:\n"
+        "- Same layout: the same outline, the same walls in the same places, "
+        "the same rooms at the same sizes and proportions, the same doors and "
+        "windows in the same openings.\n"
+        "- Same contents: every piece of furniture stays the same piece, in the "
+        "same place, at the same size and the same angle. Add nothing, remove "
+        "nothing, move nothing, resize nothing.\n"
+        "- Same view: keep the camera, angle, framing, scale and orientation "
+        "identical. Do not rotate, re-centre, crop or level it. No roof and no "
+        "ceilings — every room stays open from above.\n\n"
+        "CHANGE THE SURFACES, AND ONLY THE SURFACES:\n"
+        f"- Give the flat model shapes real materials in a refined {style} "
+        "style: believable floors, painted walls, upholstery, timber, stone, "
+        "metal and glass, with visible weave, grain and edge detail.\n"
+        f"- COLOR: {color_rule} — lightest over floors and walls, mid-tones on "
+        "upholstery and rugs, the deepest color in a few small touches.\n"
+        "- Light it like a photographed architectural model: soft even daylight "
+        "from above, a contact shadow under every object, no hard sun.\n"
+        "- No text, labels, dimensions, arrows, people, watermark, and no "
+        "second copy of the plan anywhere in the frame."
     )
 
 
