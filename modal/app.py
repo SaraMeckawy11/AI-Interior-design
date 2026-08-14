@@ -1401,8 +1401,12 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-hero-piece-v18",
+        "promptEngine": "gen-klein-hero-piece-v19-floor-plan",
         "interiorLocks": {"photo": "explicit-openings", "walkthrough": "concise"},
+        # A plan-view capture is briefed as a plan rather than as a room. Named
+        # here so a deployment that still gives it the room brief is visible
+        # from the health check instead of only from the picture.
+        "floorPlanBrief": "cutaway-from-above",
         "exteriorPrompt": "ad7a9ba2c5b396c78dbf390aa6136a3262dd0cec",
         "exteriorEngine": "ad7a9ba-exact-full-path",
         "exteriorBuildingSeed": 977,
