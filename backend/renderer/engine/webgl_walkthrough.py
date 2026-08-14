@@ -291,62 +291,70 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
     else:
         target_seats = 4 if area < 14.0 or minor < 2.8 else 6
 
-    def table_template(seats):
+    def long_shape(seats):
+        """The elongated silhouette this style would draw for `seats`."""
+        if any(word in style for word in ("industrial", "traditional")):
+            shape_options = ("rectangular", "racetrack")
+        elif any(word in style for word in ("scandinavian", "japandi", "minimal")):
+            shape_options = ("oval", "rounded_rectangle", "rectangular")
+        elif any(word in style for word in ("classic", "bohemian", "boho")):
+            shape_options = ("oval", "rectangular")
+        else:
+            shape_options = ("rectangular", "oval", "racetrack", "rounded_rectangle")
+        return shape_options[(style_pick + seats) % len(shape_options)]
+
+    def shape_candidates(seats):
+        """Table silhouettes for `seats`, the one the room suits first.
+
+        A circle is the default dining table, and the first shape tried
+        anywhere it can work: it seats four in the smallest footprint of any
+        shape, has no corner to walk into beside a doorway, and is the right
+        answer in the square-ish rooms most plans draw. The other shapes are
+        chosen by the space rather than by taste — a square top where a
+        formal, genuinely square room wants one, and the long family once the
+        room is clearly elongated or the table has to seat six.
+
+        Returning a list instead of one shape is what makes that a fit rather
+        than a guess: each candidate is offered to the pose search in turn, so
+        a narrow room that cannot take a round table gets the rectangle it can
+        take instead of losing its table altogether.
+        """
+        long_pick = long_shape(seats)
+        if seats >= 6:
+            # Six covers do not fit around a residential round table.
+            return (long_pick, "rectangular")
         balanced = aspect <= 1.24
+        formal = any(
+            word in style
+            for word in ("classic", "traditional", "industrial")
+        )
+        if aspect > 1.45:
+            # A clearly elongated room reads as a long table — except for a
+            # two-seater, which is a bistro table wherever it stands.
+            return (
+                ("round", long_pick, "square")
+                if seats <= 2
+                else (long_pick, "round", "square")
+            )
+        if seats == 4 and balanced and formal and not circulation_sensitive:
+            return ("square", "round", long_pick)
+        return ("round", "square", long_pick)
+
+    def table_template(seats, shape, clearance=None):
         dining_clearance = (
-            0.58
+            float(clearance)
+            if clearance is not None
+            else 0.58
             if open_plan_dining
             else DESIGN_CLEARANCES["dining_edge"]
         )
-        if seats == 2:
-            if balanced and minor >= 1.85:
-                shape = "round"
-                width = depth = 0.86
-            else:
-                shape = "rectangular"
-                width, depth = 1.02, 0.72
-        elif seats == 4 and (balanced or circulation_sensitive):
-            if circulation_sensitive:
-                # Rounded edges are the safest and most visually generous
-                # choice beside an active doorway/circulation lane.
-                shape = (
-                    "square"
-                    if any(
-                        word in style
-                        for word in ("classic", "traditional")
-                    )
-                    else "round"
-                )
-            else:
-                balanced_options = (
-                    ("round", "square")
-                    if any(
-                        word in style
-                        for word in (
-                            "scandinavian",
-                            "japandi",
-                            "minimal",
-                            "bohemian",
-                            "boho",
-                        )
-                    )
-                    else ("square", "round")
-                )
-                shape = balanced_options[
-                    style_pick % len(balanced_options)
-                ]
-            width = depth = 1.04 if shape == "round" else 0.98
+        if shape == "round":
+            width = depth = 0.88 if seats <= 2 else 1.06
+        elif shape == "square":
+            width = depth = 0.86 if seats <= 2 else 0.98
         else:
-            if any(word in style for word in ("industrial", "traditional")):
-                shape_options = ("rectangular", "racetrack")
-            elif any(word in style for word in ("scandinavian", "japandi", "minimal")):
-                shape_options = ("oval", "rounded_rectangle", "rectangular")
-            elif any(word in style for word in ("classic", "bohemian", "boho")):
-                shape_options = ("oval", "rectangular")
-            else:
-                shape_options = ("rectangular", "oval", "racetrack", "rounded_rectangle")
-            shape = shape_options[(style_pick + seats) % len(shape_options)]
             dimensions = {
+                2: (1.02, 0.72),
                 4: (1.26 if circulation_sensitive else 1.36, 0.78),
                 6: (1.78, 0.92),
                 8: (2.26, 1.02),
@@ -393,11 +401,30 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         4: (4, 2),
         2: (2,),
     }[target_seats]
-    selected = None
-    pose = None
-    for seat_count in seat_candidates:
-        candidate = table_template(seat_count)
-        candidate_pose = None
+
+    # The pull-back allowance, and what to do when the room cannot give it.
+    #
+    # A 0.90 m allowance on every edge is the right number for a room with
+    # space to spare, and it is why small dining rooms used to come back with
+    # no table at all: a 3 m square room inset for its walls leaves 2.76 m, the
+    # smallest four-seat zone at full allowance is 2.86 m, and the keep-clear
+    # corridor in front of the door takes a bite out of what is left. Every
+    # size failed, and the room — the one room named after its table — was
+    # furnished with a sideboard and nothing to eat at.
+    #
+    # So the allowance steps down before the table does. Each rung is still a
+    # usable gap to pull a chair back into; a slightly tight dining room is a
+    # far better answer than an empty one.
+    default_clearance = (
+        0.58 if open_plan_dining else DESIGN_CLEARANCES["dining_edge"]
+    )
+    clearance_ladder = [None] + [
+        value
+        for value in (0.76, 0.62, 0.50)
+        if value < default_clearance
+    ]
+
+    def find_pose_for(candidate):
         if open_plan_dining and position is not None:
             safe_room = self.poly.buffer(-0.12)
             for candidate_yaw in structural_yaws:
@@ -418,28 +445,47 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                         for placed in self.placed
                     )
                 ):
-                    candidate_pose = {
+                    return {
                         "pos": np.asarray(position, dtype=float),
                         "yaw": candidate_yaw,
                         "footprint": preferred_footprint,
                     }
+        return self.find_open_pose(
+            candidate["zone_width"],
+            candidate["zone_depth"],
+            preferred=position,
+            yaws=structural_yaws,
+        )
+
+    selected = None
+    pose = None
+    for clearance in clearance_ladder:
+        for seat_count in seat_candidates:
+            for shape in shape_candidates(seat_count):
+                candidate = table_template(seat_count, shape, clearance)
+                candidate_pose = find_pose_for(candidate)
+                if candidate_pose is not None:
+                    selected = candidate
+                    pose = candidate_pose
                     break
-        if candidate_pose is None:
-            candidate_pose = self.find_open_pose(
-                candidate["zone_width"],
-                candidate["zone_depth"],
-                preferred=position,
-                yaws=structural_yaws,
-            )
-        if candidate_pose is not None:
-            selected = candidate
-            pose = candidate_pose
+            if pose is not None:
+                break
+        if pose is not None:
             break
 
+    smallest = seat_candidates[-1]
     if selected is None:
-        selected = table_template(seat_candidates[-1])
+        selected = table_template(
+            smallest,
+            shape_candidates(smallest)[0],
+            clearance_ladder[-1],
+        )
     if pose is None:
-        if not guarantee:
+        # A dining room with no dining table is not a dining room. Once every
+        # size, shape and allowance has been tried, stand the set on the room's
+        # centre and let the person move it, rather than hand back an empty
+        # floor. Other rooms keep the old behaviour and simply go without.
+        if not guarantee and not dedicated_dining:
             return None
         forced = np.asarray(position, dtype=float) if position is not None else self.centroid
         forced_yaw = structural_yaws[0]
@@ -3089,6 +3135,21 @@ def _furnish_complete_bedroom(self):
 
 def _furnish_complete_dining(self):
     _ORIGINAL_FURNISH_DINING(self)
+    # Recover the table the way the open-plan living room does.
+    #
+    # The recipe above asks for one zone, at one size, on the centroid, and
+    # accepts whatever comes back — so a room whose doorway corridor crosses
+    # its middle came out with a sideboard, a plant, and nowhere to eat. The
+    # allowance ladder inside `place_dining_zone` covers most of that now; this
+    # is the last resort for the rest, and a dedicated dining room is the one
+    # place where standing the set down unconditionally is the right answer.
+    if not _furniture_with_suffix(self, "dining_table"):
+        if not self.place_dining_zone(position=self.centroid, compact=True):
+            self.place_dining_zone(
+                position=self.centroid,
+                compact=True,
+                guarantee=True,
+            )
     has_storage = any(
         "sideboard" in str(item.get("asset_key", ""))
         for item in self.editable_objects
@@ -3577,21 +3638,6 @@ def _place_required_coffee_table(self, sofa):
     return False
 
 
-def _turn_furniture_toward(item, target):
-    position = np.asarray(item["position"], dtype=float)
-    direction = np.asarray(target, dtype=float) - position
-    if float(np.linalg.norm(direction)) < 1e-6:
-        return
-    target_yaw = float(original.yaw_facing(direction))
-    current_yaw = float(item["yaw"])
-    delta = math.atan2(
-        math.sin(target_yaw - current_yaw),
-        math.cos(target_yaw - current_yaw),
-    )
-    if abs(delta) > math.radians(2.0):
-        original.rotate_furniture_object(item, delta)
-
-
 def _furnish_aligned_living(self):
     """Normalize the finished seating group around one measured focal axis."""
     _ORIGINAL_FURNISH_LIVING(self)
@@ -3718,7 +3764,20 @@ def _furnish_aligned_living(self):
             float(coffee_table["depth"]),
         )
 
-    _turn_furniture_toward(sofa, table_position)
+    # The sofa keeps the yaw its wall gave it.
+    #
+    # This used to turn the sofa to face the coffee table, which is fine when
+    # the table is dead ahead and wrong every other time. An L-sectional puts
+    # its table up to 0.62 m off the seating axis, and a table that could not
+    # be moved stays wherever it was — so "face the table" swung the sofa as
+    # much as thirty degrees off the wall behind it. Because it rotates about
+    # its own centre, and that centre sits half a sofa-depth off the wall, one
+    # end then buried itself in the plaster: the tilted sofa half-inside the
+    # wall that people were seeing.
+    #
+    # A sofa against a wall is parallel to that wall. `against_wall` already
+    # places it square, and the coffee table is aligned to the sofa above
+    # rather than the other way round, so there is nothing left to correct.
     chairs = [
         item
         for item in self.editable_objects

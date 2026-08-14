@@ -236,6 +236,64 @@ def resolve_render_source(source) -> str:
     return WALKTHROUGH_SOURCE if value == WALKTHROUGH_SOURCE else PHOTO_SOURCE
 
 
+#: Space names that mean "a whole home seen from above", not one room seen from
+#: inside it. The walkthrough sends this when the render is taken from its plan
+#: view rather than from the walking camera.
+FLOOR_PLAN_SPACES = {"floor plan", "floorplan", "plan", "3d floor plan"}
+
+
+def is_floor_plan(space_type) -> bool:
+    """Whether the input image is a plan of a home rather than a room photo."""
+    return str(space_type or "").strip().lower() in FLOOR_PLAN_SPACES
+
+
+def build_floor_plan_prompt(*, design_style: str, color_rule: str) -> str:
+    """Return the brief for a plan-view render of a whole home.
+
+    A plan and a room photograph are two different jobs, and the plan was
+    being given the room's brief. "Redesign this Floor Plan… photorealistic
+    editorial interior, natural light" over a top-down view of a whole home
+    reads as an instruction to produce a room — so the model picked one corner
+    of the plan, invented an eye-level camera and a ceiling for it, and
+    returned an interior shot that had lost the layout the person drew.
+
+    Everything below therefore names what the image *is* before it asks for
+    anything: a plan, kept as a plan, still seen from above, still open to the
+    sky, with every room furnished at once.
+    """
+    style = design_style or "Modern"
+    return (
+        f"Render this floor plan as a photorealistic 3D cutaway floor plan of "
+        f"the whole home in a refined {style} style. It is a plan seen from "
+        "above, not a photograph taken inside a room.\n\n"
+        "PLAN - HIGHEST PRIORITY:\n"
+        "- Keep the layout exactly as drawn: same outline, wall lines, room "
+        "count, room sizes and proportions, and the same door and window "
+        "openings. Never add, remove, move, resize or merge a room, a wall or "
+        "an opening.\n"
+        "- Keep the overhead camera, angle, framing and orientation identical. "
+        "No roof and no ceilings: every room stays open to the camera and fully "
+        "visible from above, walls cut off at wall height.\n\n"
+        "DESIGN DIRECTION:\n"
+        "- Furnish every room for the function its existing furniture already "
+        "shows, and furnish all of them: seating around a rug in the living "
+        "room, a bed and bedsides in each bedroom, a table and chairs in the "
+        "dining room, fitted runs in the kitchen, fixtures in the bathroom.\n"
+        "- Designer furniture, clean silhouettes, honest materials, correctly "
+        "scaled to the room it stands in and squared to its walls.\n"
+        "- Keep every doorway and the route between rooms clear; no furniture "
+        "on a wall, in a doorway or outside the plan outline.\n"
+        "- Choose all floors, walls and finishes as one scheme across the whole "
+        "home; force no predetermined material or color.\n"
+        f"- COLOR: {color_rule}, weighted as a designer would: lightest or most "
+        "muted over floors and walls, mid-tones on upholstery and rugs, the "
+        "deepest color in a few small touches.\n"
+        "- Finish as a photorealistic architectural model: even soft daylight "
+        "from above, believable scale, contact shadows, crisp material detail. "
+        "No text, labels, dimensions, arrows, people or watermark."
+    )
+
+
 def build_gen_klein_interior_prompt(
     *,
     space_type: str,
@@ -267,6 +325,12 @@ def build_gen_klein_interior_prompt(
         color_rule = f"the selected palette ({palette})"
     else:
         color_rule = f"{tone} as the overall direction"
+
+    # A plan is not a room. Everything below this line — programme, hero piece,
+    # decor, eye-level photography — describes one room seen from inside it,
+    # which is the wrong brief for a whole home seen from above.
+    if is_floor_plan(room_type):
+        return build_floor_plan_prompt(design_style=style, color_rule=color_rule)
 
     room_key = room_type.lower().strip()
     programmes = {

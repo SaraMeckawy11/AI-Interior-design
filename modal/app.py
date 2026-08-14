@@ -61,6 +61,7 @@ from prompt_engine import (
     build_gen_klein_interior_prompt,
     build_prompt,
     build_short_prompt,
+    is_floor_plan,
     resolve_mode,
     resolve_render_source,
 )
@@ -598,7 +599,13 @@ class GenKlein:
         resolved_mode = resolve_mode(mode, room_type)
         width, height = self._target_size(
             source,
-            preserve_aspect=resolved_mode == "exterior",
+            # A plan keeps its source ratio for the same reason a facade does,
+            # and with more at stake: squeezing a phone-shaped frame into 4:3
+            # stretches the whole floor along one axis, so every room comes
+            # back a different shape from the one that was drawn.
+            preserve_aspect=(
+                resolved_mode == "exterior" or is_floor_plan(room_type)
+            ),
         )
         if resolved_mode == "interior" and room_type.strip().lower() != "prompt only":
             prompt = build_gen_klein_interior_prompt(

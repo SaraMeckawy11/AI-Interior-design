@@ -2678,13 +2678,22 @@ class RoomFurnisher:
                 for zone in self.door_zones
             )
             if footprint.within(safe_room) and clears_doors:
+                built = build_rug(
+                    self.P,
+                    w=fitted_w,
+                    d=fitted_d,
+                    design=self.rug_design,
+                )
+                # A rug is furniture. It is chosen, it is placed, and it is the
+                # one piece in a room that people actually do slide around —
+                # yet it was the only staged object with no asset key, so it
+                # never reached `editable_objects`, never reached the exported
+                # furniture list, and could not be selected or moved in the
+                # walkthrough while every piece standing on it could.
+                for mesh in built[0]:
+                    self._editable_mesh_assets[id(mesh)] = (mesh, "rug")
                 return self.add(
-                    build_rug(
-                        self.P,
-                        w=fitted_w,
-                        d=fitted_d,
-                        design=self.rug_design,
-                    ),
+                    built,
                     position,
                     yaw,
                     block=False,
