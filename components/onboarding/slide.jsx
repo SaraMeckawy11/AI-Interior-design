@@ -200,26 +200,26 @@ export default function Slide({ slide, index, setIndex, totalSlides }) {
             </View>
           )}
 
-          <Pressable
-            onPress={handlePress}
-            accessibilityRole="button"
-            accessibilityLabel={isLast ? "Get started" : "Next"}
-            style={({ pressed }) => [
-              styles.ctaWrapper,
-              pressed && styles.ctaPressed,
-            ]}
-          >
-            <LinearGradient
-              colors={[COLORS.primary, COLORS.primaryDark]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.cta}
+          {isLast && (
+            <Pressable
+              onPress={handlePress}
+              accessibilityRole="button"
+              accessibilityLabel="Get started"
+              style={({ pressed }) => [
+                styles.ctaWrapper,
+                pressed && styles.ctaPressed,
+              ]}
             >
-              <Text style={styles.ctaText}>
-                {isLast ? "Get Started" : "Next"}
-              </Text>
-            </LinearGradient>
-          </Pressable>
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.primaryDark]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.cta}
+              >
+                <Text style={styles.ctaText}>Get Started</Text>
+              </LinearGradient>
+            </Pressable>
+          )}
         </View>
       </View>
 
