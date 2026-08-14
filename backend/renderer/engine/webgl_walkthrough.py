@@ -264,32 +264,44 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         original.build_dining_table,
     )
 
+    # How many covers the room can carry.
+    #
+    # These thresholds were set when a doorway sterilised four or five square
+    # metres of the room they were measuring, so they had to be pessimistic:
+    # asking for eight seats in a room that could only place four just meant
+    # the search walked back down the ladder and cost a pass. With the guards
+    # cut back to the routes people actually walk, a room of a given size can
+    # carry the table that size of room really seats — a 30 m2 dining room is
+    # an eight-seater, not a six, and a genuinely large one seats ten.
     if compact:
         target_seats = 4
     elif open_plan_dining:
         # Only the kitchen-side allocation belongs to dining; the total room
         # also contains the lounge. Never size an open-plan table from the
         # whole living-room area.
-        target_seats = (
-            6
-            if (
-                area >= 46.0
-                and minor >= 4.0
-                and not circulation_sensitive
-            )
-            else 4
-        )
-    elif dedicated_dining:
-        if area >= 28.0 and major >= 5.0 and minor >= 3.6:
+        if area >= 55.0 and minor >= 4.0 and not circulation_sensitive:
             target_seats = 8
-        elif area >= 15.0 and minor >= 2.8:
+        elif area >= 34.0 and minor >= 3.4 and not circulation_sensitive:
             target_seats = 6
-        elif area >= 8.0 and minor >= 2.1:
+        else:
+            target_seats = 4
+    elif dedicated_dining:
+        if area >= 38.0 and major >= 6.0 and minor >= 3.8:
+            target_seats = 10
+        elif area >= 22.0 and major >= 4.4 and minor >= 3.2:
+            target_seats = 8
+        elif area >= 13.0 and minor >= 2.7:
+            target_seats = 6
+        elif area >= 7.5 and minor >= 2.1:
             target_seats = 4
         else:
             target_seats = 2
     else:
-        target_seats = 4 if area < 14.0 or minor < 2.8 else 6
+        target_seats = (
+            8 if area >= 26.0 and minor >= 3.2
+            else 4 if area < 14.0 or minor < 2.8
+            else 6
+        )
 
     def long_shape(seats):
         """The elongated silhouette this style would draw for `seats`."""
@@ -320,10 +332,14 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         take instead of losing its table altogether.
         """
         long_pick = long_shape(seats)
-        if seats >= 6:
-            # Six covers do not fit around a residential round table.
-            return (long_pick, "rectangular")
         balanced = aspect <= 1.24
+        if seats >= 8:
+            # Eight covers is a long table in any room.
+            return (long_pick, "rectangular")
+        if seats == 6:
+            # A six-seat round table is 1.4 m across and needs a square-ish
+            # room to sit in; where there is one, it is the better table.
+            return ("round", long_pick) if balanced else (long_pick, "rectangular")
         formal = any(
             word in style
             for word in ("classic", "traditional", "industrial")
@@ -348,16 +364,26 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
             if open_plan_dining
             else DESIGN_CLEARANCES["dining_edge"]
         )
+        # Real dining tables, at the sizes a furniture shop sells them.
+        #
+        # Every one of these used to be a size down: a four-seater at 1.36 m
+        # long and 0.78 m deep is a breakfast table, and a 1.06 m round seats
+        # three adults in comfort, not four. They were cut to fit past the
+        # doorway guards, and now that those are the size of a walking route
+        # there is no reason to keep serving a small table in a large room.
+        # 0.60 m of table edge per cover, and 0.90 m across the middle for the
+        # dishes, is what these are built from.
         if shape == "round":
-            width = depth = 0.88 if seats <= 2 else 1.06
+            width = depth = 0.92 if seats <= 2 else 1.18 if seats == 4 else 1.42
         elif shape == "square":
-            width = depth = 0.86 if seats <= 2 else 0.98
+            width = depth = 0.90 if seats <= 2 else 1.12
         else:
             dimensions = {
-                2: (1.02, 0.72),
-                4: (1.26 if circulation_sensitive else 1.36, 0.78),
-                6: (1.78, 0.92),
-                8: (2.26, 1.02),
+                2: (1.10, 0.78),
+                4: (1.34 if circulation_sensitive else 1.52, 0.88),
+                6: (2.00, 0.96),
+                8: (2.48, 1.04),
+                10: (3.00, 1.10),
             }
             width, depth = dimensions[seats]
             if shape == "oval":
@@ -396,6 +422,7 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         }
 
     seat_candidates = {
+        10: (10, 8, 6, 4, 2),
         8: (8, 6, 4, 2),
         6: (6, 4, 2),
         4: (4, 2),
@@ -631,13 +658,25 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         local_x = np.array([math.cos(table_yaw), math.sin(table_yaw)])
         local_y = np.array([-math.sin(table_yaw), math.cos(table_yaw)])
         side_offset = table_depth / 2 + 0.36
-        side_chairs = 1 if chair_count == 2 else 2 if chair_count <= 6 else 3
+        side_chairs = (
+            1 if chair_count == 2
+            else 2 if chair_count <= 6
+            else 3 if chair_count == 8
+            else 4
+        )
         longitudinal_positions = (
             (0.0,)
             if side_chairs == 1
             else (-table_width * 0.27, table_width * 0.27)
             if side_chairs == 2
             else (-table_width * 0.31, 0.0, table_width * 0.31)
+            if side_chairs == 3
+            else (
+                -table_width * 0.345,
+                -table_width * 0.115,
+                table_width * 0.115,
+                table_width * 0.345,
+            )
         )
         for side in (-1, 1):
             for offset in longitudinal_positions:
@@ -646,7 +685,7 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                     chair_pos,
                     original.yaw_facing(-local_y * side),
                 )
-        if chair_count in (6, 8):
+        if chair_count >= 6:
             end_offset = table_width / 2 + 0.38
             for side in (-1, 1):
                 chair_pos = center + local_x * side * end_offset
@@ -1968,16 +2007,20 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
             opening_width = float(np.linalg.norm(opening_b - opening_a))
             inward = self._inward_normal(p1, p2)
             is_balcony = kind in ("balcony", "balcony_hole")
-            # Keep-clear corridors were so deep/wide (1.85 m x opening+0.72) that
-            # a single doorway sterilised ~4-5 m2 and several openings together
-            # fragmented a living room so badly that no dining zone could fit in
-            # front of a balcony. Real circulation only needs ~1 m of approach.
+            # Keep-clear corridors were so deep/wide (1.85 m x opening+0.72)
+            # that a single doorway sterilised ~4-5 m2 and several openings
+            # together fragmented a living room so badly that no dining zone
+            # could fit in front of a balcony. That was cut once; this is the
+            # rest of it. A doorway does not need floor kept clear either side
+            # of itself — walking through one uses its own width — and 1.05 m
+            # of approach is a stride and a half. The room is furnished for
+            # living in, not for standing in a doorway looking at it.
             cased = not is_balcony and original.cased_opening_at(center)
-            corridor_depth = 1.15 if is_balcony else 0.85 if cased else 1.05
+            corridor_depth = 1.15 if is_balcony else 0.80 if cased else 0.85
             corridor_width = (
-                min(opening_width, original.PASSAGE_W) + 0.14
+                min(opening_width, original.PASSAGE_W) + 0.10
                 if cased
-                else opening_width + 0.34
+                else min(opening_width, 1.30) + 0.10
             )
             corridor_center = center + inward * corridor_depth / 2
             corridor = original.footprint_poly(

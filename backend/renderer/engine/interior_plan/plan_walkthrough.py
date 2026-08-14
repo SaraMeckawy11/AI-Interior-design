@@ -2098,11 +2098,35 @@ def build_room_trim(room_m, edges, P, config=None):
             bb = _wall_strip(a, b, 0.0, BASEBOARD_H, 0.03, trim_col, inward, off)
             if bb:
                 meshes.append(bb)
-        # cornice along the whole wall at the ceiling
-        cor = _wall_strip(p1, p2, WALL_H - CORNICE_H, WALL_H, 0.04,
-                          _shade(P["wall"], 1.02), inward, off)
-        if cor:
-            meshes.append(cor)
+        # Cornice along the wall at the ceiling — where there is a wall.
+        #
+        # This ran the full length of every edge, which is right for a doorway
+        # (there is wall above it to carry the moulding) and wrong for a cased
+        # opening, which goes all the way to the ceiling. The result was a bar
+        # of cornice hanging across the top of the gap with nothing behind it:
+        # the opening looked closed at the head, exactly like a very wide door.
+        # It breaks over those openings now, the way the baseboard above breaks
+        # over the floor gaps.
+        cased_spans = sorted(
+            (t0, t1)
+            for typ, t0, t1 in e.get("openings", [])
+            if typ in ("door", "door_hole")
+            and cased_opening_at(p1 + (p2 - p1) * ((t0 + t1) / 2))
+        )
+        cur = 0.0
+        cornice_spans = []
+        for t0, t1 in cased_spans:
+            if t0 > cur:
+                cornice_spans.append((cur, t0))
+            cur = max(cur, t1)
+        if cur < 1.0:
+            cornice_spans.append((cur, 1.0))
+        for s0, s1 in cornice_spans:
+            cor = _wall_strip(p1 + (p2 - p1) * s0, p1 + (p2 - p1) * s1,
+                              WALL_H - CORNICE_H, WALL_H, 0.04,
+                              _shade(P["wall"], 1.02), inward, off)
+            if cor:
+                meshes.append(cor)
 
         # curtains at each window
         for typ, t0, t1 in e.get("openings", []):
@@ -2642,8 +2666,16 @@ class RoomFurnisher:
                 c = (a + b) / 2.0
                 cased = cased_opening_at(c)
                 # No leaf, no swing, nothing to keep clear for one.
+                #
+                # For a doorway that does have one: 0.55 m, not 0.95. The circle
+                # is centred on the threshold and applies in *both* rooms, so at
+                # 0.95 it was a 1.9 m disc of protected floor either side of
+                # every internal door — around three square metres each, on top
+                # of the corridor below. A door leaf is 0.9 m long and sweeps a
+                # quarter turn from one jamb; what has to stay clear is the
+                # threshold and the arc, not a circle you could park a sofa in.
                 if not cased:
-                    self.door_zones.append(Point(c[0], c[1]).buffer(0.95))
+                    self.door_zones.append(Point(c[0], c[1]).buffer(0.55))
 
                 span = b - a
                 width = float(np.hypot(span[0], span[1]))
@@ -2658,12 +2690,21 @@ class RoomFurnisher:
                     if not self.poly.contains(Point(*(c + normal * 0.35))):
                         continue
 
-                # Scaled to the room. A fixed 1.4 m corridor is right in a
-                # living room and eats a box room alive, and a keep-clear zone
-                # that leaves nowhere to put anything just makes the fallback
-                # passes drop it again.
-                reach = float(min(1.40, max(0.70, math.sqrt(self.poly.area) * 0.40)))
-                half = max(width, MIN_DOOR_W) / 2.0 + 0.15
+                # Scaled to the room. A fixed corridor is right in a living
+                # room and eats a box room alive, and a keep-clear zone that
+                # leaves nowhere to put anything just makes the fallback passes
+                # drop it again.
+                #
+                # It used to reach up to 1.40 m into the room and run 0.15 m
+                # wider than the doorway on each side. That is a room's worth of
+                # approach for a door you step through: between it, the swing
+                # circle and the exporter's own corridor on top, one internal
+                # door could take four square metres out of the middle of a
+                # room, and it was the dining table — the largest thing being
+                # placed, and the last — that paid for it. What a doorway needs
+                # is its own width, and enough depth to be through it.
+                reach = float(min(0.95, max(0.60, math.sqrt(self.poly.area) * 0.26)))
+                half = max(width, MIN_DOOR_W) / 2.0
                 if cased:
                     # The passage, not the hole: a person-and-a-bit wide, down
                     # the middle of the opening, and no deeper than the step it
