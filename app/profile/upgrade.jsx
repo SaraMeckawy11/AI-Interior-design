@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import purchases from 'react-native-purchases';
@@ -234,7 +235,9 @@ export default function Upgrade() {
         title: 'That purchase did not go through',
         message:
           error?.message ||
-          'Nothing has been charged. Please try again, or check your payment method in the Play Store.',
+          `Nothing has been charged. Please try again, or check your payment method in the ${
+            Platform.OS === 'ios' ? 'App Store' : 'Play Store'
+          }.`,
       });
     } finally {
       setBusy('');
@@ -368,6 +371,8 @@ export default function Upgrade() {
       onBack={() => router.back()}
       onCloseDialog={() => setDialog(null)}
       onManageSubscription={() => router.push('/profile/manageSubscription')}
+      onOpenPrivacy={() => router.push('/profile/privacy')}
+      onOpenTerms={() => router.push('/profile/terms')}
       onPurchase={buyingPlan ? handleUpgrade : buyCoins}
       onRestorePurchases={restorePurchases}
       packs={packs}

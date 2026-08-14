@@ -289,12 +289,27 @@ export default StyleSheet.create({
   primaryButtonTextDisabled: { ...TYPE.bodyStrong, color: COLORS.textTertiary, textAlign: 'center' },
   footerNote: {
     ...TYPE.caption,
-    minHeight: ms(20),
-    fontSize: ms(9.5),
-    lineHeight: ms(14),
-    color: COLORS.textTertiary,
+    fontSize: ms(10),
+    lineHeight: ms(14.5),
+    color: COLORS.textSecondary,
     textAlign: 'center',
-    marginTop: 3,
+    marginTop: SPACING.xs,
+  },
+  legalLinks: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+  },
+  legalLinkText: {
+    ...TYPE.caption,
+    color: COLORS.primaryDark,
+    textDecorationLine: 'underline',
+  },
+  legalSeparator: {
+    ...TYPE.caption,
+    color: COLORS.textTertiary,
   },
   pressed: { opacity: 0.78 },
 

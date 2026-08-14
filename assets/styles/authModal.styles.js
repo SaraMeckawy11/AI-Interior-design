@@ -258,6 +258,38 @@ export default StyleSheet.create({
     // is what separates the two rather than a rule across the card.
     marginTop: verticalScale(26),
   },
+  emailButton: {
+    width: "100%",
+    height: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(10),
+    backgroundColor: COLORS.surfaceAlt,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    borderRadius: 14,
+  },
+  emailButtonText: {
+    color: COLORS.textPrimary,
+    fontFamily: "Poppins_500Medium",
+    fontSize: scale(15),
+  },
+  emailLoginSection: {
+    width: "100%",
+    marginTop: verticalScale(22),
+  },
+  emailBackButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+  },
+  emailBackText: {
+    color: COLORS.primaryDark,
+    fontFamily: "Poppins_500Medium",
+    fontSize: scale(13),
+  },
   appleButton: {
     width: "100%",
     height: 50,

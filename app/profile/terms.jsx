@@ -61,6 +61,16 @@ const Terms = () => {
           <Text style={styles.text}>
             You are responsible for managing your subscription, including cancellations and renewals.
           </Text>
+          <Text style={styles.text}>
+            Apple users are also covered by the{' '}
+            <Text
+              accessibilityRole="link"
+              style={styles.link}
+              onPress={() => Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/')}
+            >
+              Standard Apple Terms of Use (EULA)
+            </Text>.
+          </Text>
         </Section>
 
         <Section title="Intellectual Property">
@@ -107,7 +117,7 @@ const Terms = () => {
 
         <Section title="Governing Law">
           <Text style={styles.text}>
-            These Terms are governed by and construed in accordance with the laws of [Insert Country or Jurisdiction]. Any disputes shall be resolved in the courts of that jurisdiction.
+            These Terms are governed by applicable law. Any disputes will be handled by a court with proper jurisdiction, subject to any consumer-protection rights that apply where you live.
           </Text>
         </Section>
 

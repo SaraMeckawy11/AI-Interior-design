@@ -22,7 +22,13 @@ export default function LoginForm({ setModalVisible }) {
   const router = useRouter(); // ✅ initialize router
 
   const handleLogin = async () => {
-    const result = await login(email, password);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
+      Alert.alert("Email and password required", "Enter both fields to sign in.");
+      return;
+    }
+
+    const result = await login(normalizedEmail, password);
     if (!result.success) {
       Alert.alert("Error", result.error);
       return;
@@ -51,6 +57,9 @@ export default function LoginForm({ setModalVisible }) {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          textContentType="emailAddress"
         />
       </View>
 
@@ -69,6 +78,8 @@ export default function LoginForm({ setModalVisible }) {
           value={password}
           onChangeText={setPassword}
           secureTextEntry={!showPassword}
+          autoComplete="current-password"
+          textContentType="password"
         />
         <TouchableOpacity
           onPress={() => setShowPassword(!showPassword)}
@@ -85,13 +96,18 @@ export default function LoginForm({ setModalVisible }) {
       {/* Login Button */}
       <TouchableOpacity
         onPress={handleLogin}
-        disabled={isLoading}
-        style={[styles.signupButton, isLoading && { opacity: 0.6 }]}
+        disabled={isLoading || !email.trim() || !password}
+        accessibilityRole="button"
+        accessibilityLabel="Sign in"
+        style={[
+          styles.signupButton,
+          (isLoading || !email.trim() || !password) && { opacity: 0.6 },
+        ]}
       >
         {isLoading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.signupButtonText}>Login</Text>
+          <Text style={styles.signupButtonText}>Sign in</Text>
         )}
       </TouchableOpacity>
     </View>

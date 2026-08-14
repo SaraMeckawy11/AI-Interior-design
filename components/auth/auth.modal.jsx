@@ -20,6 +20,7 @@ import {
   GOOGLE_IOS_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
 } from "../../configs/googleAuth";
+import LoginForm from "./login";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
@@ -27,6 +28,7 @@ export default function AuthModal({ setModalVisible }) {
   const [signingInProvider, setSigningInProvider] = useState(null);
   const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [signInError, setSignInError] = useState(null);
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
   const isSigningIn = signingInProvider !== null;
 
   useEffect(() => {
@@ -157,53 +159,95 @@ export default function AuthModal({ setModalVisible }) {
             here pushes the two buttons, the terms and the whole decision
             further down a card that is already the only thing on screen. */}
         <Text style={styles.socialTitle} accessibilityRole="header">
-          Join Livinai
+          {showEmailLogin ? "Sign in to Livinai" : "Join Livinai"}
         </Text>
         <Text style={styles.socialSubtitle}>
-          Save your designs to your account and pick them up on any device.
+          {showEmailLogin
+            ? "Use the email and password for your Livinai account."
+            : "Save your designs to your account and pick them up on any device."}
         </Text>
 
-        <View style={styles.providerStack}>
-          {appleSignInAvailable &&
-            (signingInProvider === "apple" ? (
-              <View style={styles.appleLoadingButton}>
-                <ActivityIndicator color="#FFFFFF" size="small" />
-                <Text style={styles.appleLoadingText}>Signing in with Apple…</Text>
-              </View>
-            ) : (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                cornerRadius={14}
-                style={[styles.appleButton, isSigningIn && styles.providerButtonDisabled]}
-                onPress={handleAppleSignIn}
-              />
-            ))}
+        {showEmailLogin ? (
+          <View style={styles.emailLoginSection}>
+            <LoginForm setModalVisible={setModalVisible} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to Apple or Google sign in"
+              onPress={() => {
+                setSignInError(null);
+                setShowEmailLogin(false);
+              }}
+              style={({ pressed }) => [
+                styles.emailBackButton,
+                pressed && styles.providerButtonPressed,
+              ]}
+            >
+              <Text style={styles.emailBackText}>Back to Apple or Google</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.providerStack}>
+            {appleSignInAvailable &&
+              (signingInProvider === "apple" ? (
+                <View style={styles.appleLoadingButton}>
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text style={styles.appleLoadingText}>Signing in with Apple…</Text>
+                </View>
+              ) : (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={14}
+                  style={[styles.appleButton, isSigningIn && styles.providerButtonDisabled]}
+                  onPress={handleAppleSignIn}
+                />
+              ))}
 
-          <Pressable
-            onPress={handleGoogleSignIn}
-            disabled={isSigningIn}
-            accessibilityRole="button"
-            accessibilityLabel="Sign in with Google"
-            style={({ pressed }) => [
-              styles.googleButton,
-              pressed && !isSigningIn && styles.providerButtonPressed,
-              isSigningIn && styles.providerButtonDisabled,
-            ]}
-          >
-            {signingInProvider === "google" ? (
-              <ActivityIndicator color="#33604A" size="small" />
-            ) : (
-              <Image
-                source={require("@/assets/images/onboarding/google.png")}
-                style={styles.googleIcon}
-              />
-            )}
-            <Text style={styles.googleText}>
-              {signingInProvider === "google" ? "Signing in with Google…" : "Sign in with Google"}
-            </Text>
-          </Pressable>
-        </View>
+            <Pressable
+              onPress={handleGoogleSignIn}
+              disabled={isSigningIn}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in with Google"
+              style={({ pressed }) => [
+                styles.googleButton,
+                pressed && !isSigningIn && styles.providerButtonPressed,
+                isSigningIn && styles.providerButtonDisabled,
+              ]}
+            >
+              {signingInProvider === "google" ? (
+                <ActivityIndicator color="#33604A" size="small" />
+              ) : (
+                <Image
+                  source={require("@/assets/images/onboarding/google.png")}
+                  style={styles.googleIcon}
+                />
+              )}
+              <Text style={styles.googleText}>
+                {signingInProvider === "google"
+                  ? "Signing in with Google…"
+                  : "Sign in with Google"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                setSignInError(null);
+                setShowEmailLogin(true);
+              }}
+              disabled={isSigningIn}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in with email"
+              style={({ pressed }) => [
+                styles.emailButton,
+                pressed && !isSigningIn && styles.providerButtonPressed,
+                isSigningIn && styles.providerButtonDisabled,
+              ]}
+            >
+              <Ionicons name="mail-outline" size={20} color="#33604A" />
+              <Text style={styles.emailButtonText}>Sign in with email</Text>
+            </Pressable>
+          </View>
+        )}
 
         {signInError && (
           <View

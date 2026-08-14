@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -48,6 +49,8 @@ export default function UpgradeExperience({
   onBack,
   onCloseDialog,
   onManageSubscription,
+  onOpenPrivacy,
+  onOpenTerms,
   onPurchase,
   onRestorePurchases,
   packs,
@@ -203,6 +206,8 @@ export default function UpgradeExperience({
         buyingPlan={buyingPlan}
         insets={insets}
         isSubscribed={isSubscribed}
+        onOpenPrivacy={onOpenPrivacy}
+        onOpenTerms={onOpenTerms}
         onPress={onPurchase}
         priceFor={priceFor}
       />
@@ -458,7 +463,18 @@ function Radio({ selected }) {
   );
 }
 
-function PurchaseFooter({ activePack, activePlan, busy, buyingPlan, insets, isSubscribed, onPress, priceFor }) {
+function PurchaseFooter({
+  activePack,
+  activePlan,
+  busy,
+  buyingPlan,
+  insets,
+  isSubscribed,
+  onOpenPrivacy,
+  onOpenTerms,
+  onPress,
+  priceFor,
+}) {
   const price = buyingPlan
     ? priceFor(activePlan, activePlan?.storePackage)
     : priceFor(activePack, activePack?.storePackage);
@@ -525,9 +541,32 @@ function PurchaseFooter({ activePack, activePlan, busy, buyingPlan, insets, isSu
         */}
         <Text style={styles.footerNote}>
           {buyingPlan
-            ? 'Renews automatically. Cancel anytime. Unlimited subject to fair use.'
+            ? `Payment is charged to your ${Platform.OS === 'ios' ? 'Apple ID' : 'Google Play account'}. `
+              + 'Renews automatically unless canceled at least 24 hours before the current period ends. '
+              + 'Unlimited use is subject to fair use.'
             : 'One-time purchase. Coins never expire.'}
         </Text>
+        {buyingPlan ? (
+          <View style={styles.legalLinks}>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Open Terms of Use"
+              hitSlop={8}
+              onPress={onOpenTerms}
+            >
+              <Text style={styles.legalLinkText}>Terms of Use</Text>
+            </Pressable>
+            <Text style={styles.legalSeparator}>•</Text>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Open Privacy Policy"
+              hitSlop={8}
+              onPress={onOpenPrivacy}
+            >
+              <Text style={styles.legalLinkText}>Privacy Policy</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
     </View>
   );

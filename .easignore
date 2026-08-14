@@ -67,3 +67,9 @@ app-example/
 # not inflate the native build source archive.
 assets/store/
 play-store-assets/
+.livinai-public-site/
+/coin-purchases-review.jpg
+/coin-purchases-review.png
+/subscriptions-review.jpg
+/subscriptions-review.png
+/scripts/resize-review-screenshots.ps1
