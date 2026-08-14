@@ -3470,6 +3470,77 @@ def _place_opposite_wall_media(self, sofa, tv_builder):
     return False
 
 
+def _sofa_pose_for_media(sofa):
+    """The wall-slot shape the two media placers expect, from a placed sofa."""
+    facing, lateral = _furniture_axes(sofa)
+    return {
+        "pos": np.asarray(sofa["position"], dtype=float),
+        "n": facing,
+        "s": lateral,
+        "w": float(sofa["width"]),
+        "d": float(sofa["depth"]),
+        "yaw": float(sofa["yaw"]),
+    }
+
+
+def _align_media_to_sofa(self, sofa):
+    """Put the television where the sofa is pointed, or do not keep it.
+
+    A television has exactly one correct position in a living room: on the
+    axis the seating faces. The recipe hangs it on the wall opposite the sofa
+    and that is usually right — but the opposite wall is often part window,
+    and `wall_slots` treats a window as blocking, so the search would come up
+    empty and the fallback would hang it on whatever wall was left. Beside the
+    sofa, at ninety degrees to it, is not a fallback; it is the one place it
+    must not go.
+
+    So this checks the result rather than trusting it. A console that is in
+    front of the seating, roughly on its centre line and turned back toward
+    it, stays. Anything else is replaced by one that is — on the facing wall
+    if that wall can take it, and standing free directly in front of the sofa
+    if it cannot, which is what a room with a glazed far wall actually does.
+    Only if neither works does the original go back, because a television in
+    an awkward place still beats a living room with none.
+    """
+    if "no tv" in self.brief or "without tv" in self.brief:
+        return
+    pose = _sofa_pose_for_media(sofa)
+    sofa_position, facing, lateral = pose["pos"], pose["n"], pose["s"]
+
+    restore = None
+    console = _furniture_with_suffix(self, "media_console")
+    if console is not None:
+        delta = np.asarray(console["position"], dtype=float) - sofa_position
+        console_facing, _console_lateral = _furniture_axes(console)
+        if (
+            # In front of the seating, within about 25 degrees of its centre
+            # line, and turned back toward it.
+            float(np.dot(delta, facing)) >= 1.60
+            and abs(float(np.dot(delta, lateral))) <= max(0.85, pose["w"] * 0.50)
+            and float(np.dot(console_facing, facing)) <= -0.50
+        ):
+            return
+        restore = dict(
+            position=np.asarray(console["position"], dtype=float),
+            yaw=float(console["yaw"]),
+            width=float(console["width"]),
+        )
+        _remove_furniture_object(self, console)
+
+    tv_builder = self.furniture_builder("tv_unit", original.build_tv_unit)
+    if _place_opposite_wall_media(self, pose, tv_builder):
+        return
+    if _place_floating_media_safely(self, pose, tv_builder):
+        return
+    if restore is not None:
+        self.add(
+            tv_builder(self.P, w=restore["width"]),
+            restore["position"],
+            restore["yaw"],
+            check=False,
+        )
+
+
 def _place_required_living_group(self):
     """Recover a correctly zoned sofa group when dining claimed every anchor."""
     dining_zones = list(
@@ -3752,6 +3823,10 @@ def _furnish_aligned_living(self):
             None,
         )
     if not sofa or not coffee_table:
+        # A room that could not be given a coffee table still has a sofa
+        # pointed somewhere, and the television still belongs on that axis.
+        if sofa:
+            _align_media_to_sofa(self, sofa)
         return
 
     sofa_position = np.asarray(sofa["position"], dtype=float)
@@ -3900,6 +3975,12 @@ def _furnish_aligned_living(self):
         kept += 1
     for chair in chairs[len(chair_sides):]:
         _remove_furniture_object(self, chair)
+
+    # Last, because it is judged against the finished group: the sofa has its
+    # final pose and the armchairs that survived are out of the way, so this is
+    # the first point at which "is the television in front of the seating?" has
+    # a truthful answer.
+    _align_media_to_sofa(self, sofa)
 
 
 def _bathroom_corner_candidates(self):

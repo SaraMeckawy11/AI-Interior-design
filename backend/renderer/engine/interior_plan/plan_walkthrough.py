@@ -3518,16 +3518,25 @@ class RoomFurnisher:
                 )
                 if not tv:
                     # The wall directly opposite the sofa may be glazed or
-                    # doored. A living room should still read as complete, so
-                    # fall back to any other wall (not the sofa's own) before
-                    # giving up on the television entirely.
-                    side_tv_slots = [
+                    # doored. Widen the test to any wall the sofa still broadly
+                    # faces — but never one beside it.
+                    #
+                    # This used to accept `dot < 0.5`, which is every wall in
+                    # the room except the sofa's own: a perpendicular wall
+                    # scores 0 and passed. So the moment the facing wall had a
+                    # window in it — which is most living rooms, since
+                    # `wall_slots` treats a window as blocking — the television
+                    # went on the wall beside the sofa, at ninety degrees to
+                    # everyone sitting on it. A television nobody can watch from
+                    # the seat pointed at it is the wrong place for it, and a
+                    # room reads as wrong the moment you look at the sofa.
+                    facing_tv_slots = [
                         sl for sl in self.wall_slots()
-                        if np.dot(sl["n"], n) < 0.5
+                        if np.dot(sl["n"], n) < -0.35
                     ]
                     (
-                        self.against_wall(tv_builder, slots=side_tv_slots, w=1.35)
-                        or self.against_wall(tv_builder, slots=side_tv_slots, w=1.10)
+                        self.against_wall(tv_builder, slots=facing_tv_slots, w=1.35)
+                        or self.against_wall(tv_builder, slots=facing_tv_slots, w=1.10)
                     )
             if self.layered:
                 ottoman_pos = np.array(sofa["pos"]) + n * 1.48 - s * 1.35
