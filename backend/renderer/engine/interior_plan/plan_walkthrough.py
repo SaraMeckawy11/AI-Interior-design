@@ -1612,6 +1612,23 @@ def cased_opening_at(centre) -> bool:
 #: Set by `assign_openings`, which is where the room count is known.
 _ACTIVE_ENTRANCE_DOORS = ContextVar("livinai_entrance_doors", default=())
 
+#: Every placed door as ``(line, frozenset_of_room_indices)``.
+#:
+#: `assign_openings` already works this out — it cuts a door into every room
+#: whose wall it touches and tracks which ones received it, so the far side of a
+#: shared wall is never left solid. Publishing it lets `build_scene`, which is
+#: the only place that knows what each room *is*, decide which doors matter.
+_ACTIVE_DOOR_ROOMS = ContextVar("livinai_door_rooms", default=())
+
+#: Openings onto a hall, corridor or entry, as world-metre lines.
+#:
+#: A hallway is not a room anybody furnishes; it is the route between the rooms
+#: that are furnished, and its mouth is part of that route. With the doorway
+#: guards gone, the widest clear floor in an open-plan room is often the strip
+#: right in front of the hall opening — which is exactly where the dining table
+#: was landing, closing the way through. These keep a passage clear.
+_ACTIVE_CIRCULATION_DOORS = ContextVar("livinai_circulation_doors", default=())
+
 
 def entrance_door_at(centre) -> bool:
     """Whether the doorway centred here is the way into the home."""
@@ -1620,6 +1637,19 @@ def entrance_door_at(centre) -> bool:
         return False
     point = Point(float(centre[0]), float(centre[1]))
     return any(line.distance(point) <= 0.40 for line in segments)
+
+
+def circulation_door_at(centre) -> bool:
+    """Whether the opening centred here is the mouth of a hall or corridor."""
+    segments = _ACTIVE_CIRCULATION_DOORS.get()
+    if not segments:
+        return False
+    point = Point(float(centre[0]), float(centre[1]))
+    return any(line.distance(point) <= 0.40 for line in segments)
+
+
+#: Room names that mean "this space is a route, not a destination".
+CIRCULATION_ROOM_WORDS = ("hall", "corridor", "entry", "foyer", "landing", "passage")
 
 
 def assign_openings(all_room_edges, doors_m, windows_m):
@@ -1657,6 +1687,8 @@ def assign_openings(all_room_edges, doors_m, windows_m):
     door_infos = []
     # Doors that reached exactly one room. See _ACTIVE_ENTRANCE_DOORS.
     entrance_doors = []
+    # Every door and the rooms it opened. See _ACTIVE_DOOR_ROOMS.
+    door_rooms = []
     for a, b in doors_m:
         seg = LineString([a, b])
         seg_len = float(np.linalg.norm(np.array(b) - np.array(a)))
@@ -1685,9 +1717,12 @@ def assign_openings(all_room_edges, doors_m, windows_m):
                         rooms_with_door.add(room_index)
         if placed_any:
             door_infos.append((np.array(a), np.array(b)))
+            line = LineString([tuple(a[:2]), tuple(b[:2])])
+            door_rooms.append((line, frozenset(rooms_with_door)))
             if len(rooms_with_door) <= 1:
-                entrance_doors.append(LineString([tuple(a[:2]), tuple(b[:2])]))
+                entrance_doors.append(line)
     _ACTIVE_ENTRANCE_DOORS.set(tuple(entrance_doors))
+    _ACTIVE_DOOR_ROOMS.set(tuple(door_rooms))
     for item in windows_m:
         a, b = item[0], item[1]
         seg = LineString([a, b])
@@ -2652,6 +2687,9 @@ class RoomFurnisher:
         # thing that must never end up in front of the front door can check for
         # it even on the path that ignores every other guard.
         self.entrance_zones = []
+        # And the passages through a hall or corridor opening, for the same
+        # reason: a table standing in one closes the way through the home.
+        self.route_zones = []
         # The line of sight straight in from each doorway, kept separately from
         # the keep-clear zones above and recorded for every door.
         #
@@ -2712,7 +2750,33 @@ class RoomFurnisher:
                     "half": max(width, MIN_DOOR_W) / 2.0,
                 })
 
-                if cased_opening_at(c) or not entrance_door_at(c):
+                if not entrance_door_at(c):
+                    # A hall or corridor is the way between rooms, and its
+                    # mouth is part of that way. This is the one internal
+                    # opening that still reserves floor — a passage through it,
+                    # no wider than the opening — because the strip in front of
+                    # it is usually the largest clear area left in an open-plan
+                    # room, and a dining table put there closes the route the
+                    # rest of the home is reached by.
+                    #
+                    # A cased opening onto a hall counts. A hole in a wall is a
+                    # doorway you can see through; it is still the way past.
+                    if not circulation_door_at(c):
+                        continue
+                    passage = max(width, MIN_DOOR_W) / 2.0
+                    depth = 1.05
+                    route = Polygon([
+                        (point[0], point[1])
+                        for point in (
+                            c + tangent * passage,
+                            c + tangent * passage + normal * depth,
+                            c - tangent * passage + normal * depth,
+                            c - tangent * passage,
+                        )
+                    ])
+                    if route.is_valid and not route.is_empty:
+                        self.door_zones.append(route)
+                        self.route_zones.append(route)
                     continue
 
                 # The way in, and the one place in the home that has to stay
@@ -2730,8 +2794,9 @@ class RoomFurnisher:
                 # everybody uses it.
                 #
                 # So this one is generous on purpose: a real entry zone, not a
-                # threshold. It is the only guard left in the plan, so it can
-                # afford to be the size the job actually needs.
+                # threshold. It and the hall passages above are the only guards
+                # left in the plan, so it can afford to be the size the job
+                # actually needs.
                 reach = float(min(2.60, max(1.70, math.sqrt(self.poly.area) * 0.55)))
                 half = max(width, MIN_DOOR_W) / 2.0 + 0.45
                 self.door_zones.append(Point(c[0], c[1]).buffer(1.15))
@@ -3435,7 +3500,8 @@ class RoomFurnisher:
         # the dining table needs. Mirrors the gate used further below.
         _has_dining_room = self.config.get("_plan_has_dining_room", False)
         self.config["_livinai_expects_dining"] = (
-            self.poly.area >= (15.0 if not _has_dining_room else 30.0)
+            not _has_dining_room
+            and self.poly.area >= 15.0
             and not any(
                 word in self.brief
                 for word in ("no dining", "without dining", "living only")
@@ -3565,12 +3631,17 @@ class RoomFurnisher:
         # empty, so automatically zone the largest remaining clear area.
         dining_zone = None
         # When the plan has no dedicated dining room, the living room is where
-        # people actually eat, so prioritise a dining set and try it in far more
-        # modest rooms. A plan that already contains a dining room only overflows
-        # dining into a genuinely large open-plan living space.
+        # people actually eat, so a dining set is a priority here and is tried
+        # in quite modest rooms.
+        #
+        # When the plan *does* have one, the living room gets none. This used to
+        # overflow a second dining set into any living room over 30 m², on the
+        # theory that a large open plan can carry both — but the person drawing
+        # the plan already said where dinner happens by drawing a dining room,
+        # and a home with two dining tables in it is not a home. A large living
+        # room is a large living room.
         has_dining_room = self.config.get("_plan_has_dining_room", False)
-        dining_min_area = 15.0 if not has_dining_room else 30.0
-        if self.poly.area >= dining_min_area and not any(
+        if not has_dining_room and self.poly.area >= 15.0 and not any(
             word in self.brief
             for word in ("no dining", "without dining", "living only")
         ):
@@ -4335,6 +4406,27 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
 
     all_edges = [build_room_edges(r) for r in rooms_m]
     door_infos = assign_openings(all_edges, doors_m, windows_m)
+
+    # Which openings are the mouth of a route rather than the door to a room.
+    # `assign_openings` knows which rooms each door reached; this is the only
+    # place that knows what those rooms are for.
+    _circulation_rooms = {
+        index
+        for index in range(len(rooms_m))
+        if any(
+            word
+            in str(
+                (room_configs[index] if index < len(room_configs) else {})
+                .get("room_type", "")
+            ).lower()
+            for word in CIRCULATION_ROOM_WORDS
+        )
+    }
+    _ACTIVE_CIRCULATION_DOORS.set(tuple(
+        line
+        for line, opened_rooms in _ACTIVE_DOOR_ROOMS.get()
+        if opened_rooms & _circulation_rooms
+    ))
 
     meshes = []
     furniture_fps = []

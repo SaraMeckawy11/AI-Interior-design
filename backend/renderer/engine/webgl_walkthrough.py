@@ -110,7 +110,7 @@ def _kitchen_type_key(value):
 def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarantee=False):
     """Choose and align a dining set from usable room geometry and style.
 
-    Bistro, round, square, oval, racetrack and rectangular tables are sized
+    Bistro, round, square and rectangular tables are sized from the room and
     from real clearances. Every option is squared to the dominant wall and
     reserved as one circulation-safe group.
     """
@@ -160,15 +160,22 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         kitchen_anchor = self._kitchen_xy()
         balcony_zones = list(getattr(self, "balcony_access_zones", ()))
         if kitchen_anchor is not None:
-            # Serving distance wins: the dining table belongs on the kitchen
-            # side of an open-plan living room. Pull toward the kitchen but stay
-            # inside this room, so the set lands at the kitchen end rather than
-            # against the wall between them.
+            # The dining table belongs on the kitchen side of an open-plan
+            # living room — but only just.
+            #
+            # This used to pull it 2.4 m toward the kitchen, and the sofa is
+            # zoned to the opposite end for the same reason, so the two ends of
+            # the room were being driven apart: a seating group at one end, a
+            # table at the other, and several metres of nothing between them.
+            # An open plan is one room. The table sits at the kitchen end *of
+            # the living area*, close enough to the sofa to read as the same
+            # space, which is how these rooms are actually arranged and lived
+            # in. A short nudge is all the serving side needs.
             toward = kitchen_anchor - self.centroid
             norm = float(np.linalg.norm(toward))
             if norm > 1e-6:
                 position = self.centroid + (toward / norm) * min(
-                    2.40, norm * 0.55
+                    1.10, norm * 0.28
                 )
             else:
                 position = self.centroid
@@ -252,13 +259,6 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         return build
 
     style = str(self.config.get("style", "Modern")).lower()
-    signature = "|".join((
-        str(self.config.get("name", "room")),
-        style,
-        str(self.config.get("design_seed", "variation-v3")),
-        str(round(area, 2)),
-    ))
-    style_pick = int(hashlib.sha1(signature.encode("utf-8")).hexdigest()[:8], 16)
     source_table_builder = self.furniture_builder(
         "dining_table",
         original.build_dining_table,
@@ -303,43 +303,38 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
             else 6
         )
 
-    def long_shape(seats):
-        """The elongated silhouette this style would draw for `seats`."""
-        if any(word in style for word in ("industrial", "traditional")):
-            shape_options = ("rectangular", "racetrack")
-        elif any(word in style for word in ("scandinavian", "japandi", "minimal")):
-            shape_options = ("oval", "rounded_rectangle", "rectangular")
-        elif any(word in style for word in ("classic", "bohemian", "boho")):
-            shape_options = ("oval", "rectangular")
-        else:
-            shape_options = ("rectangular", "oval", "racetrack", "rounded_rectangle")
-        return shape_options[(style_pick + seats) % len(shape_options)]
-
     def shape_candidates(seats):
         """Table silhouettes for `seats`, the one the room suits first.
 
-        A circle is the default dining table, and the first shape tried
-        anywhere it can work: it seats four in the smallest footprint of any
-        shape, has no corner to walk into beside a doorway, and is the right
-        answer in the square-ish rooms most plans draw. The other shapes are
-        chosen by the space rather than by taste — a square top where a
-        formal, genuinely square room wants one, and the long family once the
-        room is clearly elongated or the table has to seat six.
+        Three shapes, because three is what a dining table is: a circle, a
+        rectangle, and the square that is really a small version of both. The
+        oval, racetrack and rounded-rectangle variants that used to be picked
+        from a style table are gone. They were chosen by the room's *style*
+        rather than by its shape, which meant the same room got a different
+        silhouette for a different colour scheme, and none of them read as a
+        deliberate choice at walkthrough scale — a rounded rectangle and a
+        rectangle are the same table from three metres away.
+
+        A circle is the default, and the first shape tried anywhere it can
+        work: it seats four in the smallest footprint of any shape, has no
+        corner to walk into, and is the right answer in the square-ish rooms
+        most plans draw. A square top is for a formal, genuinely square room.
+        The rectangle is what an elongated room, or a table for six or more,
+        actually needs.
 
         Returning a list instead of one shape is what makes that a fit rather
         than a guess: each candidate is offered to the pose search in turn, so
         a narrow room that cannot take a round table gets the rectangle it can
         take instead of losing its table altogether.
         """
-        long_pick = long_shape(seats)
         balanced = aspect <= 1.24
         if seats >= 8:
             # Eight covers is a long table in any room.
-            return (long_pick, "rectangular")
+            return ("rectangular",)
         if seats == 6:
             # A six-seat round table is 1.4 m across and needs a square-ish
             # room to sit in; where there is one, it is the better table.
-            return ("round", long_pick) if balanced else (long_pick, "rectangular")
+            return ("round", "rectangular") if balanced else ("rectangular",)
         formal = any(
             word in style
             for word in ("classic", "traditional", "industrial")
@@ -348,13 +343,24 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
             # A clearly elongated room reads as a long table — except for a
             # two-seater, which is a bistro table wherever it stands.
             return (
-                ("round", long_pick, "square")
+                ("round", "rectangular")
                 if seats <= 2
-                else (long_pick, "round", "square")
+                else ("rectangular", "round")
             )
         if seats == 4 and balanced and formal and not circulation_sensitive:
-            return ("square", "round", long_pick)
-        return ("round", "square", long_pick)
+            return ("square", "round", "rectangular")
+        return ("round", "square", "rectangular")
+
+    # How much bigger than its base size this room can carry a table.
+    #
+    # The seat count already steps the table up with the room, but in coarse
+    # jumps: every four-seater in every four-seat room was the identical
+    # 1.52 m. Real rooms are not sized in steps, and neither is the furniture
+    # that suits them — a four-seater in a room with 3.6 m across it should be
+    # a more generous table than one in a room with 2.8 m, without becoming a
+    # six-seater. This eases between the two, over the narrow dimension of the
+    # room, because the narrow dimension is what actually limits a table.
+    size_growth = 1.0 + 0.18 * max(0.0, min(1.0, (minor - 2.70) / 1.80))
 
     def table_template(seats, shape, clearance=None):
         dining_clearance = (
@@ -369,10 +375,10 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         # Every one of these used to be a size down: a four-seater at 1.36 m
         # long and 0.78 m deep is a breakfast table, and a 1.06 m round seats
         # three adults in comfort, not four. They were cut to fit past the
-        # doorway guards, and now that those are the size of a walking route
-        # there is no reason to keep serving a small table in a large room.
-        # 0.60 m of table edge per cover, and 0.90 m across the middle for the
-        # dishes, is what these are built from.
+        # doorway guards, and now that those are gone from every door but the
+        # front one there is no reason to keep serving a small table in a large
+        # room. 0.60 m of table edge per cover, and 0.90 m across the middle
+        # for the dishes, is what these are built from.
         if shape == "round":
             width = depth = 0.92 if seats <= 2 else 1.18 if seats == 4 else 1.42
         elif shape == "square":
@@ -386,10 +392,14 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                 10: (3.00, 1.10),
             }
             width, depth = dimensions[seats]
-            if shape == "oval":
-                width += 0.06
-            elif shape == "racetrack":
-                width += 0.03
+        # Grown with the room, then held to what a table is actually made in:
+        # nobody sells a 1.30 m round four-seater or a 1.25 m deep rectangle.
+        width = min(width * size_growth, 3.20)
+        depth = (
+            width
+            if shape in ("round", "square")
+            else min(depth * size_growth, 1.15)
+        )
 
         if shape in ("round", "square"):
             # In open plans, tuck chairs into their everyday position and keep
@@ -533,7 +543,10 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         # axes before falling back to standing it on the spot.
         entrance_zones = [
             zone.buffer(0.20)
-            for zone in getattr(self, "entrance_zones", ())
+            for zone in (
+                list(getattr(self, "entrance_zones", ()))
+                + list(getattr(self, "route_zones", ()))
+            )
         ]
         if entrance_zones and any(
             forced_footprint.intersects(zone) for zone in entrance_zones
@@ -583,7 +596,7 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                 dtype=float,
             )
             safe_room = self.poly.buffer(-0.12)
-            for shift in (1.40, 1.20, 1.00, 0.80, 0.60, 0.40, 0.20):
+            for shift in (0.55, 0.40, 0.25, 0.15):
                 shifted = False
                 for lateral_shift in (
                     0.0,
@@ -625,6 +638,54 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                         break
                 if shifted:
                     break
+
+    # Sit the set with the living room, not across the room from it.
+    #
+    # Everything above decides which end of an open plan the table belongs at.
+    # Nothing decided how far from the sofa it ends up, and the answer kept
+    # being "as far as the search could get it": `find_open_pose` scores
+    # clearance, so the winning pose was usually the one that had backed as far
+    # from the seating group as the walls allowed. The two halves of one room
+    # read as two rooms with a corridor of carpet between them.
+    #
+    # So the finished pose is walked back toward the sofa, a step at a time,
+    # for as long as it stays legal. It stops a comfortable pull-out gap short
+    # of the seating rather than against it, and it never crosses anything the
+    # earlier passes were protecting.
+    if open_plan_dining and pose is not None:
+        sofa = _furniture_with_suffix(self, "sofa")
+        if sofa is not None:
+            sofa_position = np.asarray(sofa["position"], dtype=float)
+            current = np.asarray(pose["pos"], dtype=float)
+            toward_sofa = sofa_position - current
+            gap = float(np.linalg.norm(toward_sofa))
+            if gap > 1e-6:
+                toward_sofa = toward_sofa / gap
+                keep_apart = (
+                    float(sofa["depth"]) / 2
+                    + selected["zone_depth"] / 2
+                    + 0.30
+                )
+                safe_room = self.poly.buffer(-0.12)
+                travel = gap - keep_apart
+                step = 0.20
+                while travel > 0.0:
+                    moved = current + toward_sofa * min(travel, step)
+                    candidate = original.footprint_poly(
+                        moved,
+                        float(pose["yaw"]),
+                        selected["zone_width"],
+                        selected["zone_depth"],
+                    )
+                    if not candidate.within(safe_room) or any(
+                        candidate.intersects(zone) for zone in self.door_zones
+                    ) or any(
+                        candidate.intersects(placed) for placed in self.placed
+                    ):
+                        break
+                    current = moved
+                    pose = {**pose, "pos": current, "footprint": candidate}
+                    travel -= step
 
     chair_count = selected["seats"]
     table_shape = selected["shape"]
