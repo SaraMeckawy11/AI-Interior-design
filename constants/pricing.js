@@ -3,8 +3,8 @@
  *
  * Livinai is paid for in two ways, and a person picks one:
  *
- *  1. **A subscription** — monthly or yearly. Unlimited renders, no ads, no
- *     counting. This is for people who use the app.
+ *  1. **A subscription** — monthly or yearly. Up to 40 renders a day, no ads,
+ *     no coin counting. This is for people who use the app.
  *  2. **Coins** — bought in packs, or earned one at a time by watching a
  *     rewarded ad. This is for people who want three renders and then to be left
  *     alone, and it is the only route that costs them nothing.
@@ -27,6 +27,14 @@ export const AD_COIN_REWARD = 1;
 
 /** Renders every new account gets before any of this applies. */
 export const FREE_DESIGNS = 2;
+
+/**
+ * Daily fair-use allowance included with Livinai Pro.
+ *
+ * Keep this equal to `MAX_RENDERS_PER_DAY` in
+ * `backend/src/config/pricing.js`; the server remains authoritative.
+ */
+export const PRO_RENDER_LIMIT_PER_DAY = 40;
 
 /**
  * The price list, in coins.

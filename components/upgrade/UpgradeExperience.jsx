@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ActivityIndicator,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -16,13 +15,14 @@ import styles from '../../assets/styles/upgradeV2.styles';
 import COLORS from '../../constants/colors';
 import {
   AD_COIN_REWARD,
+  PRO_RENDER_LIMIT_PER_DAY,
   YEARLY_SAVING_PERCENT,
   coinLabel,
   packSaving,
 } from '../../constants/pricing';
 
 const PRO_FEATURES = [
-  { icon: 'infinite-outline', label: 'Unlimited renders' },
+  { icon: 'sparkles-outline', label: `${PRO_RENDER_LIMIT_PER_DAY} renders / day` },
   { icon: 'cube-outline', label: '3D walkthroughs' },
   { icon: 'eye-off-outline', label: 'Ad-free' },
 ];
@@ -164,7 +164,7 @@ export default function UpgradeExperience({
         <View style={styles.purchaseToggle} accessibilityRole="tablist">
           <PurchaseTab
             active={buyingPlan}
-            label="Unlimited"
+            label="Livinai Pro"
             onPress={() => selectPurchaseType('plan')}
           />
           <PurchaseTab
@@ -483,10 +483,37 @@ function PurchaseFooter({
   const actionLabel = buyingPlan
     ? `${isSubscribed ? 'Switch to' : 'Start'} ${activePlan?.title}`
     : `Buy ${activePack?.coins ?? 0} coins`;
+  const summaryTitle = buyingPlan
+    ? `Livinai Pro ${activePlan?.title ?? ''}`.trim()
+    : coinLabel(activePack?.coins ?? 0);
+  const summaryDetail = buyingPlan
+    ? `Auto-renews until canceled · Up to ${PRO_RENDER_LIMIT_PER_DAY} renders per day`
+    : 'One-time purchase · Coins never expire';
 
   return (
     <View style={[styles.purchaseFooter, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <View style={styles.footerInner}>
+        <View style={styles.checkoutSummary} accessibilityRole="summary">
+          <View style={styles.checkoutCopy}>
+            <Text style={styles.checkoutTitle}>{summaryTitle}</Text>
+            <Text style={styles.checkoutDetail} numberOfLines={1}>
+              {summaryDetail}
+            </Text>
+          </View>
+          <View style={styles.checkoutPriceWrap}>
+            <Text
+              style={styles.checkoutPrice}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+            >
+              {price}
+            </Text>
+            {buyingPlan && activePlan?.period ? (
+              <Text style={styles.checkoutPeriod}>per {activePlan.period}</Text>
+            ) : null}
+          </View>
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={
@@ -515,52 +542,36 @@ function PurchaseFooter({
             ) : unavailable ? (
               <Text style={styles.primaryButtonTextDisabled}>Store unavailable</Text>
             ) : (
-              <>
-                <Text
-                  style={styles.primaryButtonText}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.82}
-                >
-                  {actionLabel}
-                </Text>
-                <View style={styles.primaryButtonPriceWrap}>
-                  <Text style={styles.primaryButtonPrice}>{price}</Text>
-                </View>
-              </>
+              <Text
+                style={styles.primaryButtonText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+              >
+                {actionLabel}
+              </Text>
             )}
           </LinearGradient>
         </Pressable>
-        {/*
-          "Unlimited" is true for anybody who uses the app, and there is a
-          fair-use ceiling behind it that a real evening of redecorating never
-          reaches — one render at a time, and a limit on the day. Saying so here
-          is the difference between a disclosed policy and an unlimited plan that
-          quietly is not one, which is the version that gets refund requests and
-          store complaints.
-        */}
-        <Text style={styles.footerNote}>
-          {buyingPlan
-            ? `Payment is charged to your ${Platform.OS === 'ios' ? 'Apple ID' : 'Google Play account'}. `
-              + 'Renews automatically unless canceled at least 24 hours before the current period ends. '
-              + 'Unlimited use is subject to fair use.'
-            : 'One-time purchase. Coins never expire.'}
-        </Text>
         {buyingPlan ? (
           <View style={styles.legalLinks}>
             <Pressable
               accessibilityRole="link"
               accessibilityLabel="Open Terms of Use"
-              hitSlop={8}
+              accessibilityHint="Opens the terms that apply to this subscription"
+              hitSlop={6}
+              style={({ pressed }) => [styles.legalLink, pressed && styles.pressed]}
               onPress={onOpenTerms}
             >
               <Text style={styles.legalLinkText}>Terms of Use</Text>
             </Pressable>
-            <Text style={styles.legalSeparator}>•</Text>
+            <View style={styles.legalDot} />
             <Pressable
               accessibilityRole="link"
               accessibilityLabel="Open Privacy Policy"
-              hitSlop={8}
+              accessibilityHint="Opens Livinai's privacy policy"
+              hitSlop={6}
+              style={({ pressed }) => [styles.legalLink, pressed && styles.pressed]}
               onPress={onOpenPrivacy}
             >
               <Text style={styles.legalLinkText}>Privacy Policy</Text>

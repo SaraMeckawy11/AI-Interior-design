@@ -32,7 +32,7 @@ const Privacy = () => {
 
         <Section title="Information Automatically Collected">
           <Text style={styles.text}>
-            We collect IP address, device characteristics, browser type, OS, referring URLs, and usage activity like screen views, page durations, and interaction logs to secure and optimize the app.
+            We and our service providers may process IP address, coarse location inferred from IP, device identifiers and characteristics, OS version, app interactions, advertising activity, performance data, and crash diagnostics to operate, secure, measure, and improve Livinai.
           </Text>
         </Section>
 
@@ -46,6 +46,8 @@ const Privacy = () => {
         <Section title="Use of Information">
           <Bullet text="Provide AI-generated interior design services" />
           <Bullet text="Improve app functionality" />
+          <Bullet text="Process subscriptions and coin purchases and maintain entitlement status" />
+          <Bullet text="Show and measure advertising and award coins for eligible rewarded ads" />
           <Bullet text="Respond to customer support requests" />
           <Bullet text="Communicate important updates" />
           <Bullet text="Comply with legal obligations" />
@@ -58,6 +60,9 @@ const Privacy = () => {
           <Bullet text="Cloud storage providers" />
           <Bullet text="Analytics and crash reporting platforms" />
           <Bullet text="AI model processing services" />
+          <Bullet text="Google AdMob for advertising and ad measurement" />
+          <Bullet text="RevenueCat for purchase and subscription entitlement management" />
+          <Bullet text="Apple and Google for authentication and in-app payment processing" />
           <Bullet text="Legal authorities if required by law" />
           <Text style={styles.text}>
             All partners are contractually required to follow data privacy obligations.
@@ -84,7 +89,7 @@ const Privacy = () => {
 
         <Section title="User Rights">
           <Text style={styles.text}>
-            All users have the same fundamental privacy rights. This includes the right to access, update, delete, or object to the processing of your data. To exercise your rights, contact us at{' '}
+            You can permanently delete your account and associated app data from Profile &gt; Account &gt; Delete Account. You may also ask to access, update, delete, or object to the processing of your data by contacting us at{' '}
             <Text 
               style={styles.link} 
               onPress={() => Linking.openURL('mailto:livinai2025@gmail.com')}
@@ -102,7 +107,7 @@ const Privacy = () => {
 
         <Section title="Cookies and Tracking">
           <Text style={styles.text}>
-            We may use cookies or local storage to enhance functionality and performance. You can disable these through your device settings.
+            We may use local storage and similar technologies for app functionality and performance. On iOS, Livinai asks for permission before allowing tracking across other companies&apos; apps or websites. Declining tracking does not prevent you from using the app. You can change tracking and photo permissions in iOS Settings.
           </Text>
         </Section>
 

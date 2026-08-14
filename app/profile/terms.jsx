@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import COLORS from '../../constants/colors';
 import ScreenHeader from '../../components/ScreenHeader';
 import { SPACING, TYPE } from '../../constants/theme';
+import { PRO_RENDER_LIMIT_PER_DAY } from '../../constants/pricing';
 
 const Terms = () => {
   return (
@@ -60,6 +61,9 @@ const Terms = () => {
           </Text>
           <Text style={styles.text}>
             You are responsible for managing your subscription, including cancellations and renewals.
+          </Text>
+          <Text style={styles.text}>
+            Livinai Pro includes up to {PRO_RENDER_LIMIT_PER_DAY} renders per day, with one render processed at a time. The daily allowance resets at midnight UTC.
           </Text>
           <Text style={styles.text}>
             Apple users are also covered by the{' '}
