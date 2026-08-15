@@ -58,6 +58,17 @@ ACCEPT_SCORE = 0.60
 #: comfortably above this.
 MAX_OPENING_ADDED = 0.02
 
+#: Floor on how much of the source's opening area survives, vetoing on its own.
+#:
+#: The guard shipped without this and had a hole exactly where the complaints
+#: were: `opening_added` catches a window that was *invented*, and line recall
+#: catches a shell that *moved*, but a window painted over, shrunk, or hidden
+#: behind full-height drapery loses area without adding any and without
+#: shifting a wall. A render that deleted the only window outright scored 0.839
+#: and was accepted. A window is the most valuable thing in a room and the
+#: hardest loss to forgive, so losing one is now its own veto.
+MIN_OPENING_KEPT = 0.70
+
 #: Floor on line recall alone, vetoing independently of the composite score.
 #:
 #: Without this a render that reshaped the room still passed: it kept every
@@ -219,6 +230,9 @@ class StructureGuard:
             else _threshold("LIVINAI_STRUCTURE_ACCEPT", ACCEPT_SCORE)
         )
         self.min_line_recall = _threshold("LIVINAI_STRUCTURE_MIN_LINES", MIN_LINE_RECALL)
+        self.min_opening_kept = _threshold(
+            "LIVINAI_STRUCTURE_MIN_KEPT", MIN_OPENING_KEPT
+        )
         self.max_opening_added = _threshold(
             "LIVINAI_STRUCTURE_MAX_ADDED", MAX_OPENING_ADDED
         )
@@ -252,8 +266,12 @@ class StructureGuard:
         opening_added = added / float(width * height)
 
         score = 0.45 * line_recall + 0.25 * edge_recall + 0.30 * opening_kept
+        # Ordered by how specific the diagnosis is, so the reported veto names
+        # the most useful thing that went wrong rather than the first tripped.
         if opening_added > self.max_opening_added:
             veto = "invented_opening"
+        elif opening_kept < self.min_opening_kept:
+            veto = "lost_opening"
         elif line_recall < self.min_line_recall:
             veto = "structure_moved"
         else:

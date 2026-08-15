@@ -1510,8 +1510,18 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v23-structure-guarded",
-        "interiorLocks": {"photo": "shell-and-openings-fixed", "walkthrough": "concise"},
+        "promptEngine": "gen-klein-per-room-briefs-v24-windows-untouchable",
+        "interiorLocks": {
+            "photo": "shell-windows-and-openings-fixed",
+            "walkthrough": "concise-window-shape",
+        },
+        # Which rooms are briefed for a television and which refuse one. A salon
+        # is a reception room and a kitchen is a workroom; neither gets a TV,
+        # and saying nothing was what let one appear.
+        "television": {
+            "briefed": ["living room", "living + dining", "basement", "full apartment"],
+            "refused": "every other room, by name in its exclusions",
+        },
         # Each room type now carries its own programme, hero, limits, styling,
         # layout variants and — the part that stops a kitchen being furnished
         # like a living room — its own list of what it must not contain.
@@ -1521,7 +1531,7 @@ def health():
         # for no geometry preservation.
         "structureGuard": {
             "metrics": ["line_recall", "edge_recall", "opening_kept", "opening_added"],
-            "vetoes": ["invented_opening", "structure_moved"],
+            "vetoes": ["invented_opening", "lost_opening", "structure_moved"],
             "appliesTo": ["interior", "exterior"],
         },
         # Seeds are hashed from the brief instead of pinned, so two different

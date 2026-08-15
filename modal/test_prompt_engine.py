@@ -41,15 +41,44 @@ PALETTE = {
     ]
 }
 
-#: Qwen3 truncates at 512. Words are converted at a deliberately pessimistic
-#: rate plus the chat template's overhead, because the failure mode of being
-#: wrong here is silent: the tail of the brief is dropped without an error.
+#: Qwen3 truncates at 512, and the failure mode is silent — the tail of the
+#: brief is dropped without an error, and the tail is where the quality rules
+#: live. So this is measured with the model's real tokenizer when it can be
+#: reached, and only estimated when it cannot.
+#:
+#: The estimate was 1.45 tokens/word, chosen pessimistically before anything
+#: had been measured. Against the real tokenizer these briefs run 1.34–1.38,
+#: so 1.45 was rejecting briefs that fit — 1.42 keeps a margin over the
+#: observed worst case without inventing 5% of phantom length.
 TOKEN_CEILING = 512
-TOKENS_PER_WORD = 1.45
+TOKENS_PER_WORD = 1.42
 TEMPLATE_OVERHEAD = 32
 
 
+def _real_tokenizer():
+    """The FLUX.2 [klein] tokenizer, or None if it cannot be loaded offline.
+
+    Only the tokenizer JSON is fetched — a few MB, not the 16 GB checkpoint —
+    and it is cached after the first run. Falling back to the estimate keeps
+    this suite runnable on a machine with no network.
+    """
+    try:
+        from huggingface_hub import hf_hub_download
+        from tokenizers import Tokenizer
+
+        return Tokenizer.from_file(
+            hf_hub_download("black-forest-labs/FLUX.2-klein-4B", "tokenizer/tokenizer.json")
+        )
+    except Exception:
+        return None
+
+
+TOKENIZER = _real_tokenizer()
+
+
 def estimated_tokens(prompt):
+    if TOKENIZER is not None:
+        return len(TOKENIZER.encode(prompt).ids) + TEMPLATE_OVERHEAD
     return int(len(prompt.split()) * TOKENS_PER_WORD) + TEMPLATE_OVERHEAD
 
 
@@ -89,7 +118,8 @@ def test_compact_brief_is_shorter_and_keeps_the_lock():
         assert len(compact.split()) < len(full.split())
         # The parts a render cannot be correct without survive compaction.
         assert "ARCHITECTURE - HIGHEST PRIORITY" in compact
-        assert "Openings are fixed" in compact
+        assert "WINDOWS ARE UNTOUCHABLE" in compact
+        assert "Doors and all other openings are fixed" in compact
         assert pe.room_brief(room)["forbid"] in compact
         assert pe.room_brief(room)["programme"] in compact
 
@@ -192,14 +222,84 @@ def test_seed_differs_per_room_and_per_variation():
         pe.design_seed(space_type="Kitchen", design_style="Japandi", color_tone="Neutral")
 
 
+#: A television is a piece of programme, not decoration, and a senior designer
+#: puts one in some rooms and refuses it in others. These are the rooms it
+#: belongs in — everywhere else has to rule it out explicitly, because silence
+#: is what let one turn up in a salon.
+_TV_ROOMS = ["Living Room", "Living + Dining", "Basement", "Full Apartment"]
+_NO_TV_ROOMS = [
+    "Salon", "Salon + Dining", "Bedroom", "Kitchen", "Bathroom", "Dining Room",
+    "Balcony", "Closet", "Office", "Kids Room", "Laundry Room", "Hallway",
+    "Entryway",
+]
+
+
+def test_rooms_that_should_have_a_tv_ask_for_one_with_a_unit():
+    for room in _TV_ROOMS:
+        programme = pe.room_brief(room)["programme"].lower()
+        assert "tv" in programme, f"{room} does not ask for a TV"
+        # A TV with nothing under it renders as a floating black rectangle.
+        assert "media unit" in programme, f"{room} asks for a TV with no unit under it"
+        assert "tv" not in pe.room_brief(room)["forbid"].lower()
+
+
+def test_rooms_that_should_not_have_a_tv_forbid_one():
+    for room in _NO_TV_ROOMS:
+        brief = pe.room_brief(room)
+        # Two shapes of exclusion list are in use: "no TV, no bed, ..." and the
+        # compressed "no sofa, armchair, ..., TV or area rug". Both rule it out.
+        assert "tv" in brief["forbid"].lower(), f"{room} does not rule out a TV"
+        assert "tv" not in brief["programme"].lower(), f"{room} asks for a TV"
+        prompt = interior(room)
+        instructions = prompt.replace(brief["forbid"], "").lower()
+        assert " tv" not in instructions, f"{room} still mentions a TV outside its exclusions"
+
+
+def test_formal_reception_rooms_also_refuse_the_media_unit():
+    """Told only 'no TV', the model renders the console and leaves the wall bare."""
+    for room in ("Salon", "Salon + Dining", "Dining Room"):
+        assert "media unit" in pe.room_brief(room)["forbid"].lower(), (
+            f"{room} rules out the TV but not the unit it sits on"
+        )
+
+
+def test_salon_and_living_room_are_opposites_about_the_tv():
+    """The reported case, pinned directly."""
+    salon = pe.room_brief("Salon")
+    living = pe.room_brief("Living Room")
+    assert "no tv" in salon["forbid"].lower()
+    assert "tv" in living["programme"].lower() and "media unit" in living["programme"].lower()
+    assert "no tv" not in living["forbid"].lower()
+
+
+def test_window_lock_is_explicit_and_unmissable():
+    """A window must survive at its exact size, shape and position."""
+    prompt = interior("Living Room", source="photo")
+    lowered = prompt.lower()
+    assert "windows are untouchable" in lowered
+    for rule in ("same count", "position", "outline", "width", "height", "sill"):
+        assert rule in lowered, f"window lock does not pin {rule}"
+    # The ways a window actually gets lost, each named.
+    for failure in ("widen", "narrow", "shorten", "reshape", "wall one over", "drapery"):
+        assert failure in lowered, f"window lock does not forbid '{failure}'"
+    # And it has to be read before anything asks for a design.
+    assert lowered.index("windows are untouchable") < lowered.index("senior design direction")
+
+
+def test_walkthrough_lock_also_holds_window_shape():
+    prompt = interior("Living Room", source="walkthrough").lower()
+    assert "window" in prompt
+    assert "outline and proportions" in prompt
+
+
 def test_photo_lock_fixes_both_the_shell_and_the_openings():
     prompt = interior("Living Room", source="photo")
     lowered = prompt.lower()
     assert "the shell is fixed" in lowered
-    assert "openings are fixed" in lowered
-    assert "add none, remove none, move none, resize none, cover none" in lowered
+    assert "doors and all other openings are fixed the same way" in lowered
+    assert "add, remove, move or resize none" in lowered
     # The lock has to be read before anything creative asks for a redesign.
-    assert lowered.index("openings are fixed") < lowered.index("senior design direction")
+    assert lowered.index("the shell is fixed") < lowered.index("senior design direction")
 
 
 def test_every_exterior_type_locks_its_openings():

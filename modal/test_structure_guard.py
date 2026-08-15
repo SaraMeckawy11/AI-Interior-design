@@ -23,7 +23,15 @@ from structure_guard import StructureGuard, seed_ladder
 W, H = 1024, 768
 
 
-def room(window_x=620, extra_window=False, wall_shift=0, wall_colour=210, floor=150):
+def room(
+    window_x=620,
+    extra_window=False,
+    wall_shift=0,
+    wall_colour=210,
+    floor=150,
+    window_width=190,
+    window=True,
+):
     """A crude interior: back wall, floor line, a door and one or two windows."""
     img = np.full((H, W, 3), wall_colour, np.uint8)
     # Floor
@@ -36,7 +44,8 @@ def room(window_x=620, extra_window=False, wall_shift=0, wall_colour=210, floor=
     # Door
     cv2.rectangle(img, (220, 220), (330, 560 + wall_shift), (70, 60, 55), -1)
     # Window (bright)
-    cv2.rectangle(img, (window_x, 200), (window_x + 190, 430), (255, 255, 255), -1)
+    if window:
+        cv2.rectangle(img, (window_x, 200), (window_x + window_width, 430), (255, 255, 255), -1)
     if extra_window:
         cv2.rectangle(img, (380, 200), (560, 430), (255, 255, 255), -1)
     return Image.fromarray(img)
@@ -69,24 +78,32 @@ CASES = {
     "faithful, other seed": (furnish(SOURCE, 2), True, ""),
     "window moved 200px": (furnish(room(window_x=420), 1), False, "invented_opening"),
     "extra window added": (furnish(room(extra_window=True), 1), False, "invented_opening"),
+    # These two shipped as ACCEPT before `lost_opening` existed: a window that
+    # is painted over or shrunk loses area without adding any and without
+    # moving a wall, so neither of the other vetoes ever saw it.
+    "window walled over": (furnish(room(window=False), 1), False, "lost_opening"),
+    "window halved": (furnish(room(window_width=95), 1), False, "lost_opening"),
     "room reshaped": (furnish(room(wall_shift=70), 1), False, "structure_moved"),
+    # This one fails every test at once, so which veto is reported first is not
+    # a property worth pinning — only that it is rejected.
     "unrelated image": (
         Image.fromarray(np.random.default_rng(0).integers(0, 255, (H, W, 3), dtype=np.uint8)),
         False,
-        "structure_moved",
+        ("lost_opening", "structure_moved"),
     ),
 }
 
 
 def test_each_failure_is_caught_and_named():
     for name, (candidate, should_accept, expected_veto) in CASES.items():
+        allowed = expected_veto if isinstance(expected_veto, tuple) else (expected_veto,)
         report = GUARD.evaluate(candidate)
         assert report["accepted"] == should_accept, (
             f"{name}: accepted={report['accepted']}, expected {should_accept} "
             f"(score {report['score']}, veto {report['veto'] or 'none'})"
         )
-        assert report["veto"] == expected_veto, (
-            f"{name}: veto={report['veto'] or 'none'}, expected {expected_veto or 'none'}"
+        assert report["veto"] in allowed, (
+            f"{name}: veto={report['veto'] or 'none'}, expected one of {allowed}"
         )
 
 

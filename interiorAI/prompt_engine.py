@@ -216,12 +216,20 @@ _ARCHITECTURE_LOCKS = {
     PHOTO_SOURCE: (
         "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
         "- The shell is fixed: every wall, corner, ceiling and floor edge stays on "
-        "the same pixels; the room keeps its exact size, shape and proportions.\n"
-        "- Openings are fixed: the same number of doors and windows, each at the "
-        "same position, size, sill height and shape. Add none, remove none, move "
-        "none, resize none, cover none.\n"
-        "- Camera position, lens, framing and perspective stay identical. Change "
-        "finishes and movable contents only.\n"
+        "the same pixels; the room keeps its size, shape and proportions.\n"
+        # Windows get their own line because they fail in more ways than doors
+        # do, and every one of these was a render somebody was shown: a window
+        # widened to suit the new scheme, dropped to the floor as glazing,
+        # walled over because the furniture wanted that elevation, or left
+        # technically present but buried behind full-height drapery.
+        "- WINDOWS ARE UNTOUCHABLE: copy each exactly - same count, position, "
+        "outline, width, height, sill and frame bars. Never widen, narrow, "
+        "shorten, extend one to the floor, reshape one, make one a door, wall one "
+        "over, or hide one behind drapery.\n"
+        "- Doors and all other openings are fixed the same way: add, remove, move "
+        "or resize none.\n"
+        "- Camera, lens, framing and perspective stay identical. Change finishes "
+        "and movable contents only.\n"
     ),
     # A frame captured out of the 3D walkthrough. Its openings are the user's own
     # plan geometry, already exactly where they asked for them — the problem here
@@ -233,7 +241,8 @@ _ARCHITECTURE_LOCKS = {
         "ARCHITECTURE:\n"
         "- Change finishes and movable contents only. Preserve all walls, doors, "
         "windows, balcony openings and camera framing, at the same count and in "
-        "the same places. Add no opening that is not already there.\n"
+        "the same places, each window keeping its outline and proportions. Add no "
+        "opening that is not already there.\n"
     ),
 }
 
@@ -380,9 +389,12 @@ def build_floor_plan_prompt(*, design_style: str, color_rule: str) -> str:
 #: means two runs of the same room diverge in structure and not just in colour.
 ROOM_BRIEFS = {
     "living room": dict(
+        # The everyday sitting room, so it gets the television — named as a
+        # wall-mounted set over a low unit, because "a TV" on its own is
+        # rendered as a floating black rectangle with nothing under it.
         programme=(
-            "a conversation group with sofa and complementary seating, and a TV "
-            "centred above a media console on a solid wall"
+            "a conversation group of sofa and complementary seating, and a "
+            "wall-mounted TV centred over a low media unit on a solid wall"
         ),
         hero=(
             "The coffee table is the hero piece: one sculptural low table in stone, "
@@ -402,8 +414,8 @@ ROOM_BRIEFS = {
     ),
     "living + dining": dict(
         programme=(
-            "one room zoned twice - a conversation group at one end, a dining "
-            "table and chairs at the other, a clear route between"
+            "one room zoned twice - a sofa group facing a wall-mounted TV over a "
+            "low media unit at one end, a dining table and chairs at the other"
         ),
         hero=(
             "The dining table is the hero piece: one solid timber or stone table "
@@ -422,9 +434,13 @@ ROOM_BRIEFS = {
         ),
     ),
     "salon": dict(
+        # A salon is for receiving people, not for watching anything. Ruling out
+        # the media unit as well as the TV matters: told only "no TV", the model
+        # renders the console and leaves the wall above it bare, which reads as
+        # a living room with the television switched off.
         programme=(
-            "a formal reception room: seating arranged around the perimeter so the "
-            "floor stays open, matched occasional tables and a grounded rug"
+            "a formal reception room: matched seating in facing pairs around an "
+            "open centre, occasional tables within reach of every seat, no media wall"
         ),
         hero=(
             "The seating suite is the hero piece: matched tailored sofas and chairs "
@@ -435,7 +451,10 @@ ROOM_BRIEFS = {
             "occasional table - a ceramic, a tray, candles"
         ),
         limits="one ceiling fixture, matched table or floor lamps in pairs, one potted floor plant",
-        forbid="no dining table, no TV, no bed, no desk, no kitchen cabinetry, no sanitaryware",
+        forbid=(
+            "no TV, no media unit, no dining table, no bed, no desk, no kitchen "
+            "cabinetry, no sanitaryware"
+        ),
         layouts=(
             "Face two matched sofas across the rug, with the occasional tables at the ends.",
             "Line the seating along three walls around an open centre, leaving the fourth for the entrance.",
@@ -445,19 +464,19 @@ ROOM_BRIEFS = {
     "salon + dining": dict(
         programme=(
             "a formal reception room that also seats guests at table: perimeter "
-            "seating around an open centre at one end, a dining table and chairs "
+            "seating round an open centre at one end, a dining table and chairs "
             "at the other"
         ),
         hero=(
             "The dining table is the hero piece: one formal timber or stone table "
-            "with matched chairs, answered by a matched seating suite in one fabric"
+            "with matched chairs, answered by a seating suite in one fabric"
         ),
         decor=(
             "matched cushions on the suite, one large artwork at eye level, one low "
             "centrepiece on the table"
         ),
-        limits="one pendant centred over the dining table, matched lamps in pairs beside the seating, one potted floor plant",
-        forbid="no TV, no bed, no desk, no kitchen cabinetry, no sanitaryware",
+        limits="one pendant over the dining table, matched lamps in pairs beside the seating, one potted floor plant",
+        forbid="no TV, no media unit, no bed, no desk, no kitchen cabinetry, no sanitaryware",
         layouts=(
             "Put the table nearest the window and the seating suite around the open centre at the far end.",
             "Line the seating along three walls and set the table on the room's centre line beyond it.",
@@ -475,7 +494,7 @@ ROOM_BRIEFS = {
             "of the bed, and one small group on each nightstand"
         ),
         limits="one ceiling fixture, two matched bedside lights, one potted floor plant",
-        forbid="no sofa, no dining table, no kitchen cabinetry, no sanitaryware",
+        forbid="no sofa, no TV, no dining table, no kitchen cabinetry, no sanitaryware",
         layouts=(
             "Centre the headboard on the largest solid wall, with the rug running past both sides of the bed.",
             "Face the bed towards the window wall and put the closed storage on the wall behind the door.",
@@ -489,22 +508,21 @@ ROOM_BRIEFS = {
     # licence for loose seating again.
     "kitchen": dict(
         programme=(
-            "fitted floor and wall cabinetry along the existing walls, a continuous "
+            "fitted floor and wall cabinetry on the existing walls, a continuous "
             "worktop, sink, hob, integrated appliances and under-cabinet task light"
         ),
         hero=(
-            "The run of cabinetry is the hero piece: honest stone worktops, flush "
-            "handleless fronts and one considered splashback"
+            "The cabinetry run is the hero piece: honest stone worktops, flush "
+            "handleless fronts, one considered splashback"
         ),
-        decor="one counter group - a board, a bowl, a ceramic - and clear worktop everywhere else",
+        decor="one counter group - a board, a bowl, a ceramic - and clear worktop elsewhere",
         limits=(
-            "one ceiling fixture, or pendants only over an island the room can "
-            "hold; no floor lamp; no floor plant"
+            "one ceiling fixture, or pendants over an island the room can hold; "
+            "no floor lamp; no floor plant"
         ),
         forbid=(
-            "no sofa, armchair, lounge seating, coffee table, dining table, bed, "
-            "desk or area rug; the only seating is counter stools at an island the "
-            "worktop itself forms"
+            "no sofa, armchair, coffee table, dining table, bed, desk, TV or area "
+            "rug; seating only as counter stools at an island the worktop forms"
         ),
         layouts=(
             "Keep the sink, hob and fridge within one easy triangle and the floor between them clear.",
@@ -524,8 +542,8 @@ ROOM_BRIEFS = {
         decor="folded towels, one framed piece at eye level, a small tray with a ceramic and a candle",
         limits="one ceiling fixture and one mirror light; no floor lamp; at most one small plant on a surface",
         forbid=(
-            "no sofa, armchair, bed, desk, dining furniture, kitchen cabinetry or "
-            "area rug; seating only as one compact stool"
+            "no sofa, armchair, bed, desk, TV, dining furniture, kitchen cabinetry "
+            "or area rug; seating only as one compact stool"
         ),
         layouts=(
             "Leave every fitting on the wall it already stands on and keep the door swing clear.",
@@ -547,7 +565,7 @@ ROOM_BRIEFS = {
             "group - a bowl, a ceramic and candles"
         ),
         limits="one pendant or one matched row centred over the table, one potted floor plant; no floor lamp",
-        forbid="no bed, no sofa, no desk, no kitchen cabinetry, no sanitaryware",
+        forbid="no bed, no sofa, no desk, no TV, no media unit, no kitchen cabinetry, no sanitaryware",
         layouts=(
             "Centre the table under the light with at least a chair's depth clear on every side.",
             "Set the table to one side of the room and run a low sideboard along the opposite wall.",
@@ -566,8 +584,8 @@ ROOM_BRIEFS = {
         decor="outdoor cushions, one lantern, grouped planters against the railing",
         limits="one wall or ceiling light and one string of warm outdoor lighting; two or three planters",
         forbid=(
-            "no indoor upholstery, bed, desk, dining suite, kitchen cabinetry or "
-            "sanitaryware; nothing blocking the door or railing"
+            "no indoor upholstery, bed, desk, TV, dining suite, kitchen cabinetry "
+            "or sanitaryware; nothing blocking the door or railing"
         ),
         layouts=(
             "Set the seating against the solid wall facing out, planters along the railing.",
@@ -586,7 +604,7 @@ ROOM_BRIEFS = {
             "the desk - a tray, a ceramic, a lamp"
         ),
         limits="one ceiling fixture, one task lamp on the desk, one potted floor plant",
-        forbid="no bed, no dining table, no kitchen cabinetry, no sanitaryware",
+        forbid="no bed, no TV, no dining table, no kitchen cabinetry, no sanitaryware",
         layouts=(
             "Set the desk square to the window so the light falls across it, not into the screen.",
             "Face the desk into the room with full-height shelving on the wall behind it.",
@@ -607,7 +625,7 @@ ROOM_BRIEFS = {
             "a few tidy toys in open baskets"
         ),
         limits="one ceiling fixture, one bedside light and one desk lamp; no floor lamp",
-        forbid="no sofa, no dining table, no kitchen cabinetry, no sanitaryware, no adult formal furniture",
+        forbid="no sofa, no TV, no dining table, no kitchen cabinetry, no sanitaryware, no adult formal furniture",
         layouts=(
             "Put the bed against the solid wall and the desk under the window, with the play floor between them.",
             "Tuck the bed into the corner furthest from the door and run the storage along the opposite wall.",
@@ -626,8 +644,8 @@ ROOM_BRIEFS = {
         decor="neatly folded stacks, a few matched boxes, and one small tray of accessories",
         limits="one ceiling fixture and integrated shelf lighting; no floor lamp; no plant",
         forbid=(
-            "no bed, no sofa, no desk, no dining table, no kitchen cabinetry, no "
-            "sanitaryware; seating only as one compact island bench"
+            "no bed, no sofa, no desk, no TV, no dining table, no kitchen "
+            "cabinetry, no sanitaryware; seating only as one compact island bench"
         ),
         layouts=(
             "Run hanging along both long walls with the drawers between them and the mirror on the end wall.",
@@ -647,8 +665,8 @@ ROOM_BRIEFS = {
         decor="one basket, folded linen, and a single small group on the worktop",
         limits="one ceiling fixture and under-cabinet task light; no floor lamp; no floor plant",
         forbid=(
-            "no sofa, no armchair, no bed, no desk, no dining table, no coffee "
-            "table and no area rug"
+            "no sofa, no armchair, no bed, no desk, no TV, no dining table, no "
+            "coffee table and no area rug"
         ),
         layouts=(
             "Run the appliances and worktop along one wall with tall storage at the end.",
@@ -668,8 +686,8 @@ ROOM_BRIEFS = {
         decor="a small run of framed pieces at eye level and one narrow runner",
         limits="one ceiling fixture or a matched row; no floor lamp; at most one potted plant against a wall",
         forbid=(
-            "no sofa, no bed, no dining table, no desk, no kitchen cabinetry, no "
-            "sanitaryware; nothing that narrows the walkway"
+            "no sofa, no bed, no dining table, no desk, no TV, no kitchen "
+            "cabinetry, no sanitaryware; nothing that narrows the walkway"
         ),
         layouts=(
             "Keep the full width of the floor clear and hang the art in one aligned run.",
@@ -688,7 +706,7 @@ ROOM_BRIEFS = {
         ),
         decor="a tray for keys, one ceramic, and a single framed piece or mirror at eye level",
         limits="one ceiling fixture, one wall light or table lamp, one potted floor plant",
-        forbid="no sofa, no bed, no dining table, no desk, no kitchen cabinetry, no sanitaryware",
+        forbid="no sofa, no bed, no dining table, no desk, no TV, no kitchen cabinetry, no sanitaryware",
         layouts=(
             "Set the console against the wall facing the door with the storage beside it.",
             "Run a bench along one wall with hooks and closed shoe storage above and below.",
@@ -697,8 +715,8 @@ ROOM_BRIEFS = {
     ),
     "basement": dict(
         programme=(
-            "a clearly zoned multipurpose room with comfortable seating, warm "
-            "layered lighting and moisture-tolerant finishes"
+            "a zoned multipurpose room: a sofa group facing a wall-mounted TV "
+            "over a low media unit, warm layered light, moisture-tolerant finishes"
         ),
         hero=(
             "The seating group is the hero piece: one generous sofa in a hard-wearing "
@@ -718,8 +736,8 @@ ROOM_BRIEFS = {
     # and the model will happily furnish an open plan as a single living room.
     "full apartment": dict(
         programme=(
-            "each visible zone resolved for its own use - sitting, dining, cooking "
-            "and circulation - reading as one continuous scheme"
+            "each zone resolved for its own use - sitting with a wall-mounted TV "
+            "over a media unit, dining, cooking, circulation - as one scheme"
         ),
         hero=(
             "Give each zone one hero piece, and let one flooring and one wall finish "
@@ -854,9 +872,9 @@ def build_gen_klein_interior_prompt(
         if compact
         else (
             f"- DECORATE: {brief['decor']}. Leave most surfaces bare; nothing on the floor.\n"
-            f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on the "
-            "mid-sized surfaces, the deepest in a few small touches, each echoed in "
-            "two or three places. All finishes as one scheme.\n"
+            f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on "
+            "mid-sized surfaces, the deepest in a few touches, each echoed two or "
+            "three times. All finishes one scheme.\n"
         )
     )
 
@@ -871,10 +889,10 @@ def build_gen_klein_interior_prompt(
         f"{_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
         f"THIS IS A {room_type.upper()}, not any other room. It contains "
         f"{brief['forbid']}.\n"
-        f"ITEM LIMITS: {brief['limits']}; no other lamps or greenery.\n\n"
+        f"LIMITS: {brief['limits']}; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
-        f"- Resolve {brief['programme']}. Take furniture count and scale from the visible space.\n"
-        f"- Designer furniture, clean silhouettes, honest materials. {brief['hero']}.\n"
+        f"- Resolve {brief['programme']}. Take furniture count and scale from the space.\n"
+        f"- Designer furniture, honest materials. {brief['hero']}.\n"
         f"- LAYOUT: {layout} Align art and lighting with the furniture.\n"
         f"{styling}"
         "- Keep walkways and door swings clear; no clutter or duplicates.\n"
