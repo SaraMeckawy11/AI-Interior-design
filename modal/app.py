@@ -1510,9 +1510,12 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v24-windows-untouchable",
+        "promptEngine": "gen-klein-per-room-briefs-v25-one-sofa-surfaces-repainted",
         "interiorLocks": {
-            "photo": "shell-windows-and-openings-fixed",
+            # The shell, the windows and the openings are held; the finish on
+            # them explicitly is not, which is the half that was being read as
+            # "keep the original exposed stone".
+            "photo": "shell-windows-openings-fixed-surfaces-replaced",
             "walkthrough": "concise-window-shape",
         },
         # Which rooms are briefed for a television and which refuse one. A salon
@@ -1521,6 +1524,9 @@ def health():
         "television": {
             "briefed": ["living room", "living + dining", "basement", "full apartment"],
             "refused": "every other room, by name in its exclusions",
+            # One sofa, counted out loud, facing the set — and nothing standing
+            # against the wall the TV is on.
+            "seating": "exactly-one-sofa-facing-tv-media-wall-clear",
         },
         # Each room type now carries its own programme, hero, limits, styling,
         # layout variants and — the part that stops a kitchen being furnished

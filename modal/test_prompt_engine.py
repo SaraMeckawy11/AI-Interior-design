@@ -50,9 +50,19 @@ PALETTE = {
 #: had been measured. Against the real tokenizer these briefs run 1.34–1.38,
 #: so 1.45 was rejecting briefs that fit — 1.42 keeps a margin over the
 #: observed worst case without inventing 5% of phantom length.
+#: The chat wrapper the engine adds around the brief, measured rather than
+#: guessed. Rendering the model's own chat_template.jinja for one empty user
+#: message gives exactly:
+#:
+#:     '<|im_start|>user\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+#:
+#: which is 12 tokens. This was 32 — a number invented for safety before it was
+#: checked — and the 20 phantom tokens were rejecting briefs that fit. 16 keeps
+#: a margin over the measurement without pretending the wrapper is three times
+#: its real size.
 TOKEN_CEILING = 512
 TOKENS_PER_WORD = 1.42
-TEMPLATE_OVERHEAD = 32
+TEMPLATE_OVERHEAD = 16
 
 
 def _real_tokenizer():
@@ -119,7 +129,7 @@ def test_compact_brief_is_shorter_and_keeps_the_lock():
         # The parts a render cannot be correct without survive compaction.
         assert "ARCHITECTURE - HIGHEST PRIORITY" in compact
         assert "WINDOWS ARE UNTOUCHABLE" in compact
-        assert "Doors and all other openings are fixed" in compact
+        assert "Doors and other openings" in compact
         assert pe.room_brief(room)["forbid"] in compact
         assert pe.room_brief(room)["programme"] in compact
 
@@ -272,6 +282,71 @@ def test_salon_and_living_room_are_opposites_about_the_tv():
     assert "no tv" not in living["forbid"].lower()
 
 
+def test_tv_rooms_ask_for_exactly_one_sofa():
+    """Renders came back with two sofas, the second one over the media unit."""
+    for room in _TV_ROOMS:
+        brief = pe.room_brief(room)
+        programme = brief["programme"].lower()
+        assert "one sofa" in programme, f"{room} does not count the sofa"
+        assert "second sofa" in brief["forbid"].lower(), f"{room} does not rule out a second sofa"
+
+
+def test_tv_rooms_keep_the_media_wall_clear():
+    for room in _TV_ROOMS:
+        assert "media wall" in pe.room_brief(room)["forbid"].lower(), (
+            f"{room} does not keep furniture off the media wall"
+        )
+
+
+def test_no_living_room_layout_puts_seating_on_the_media_wall():
+    """The variant that caused it said 'set the sofa square to the longest solid wall'.
+
+    The longest solid wall is where the TV and its unit go, so that sentence
+    was an instruction to produce the reported failure. Every variant now
+    places the seating by its relation to the television instead.
+    """
+    for room in _TV_ROOMS:
+        for layout in pe.room_brief(room)["layouts"]:
+            lowered = layout.lower()
+            assert "longest solid wall" not in lowered, (
+                f"{room} layout still seats the sofa on the media wall: {layout}"
+            )
+            # "a console table behind the sofa" was read as the media console.
+            assert "console" not in lowered, (
+                f"{room} layout mentions a console that reads as the media unit: {layout}"
+            )
+    # The living room's variants must each tie the seating to the TV.
+    for layout in pe.room_brief("Living Room")["layouts"]:
+        assert "tv" in layout.lower() or "media wall" in layout.lower(), (
+            f"living room layout does not place the seating against the TV: {layout}"
+        )
+
+
+def test_walls_are_refinished_not_preserved():
+    """Rooms came back with the source photo's exposed red stone still on them.
+
+    "Keep every wall on the same pixels" was read as keeping what the wall was
+    made of, so the geometry survived and the redesign did not happen.
+    """
+    prompt = interior("Living Room", source="photo")
+    lowered = prompt.lower()
+    assert "surfaces are not structure" in lowered
+    assert "replace the finish" in lowered
+    for material in ("brick", "stone", "concrete", "old paint"):
+        assert material in lowered, f"the surface rule does not name {material}"
+    assert "failed render" in lowered
+    # It has to sit inside the architecture block, next to the lock it qualifies.
+    assert lowered.index("surfaces are not structure") < lowered.index("senior design direction")
+
+
+def test_surface_rule_survives_compaction():
+    for room in ("Living Room", "Kitchen"):
+        compact = pe.build_gen_klein_interior_prompt(
+            space_type=room, design_style="Modern", color_tone="Neutral", compact=True,
+        ).lower()
+        assert "surfaces are not structure" in compact
+
+
 def test_window_lock_is_explicit_and_unmissable():
     """A window must survive at its exact size, shape and position."""
     prompt = interior("Living Room", source="photo")
@@ -280,7 +355,7 @@ def test_window_lock_is_explicit_and_unmissable():
     for rule in ("same count", "position", "outline", "width", "height", "sill"):
         assert rule in lowered, f"window lock does not pin {rule}"
     # The ways a window actually gets lost, each named.
-    for failure in ("widen", "narrow", "shorten", "reshape", "wall one over", "drapery"):
+    for failure in ("widen", "narrow", "shorten", "reshape", "wall one over", "curtain one away"):
         assert failure in lowered, f"window lock does not forbid '{failure}'"
     # And it has to be read before anything asks for a design.
     assert lowered.index("windows are untouchable") < lowered.index("senior design direction")
@@ -296,7 +371,7 @@ def test_photo_lock_fixes_both_the_shell_and_the_openings():
     prompt = interior("Living Room", source="photo")
     lowered = prompt.lower()
     assert "the shell is fixed" in lowered
-    assert "doors and all other openings are fixed the same way" in lowered
+    assert "doors and other openings: same rule" in lowered
     assert "add, remove, move or resize none" in lowered
     # The lock has to be read before anything creative asks for a redesign.
     assert lowered.index("the shell is fixed") < lowered.index("senior design direction")
