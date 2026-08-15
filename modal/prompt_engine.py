@@ -233,8 +233,13 @@ _ARCHITECTURE_LOCKS = {
         # new furniture. It is stated in the positive and without naming a
         # single unwanted material: listing the finishes that were surviving, in
         # order to forbid them, only painted them back on.
+        # "Evenly, corner to corner" is aimed at the way this actually fails.
+        # It is not that a wall keeps its old finish outright — it is that
+        # patches of it survive, because a four-step edit leaves high-frequency
+        # detail alone unless something pushes it to change. So the instruction
+        # is about the finish being continuous, not merely about it being new.
         "- Camera, lens, framing and perspective stay identical. Change finishes "
-        "and movable contents only: every surface is refinished.\n"
+        "and movable contents only: every surface refinished evenly, corner to corner.\n"
     ),
     # A frame captured out of the 3D walkthrough. Its openings are the user's own
     # plan geometry, already exactly where they asked for them — the problem here
@@ -937,8 +942,8 @@ def build_gen_klein_interior_prompt(
     # by render source — see _ARCHITECTURE_LOCKS. Everything creative stays below
     # both, so the lock is read first.
     return (
-        f"Redesign this {room_type} in a refined {style} style, using the input "
-        "photo as the architectural base.\n\n"
+        f"Redesign this {room_type} in a refined {style} style on the input "
+        "photo's architecture.\n\n"
         f"{_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
         f"THIS IS A {room_type.upper()}, not any other room. It contains "
         f"{brief['forbid']}.\n"
