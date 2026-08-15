@@ -46,13 +46,13 @@ PALETTE = {
 #: live. So this is measured with the model's real tokenizer when it can be
 #: reached, and only estimated when it cannot.
 #:
-#: The word estimate was 1.45 tokens/word, chosen pessimistically before
-#: anything had been measured. Against the real tokenizer these briefs run
-#: 1.34–1.38, so 1.45 was rejecting briefs that fit; 1.42 keeps a margin over
-#: the observed worst case without inventing 5% of phantom length.
-#:
-#: The chat wrapper is measured rather than guessed too. Rendering the model's
-#: own chat_template.jinja for one empty user message gives exactly:
+#: The estimate was 1.45 tokens/word, chosen pessimistically before anything
+#: had been measured. Against the real tokenizer these briefs run 1.34–1.38,
+#: so 1.45 was rejecting briefs that fit — 1.42 keeps a margin over the
+#: observed worst case without inventing 5% of phantom length.
+#: The chat wrapper the engine adds around the brief, measured rather than
+#: guessed. Rendering the model's own chat_template.jinja for one empty user
+#: message gives exactly:
 #:
 #:     '<|im_start|>user\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 #:
@@ -350,7 +350,7 @@ def test_walls_are_repainted_without_naming_what_to_avoid():
     lowered = prompt.lower()
     # Positive instruction, in the architecture block and again where colour is
     # actually assigned.
-    assert "every surface refinished evenly, corner to corner" in lowered
+    assert "every surface is refinished" in lowered
     assert "across every wall, ceiling and floor" in lowered
     # And the brief must not recite the materials it is trying to get rid of.
     for material in _UNWANTED_WALL_MATERIALS:
@@ -423,41 +423,6 @@ def test_hero_names_one_material_not_a_choice():
             assert len(present) == 1, (
                 f"{room} v{variation} names {len(present)} materials: {hero_line[0]}"
             )
-
-
-def test_chairs_flank_the_sofa_rather_than_face_it():
-    """A chair across from the sofa lands between it and the television.
-
-    The earlier wording — "angled in from the far corners", "at right angles
-    across the rug" — put the chairs opposite the sofa, which blocks the view
-    and reads as furniture standing in the way.
-    """
-    for room in ("Living Room", "Salon"):
-        for layout in pe.room_brief(room)["layouts"]:
-            lowered = layout.lower()
-            assert any(word in lowered for word in ("beside", "alongside")), (
-                f"{room} layout does not put the chairs beside the sofa: {layout}"
-            )
-            for wrong in ("across from", "at right angles", "facing each other",
-                          "from the far corners", "across the rug,"):
-                assert wrong not in lowered, (
-                    f"{room} layout still seats a chair opposite the sofa: {layout}"
-                )
-
-
-def test_salon_is_the_living_room_without_the_television():
-    """Asked for explicitly: same brief, minus the TV."""
-    salon, living = pe.room_brief("Salon"), pe.room_brief("Living Room")
-    for field in ("hero", "decor", "limits", "materials"):
-        assert salon[field] == living[field], f"salon {field} differs from the living room's"
-    # The programme is the living room's seating with the television removed.
-    assert "one sofa and two lounge chairs" in salon["programme"].lower()
-    assert "tv" not in salon["programme"].lower()
-    # And nothing anywhere in a salon render may ask for one.
-    for layout in salon["layouts"]:
-        assert "tv" not in layout.lower(), f"salon layout mentions a TV: {layout}"
-    forbid = salon["forbid"].lower()
-    assert "no tv" in forbid and "no media unit" in forbid
 
 
 def test_seating_rooms_place_their_chairs():

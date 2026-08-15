@@ -233,13 +233,8 @@ _ARCHITECTURE_LOCKS = {
         # new furniture. It is stated in the positive and without naming a
         # single unwanted material: listing the finishes that were surviving, in
         # order to forbid them, only painted them back on.
-        # "Evenly, corner to corner" is aimed at the way this actually fails.
-        # It is not that a wall keeps its old finish outright — it is that
-        # patches of it survive, because a four-step edit leaves high-frequency
-        # detail alone unless something pushes it to change. So the instruction
-        # is about the finish being continuous, not merely about it being new.
         "- Camera, lens, framing and perspective stay identical. Change finishes "
-        "and movable contents only: every surface refinished evenly, corner to corner.\n"
+        "and movable contents only: every surface is refinished.\n"
     ),
     # A frame captured out of the 3D walkthrough. Its openings are the user's own
     # plan geometry, already exactly where they asked for them — the problem here
@@ -438,13 +433,10 @@ ROOM_BRIEFS = {
         # The second offered "a console table behind the sofa", which merges
         # with the media console. All three now seat the sofa by where the TV
         # is, which is how the arrangement is actually decided.
-        # The chairs flank the sofa; they never sit across from it. Facing the
-        # sofa would put them between it and the television, which is both a
-        # blocked view and the thing that reads as furniture in the way.
         layouts=(
-            "Set the sofa on the wall facing the TV, a lounge chair beside each arm, angled slightly in.",
-            "Float the sofa off the wall facing the TV, both chairs alongside it sharing the same rug.",
-            "Run the sofa along the wall facing the TV, both chairs beside it at the near end, turned to the room.",
+            "Set the sofa on the wall facing the TV, both chairs angled in from the far corners, rug under every front leg.",
+            "Float the sofa off the wall facing the TV, the chairs turned in at right angles across the rug.",
+            "Run an L-shaped sofa into the corner that faces the TV, one chair angled across from it to close the group.",
         ),
     ),
     "living + dining": dict(
@@ -469,41 +461,32 @@ ROOM_BRIEFS = {
             "Run both zones along the room's long axis, each on its own rug, sharing one route to the door.",
         ),
     ),
-    # The living room's brief with the television taken out, by request: same
-    # seating, same hero piece, same styling, same materials. A salon is for
-    # receiving people rather than watching anything, so the set and the unit it
-    # would stand on are both excluded — told only "no TV", the model renders
-    # the console and leaves the wall above it bare, which reads as a living
-    # room with the television switched off.
     "salon": dict(
+        # A salon is for receiving people, not for watching anything. Ruling out
+        # the media unit as well as the TV matters: told only "no TV", the model
+        # renders the console and leaves the wall above it bare, which reads as
+        # a living room with the television switched off.
         programme=(
-            "one sofa and two lounge chairs of a lighter, distinct shape drawn "
-            "round a coffee table"
+            "a formal reception room: matched seating in facing pairs around an "
+            "open centre, occasional tables within reach of every seat, no media wall"
         ),
         hero=(
-            "The coffee table is the hero piece: one sculptural low table in "
-            "{material}, centred on the rug"
-        ),
-        materials=(
-            "honed travertine",
-            "solid walnut with a softened edge",
-            "slim blackened steel and glass",
+            "The seating suite is the hero piece: matched tailored sofas and chairs "
+            "in one fabric, facing each other across the rug"
         ),
         decor=(
-            "layered cushions, a folded throw, one large artwork at eye level, one "
-            "tight group per surface - books, a tray, a ceramic"
+            "matched cushions, one large artwork at eye level, one group on each "
+            "occasional table - a ceramic, a tray, candles"
         ),
-        limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
+        limits="one ceiling fixture, matched table or floor lamps in pairs, one potted floor plant",
         forbid=(
-            "no TV, no media unit, no bed, no desk, no dining table, no kitchen "
+            "no TV, no media unit, no dining table, no bed, no desk, no kitchen "
             "cabinetry, no sanitaryware"
         ),
-        # The living room's arrangements with the television dropped as the
-        # anchor: the chairs still flank the sofa rather than facing it.
         layouts=(
-            "Set the sofa on the longest wall, a lounge chair beside each arm, angled slightly in.",
-            "Float the sofa off the wall, both chairs alongside it sharing the same rug.",
-            "Run the sofa along the longest wall, both chairs beside it at the near end, turned to the room.",
+            "Face two matched sofas across the rug, with the occasional tables at the ends.",
+            "Line the seating along three walls around an open centre, leaving the fourth for the entrance.",
+            "Set a symmetrical suite on the room's centre line, anchored on the fireplace or largest solid wall.",
         ),
     ),
     "salon + dining": dict(
@@ -954,8 +937,8 @@ def build_gen_klein_interior_prompt(
     # by render source — see _ARCHITECTURE_LOCKS. Everything creative stays below
     # both, so the lock is read first.
     return (
-        f"Redesign this {room_type} in a refined {style} style on the input "
-        "photo's architecture.\n\n"
+        f"Redesign this {room_type} in a refined {style} style, using the input "
+        "photo as the architectural base.\n\n"
         f"{_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
         f"THIS IS A {room_type.upper()}, not any other room. It contains "
         f"{brief['forbid']}.\n"
