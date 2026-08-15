@@ -425,6 +425,41 @@ def test_hero_names_one_material_not_a_choice():
             )
 
 
+def test_chairs_flank_the_sofa_rather_than_face_it():
+    """A chair across from the sofa lands between it and the television.
+
+    The earlier wording — "angled in from the far corners", "at right angles
+    across the rug" — put the chairs opposite the sofa, which blocks the view
+    and reads as furniture standing in the way.
+    """
+    for room in ("Living Room", "Salon"):
+        for layout in pe.room_brief(room)["layouts"]:
+            lowered = layout.lower()
+            assert any(word in lowered for word in ("beside", "alongside")), (
+                f"{room} layout does not put the chairs beside the sofa: {layout}"
+            )
+            for wrong in ("across from", "at right angles", "facing each other",
+                          "from the far corners", "across the rug,"):
+                assert wrong not in lowered, (
+                    f"{room} layout still seats a chair opposite the sofa: {layout}"
+                )
+
+
+def test_salon_is_the_living_room_without_the_television():
+    """Asked for explicitly: same brief, minus the TV."""
+    salon, living = pe.room_brief("Salon"), pe.room_brief("Living Room")
+    for field in ("hero", "decor", "limits", "materials"):
+        assert salon[field] == living[field], f"salon {field} differs from the living room's"
+    # The programme is the living room's seating with the television removed.
+    assert "one sofa and two lounge chairs" in salon["programme"].lower()
+    assert "tv" not in salon["programme"].lower()
+    # And nothing anywhere in a salon render may ask for one.
+    for layout in salon["layouts"]:
+        assert "tv" not in layout.lower(), f"salon layout mentions a TV: {layout}"
+    forbid = salon["forbid"].lower()
+    assert "no tv" in forbid and "no media unit" in forbid
+
+
 def test_seating_rooms_place_their_chairs():
     """Chairs were arriving unplaced, reading as spare seating pushed in."""
     for layout in pe.room_brief("Living Room")["layouts"]:

@@ -1510,7 +1510,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v28-refinish-evenly",
+        "promptEngine": "gen-klein-per-room-briefs-v29-chairs-beside-salon-mirrors-living",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1524,7 +1524,7 @@ def health():
             # Counted in the positive — "one sofa and one or two lounge chairs"
             # — rather than by forbidding a second one. Naming a piece in order
             # to exclude it tends to summon it, so the count does the work.
-            "seating": "one-sofa-two-chairs-angled-in-facing-the-tv",
+            "seating": "one-sofa-two-chairs-beside-it-never-across",
         },
         # Walls kept the source photo's own masonry because "the shell is fixed"
         # was read as fixing the material too. Stated positively, and without
