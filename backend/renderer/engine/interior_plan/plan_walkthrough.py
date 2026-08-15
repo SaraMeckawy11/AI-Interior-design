@@ -2870,115 +2870,104 @@ class RoomFurnisher:
                 # actually needs — and it was still not the size the job needs.
                 # Furniture kept landing a stride inside the door.
                 #
-                # Three things changed, and the shape is the important one:
+                # The shape is what matters, and it took three passes to
+                # learn that the size is not.
                 #
-                #  * It reaches further in. A generous entry is about the depth
-                #    of a hallway, not the depth of a doormat, and the scaling
-                #    term drives it: a 20 m² room reserves 4.2 m of approach
-                #    where it reserved 2.5 m, and a big open-plan living room
-                #    takes the full 4.4 m rather than stopping at 2.6 m.
-                #  * It is wider at the door. Three quarters of a metre either
-                #    side of the leaf is what it takes to stand beside the door,
-                #    open it, and let somebody past you while it is open.
-                #  * It splays. A rectangle guards the line you walk in along;
-                #    it does not guard the turn you make at the end of it, which
-                #    is where the sofa arm or the table corner actually was. The
-                #    zone is a trapezoid now, widening as it goes in, which is
-                #    the shape of the floor an entrance really uses.
+                # This zone was raised twice, from 2.6 m of reach to 3.6 m and
+                # then to 4.4 m, because a dining table kept turning up across
+                # the front door. Neither pass worked, and the second made it
+                # worse, because the guard was never what was failing: the
+                # scored search has always treated it as a hard veto, so no
+                # table has ever been *placed* in it. What put the table there
+                # was the forced fallback in the exporter, which existed to
+                # guarantee a table when the room refused one and did it by
+                # ignoring every keep-clear zone. Making the guard bigger made
+                # more rooms refuse, which sent more of them down the one path
+                # that did not care.
                 #
-                # These numbers have been raised twice. The first pass took the
-                # reach from 2.6 m to 3.6 m and furniture was still arriving
-                # inside the zone, which says the limiting factor was never the
-                # figures on their own — it is that the clamps below decide how
-                # much of this a room actually keeps. So both went up together:
-                # a deeper, wider, more splayed zone, and clamps loosened from
-                # 55% to 62% of the room and from 62% to 70% of the way across
-                # it, so a room with the floor to spare actually gives it up.
+                # That path now cannot: `entrance_keepout` is absolute, and a
+                # room with nowhere clear of its own front door gets no table
+                # at all. So this can go back to being what it is actually for
+                # — the floor you walk and turn on coming in — instead of being
+                # inflated to fight a placement bug somewhere else.
                 #
-                # The lower bound is deliberately unchanged, through both
-                # passes. A small entrance hall is guarded exactly as it was,
-                # because in a 4 m² lobby the old zone was already most of the
-                # room and growing it would leave nowhere for the console table
-                # and the mirror that make it an entrance hall at all. Only
-                # rooms with floor to spare give more of it up.
+                # It is still bigger than it was before any of this: a 42 m²
+                # room reserves 7.0 m² where it used to reserve 5.1 m², the
+                # threshold circle is 1.50 m rather than 1.15 m, and the zone
+                # splays rather than running parallel, because a rectangle
+                # guards the line you walk in along and not the turn you make at
+                # the end of it. What it no longer does is run four metres into
+                # the middle of a living room and split it in two, which is what
+                # left a 42 m² room with nowhere to put a table at all.
+                #
+                # The reach is held to half the room's depth in front of the
+                # door for the same reason. A room can be large and shallow
+                # where it matters — a wide living room entered from the long
+                # side — and there, depth measured from floor area alone walks
+                # straight into the opposite wall.
                 room_span = math.sqrt(max(float(self.poly.area), 0.01))
-                door_half = max(width, MIN_DOOR_W) / 2.0
-                # How far the room actually goes in the direction you walk when
-                # you come in. A room can be large and still be shallow in front
-                # of its front door — a wide living room entered from the long
-                # side — and in one of those, a zone measured only from floor
-                # area reaches the opposite wall and takes the sofa's place with
-                # it. The zone stops well short of the far side, whatever the
-                # area says.
                 probe = LineString([
                     (float(c[0]), float(c[1])),
                     (float(c[0] + normal[0] * 60.0), float(c[1] + normal[1] * 60.0)),
                 ]).intersection(self.poly)
                 room_depth = float(getattr(probe, "length", 0.0)) or room_span
-                # The zone as it was, and the zone as it should be. The build
-                # below takes the largest blend of the two that still leaves the
-                # room usable, and the old geometry is the floor: a room that
-                # cannot afford the bigger guard keeps exactly the guard it had,
-                # never less. Growing this must not be able to empty a small
-                # entrance hall of the console table and mirror that make it one.
-                legacy = dict(
-                    reach=float(min(2.60, max(1.70, room_span * 0.55))),
-                    half=door_half + 0.45,
-                    splay=0.0,
-                    radius=1.15,
-                )
-                grown = dict(
-                    # Never shorter than the zone already was, whatever the
-                    # probe says — the point of this change is a bigger guard,
-                    # and the depth clamp is here to stop it overshooting, not
-                    # to shrink it below where it started.
-                    reach=float(max(
-                        legacy["reach"],
-                        min(4.40, room_depth * 0.70, max(1.90, room_span * 0.95)),
-                    )),
-                    half=door_half + 0.75,
-                    splay=float(min(1.25, max(0.0, room_span * 0.30))),
-                    radius=1.75,
-                )
 
-                def _entry_zone(blend):
-                    """The entry zone at `blend` of the way from old to new."""
-                    def value(key):
-                        return legacy[key] + (grown[key] - legacy[key]) * blend
-                    reach, half = value("reach"), value("half")
-                    outer = half + value("splay")
-                    shape = Polygon([
+                reach = float(min(
+                    2.60,
+                    room_depth * 0.50,
+                    max(1.70, room_span * 0.56),
+                ))
+                half = max(width, MIN_DOOR_W) / 2.0 + 0.55
+                splay = float(min(0.40, max(0.0, room_span * 0.10)))
+                radius = 1.50
+
+                corridor = Polygon([
+                    (point[0], point[1])
+                    for point in (
+                        c + tangent * half,
+                        c + tangent * (half + splay) + normal * reach,
+                        c - tangent * (half + splay) + normal * reach,
+                        c - tangent * half,
+                    )
+                ])
+
+                # One clamp, for the room that is all entrance. A 4 m² lobby
+                # cannot give this up and still hold the console table and
+                # mirror that make it an entrance hall; it keeps a shallower
+                # version instead. Rooms with floor to spare are unaffected —
+                # the zone is well under this everywhere above about 15 m².
+                budget = float(self.poly.area) * 0.45
+                while (
+                    reach > 1.10
+                    and corridor.is_valid
+                    and corridor.intersection(self.poly).area > budget
+                ):
+                    reach -= 0.20
+                    corridor = Polygon([
                         (point[0], point[1])
                         for point in (
                             c + tangent * half,
-                            c + tangent * outer + normal * reach,
-                            c - tangent * outer + normal * reach,
+                            c + tangent * (half + splay) + normal * reach,
+                            c - tangent * (half + splay) + normal * reach,
                             c - tangent * half,
                         )
                     ])
-                    return shape, value("radius")
 
-                # How much of a room the entrance may claim. A living room with
-                # the front door in it has floor to spare; a 4 m² lobby does
-                # not, and in one the full-size zone is the whole room.
+                # The threshold circle goes in `entrance_zones` as well as in
+                # `door_zones`, and that is not tidying.
                 #
-                # This is the clamp that was actually holding the guard back —
-                # at 55% the full-size zone was being blended away in exactly
-                # the mid-size rooms it was written for. A room that can afford
-                # to give up three fifths of its floor to its own front door
-                # should.
-                budget = float(self.poly.area) * 0.62
-                corridor, radius = _entry_zone(1.0)
-                for blend in (1.0, 0.75, 0.5, 0.25, 0.0):
-                    corridor, radius = _entry_zone(blend)
-                    if not corridor.is_valid or corridor.is_empty:
-                        continue
-                    if (
-                        blend <= 0.0
-                        or corridor.intersection(self.poly).area <= budget
-                    ):
-                        break
-                self.door_zones.append(Point(c[0], c[1]).buffer(radius))
+                # `door_zones` is the ordinary keep-clear list, and the forced
+                # placement paths — the ones that exist to guarantee a piece of
+                # furniture when the room has refused every legal position —
+                # deliberately ignore it. What they check instead is
+                # `entrance_zones`, because standing something in the doorway is
+                # the one placement worse than leaving the room empty. The
+                # circle was only ever in the first list, so a table forced into
+                # the room could be walked off the approach corridor and left
+                # standing squarely on the threshold itself.
+                threshold = Point(c[0], c[1]).buffer(radius)
+                self.door_zones.append(threshold)
+                self.entrance_zones.append(threshold)
                 if corridor.is_valid and not corridor.is_empty:
                     self.door_zones.append(corridor)
                     self.entrance_zones.append(corridor)
@@ -2990,6 +2979,41 @@ class RoomFurnisher:
     @property
     def airy(self):
         return self.design_profile.lower() == "airy"
+
+    def entrance_keepout(self, margin=0.20):
+        """The floor nothing may stand on, however desperate the placement.
+
+        `door_zones` is advisory in the sense that the forced paths ignore it —
+        they exist precisely to place a piece the ordinary rules rejected. This
+        is the part of `door_zones` that is not negotiable: the way into the
+        home and the way through it. A sofa an inch into a doorway is untidy; a
+        dining table across the front door means you cannot get in with the
+        shopping, and no room needs a table badly enough to pay for it.
+
+        The margin is on top of the zone, because furniture is not its
+        footprint: a chair pulled back, or somebody sitting on it, occupies
+        floor the polygon does not know about.
+        """
+        zones = []
+        for zone in (
+            list(getattr(self, "entrance_zones", ()))
+            + list(getattr(self, "route_zones", ()))
+        ):
+            if zone is None or zone.is_empty:
+                continue
+            grown = zone.buffer(margin)
+            if grown.is_valid and not grown.is_empty:
+                zones.append(grown)
+        return zones
+
+    def blocks_entrance(self, footprint, margin=0.20):
+        """Whether this footprint stands in the way in or the way through."""
+        if footprint is None or footprint.is_empty:
+            return False
+        return any(
+            footprint.intersects(zone)
+            for zone in self.entrance_keepout(margin)
+        )
 
     @property
     def hosts_dining(self):
@@ -3382,7 +3406,19 @@ class RoomFurnisher:
                 unique_yaws.append(axis_yaw)
 
         minx, miny, maxx, maxy = safe_room.bounds
-        spacing = 0.42
+        # 0.42 m was coarse enough to lose a real answer.
+        #
+        # Every test the candidate has to pass is a hard veto, so a legal
+        # position that happens to sit between two grid lines is not scored
+        # badly — it is never seen. In a room where the free floor is one strip
+        # about as wide as the group itself, which is exactly the case in a
+        # living room with the front door in it, the whole strip can fall
+        # between samples: measured cases missed by two to four centimetres and
+        # the room came back with a smaller table, or with none.
+        #
+        # At 0.24 m the search costs about three times as many candidates in a
+        # room it only walks once, and stops missing them.
+        spacing = 0.24
         margin = min(0.38, min(width, depth) * 0.18)
         xs = np.arange(minx + margin, maxx - margin + 0.01, spacing)
         ys = np.arange(miny + margin, maxy - margin + 0.01, spacing)

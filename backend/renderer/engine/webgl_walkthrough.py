@@ -107,6 +107,82 @@ def _kitchen_type_key(value):
     return "open"
 
 
+def _forced_dining_pose(self, selected, position, structural_yaws):
+    """The last-resort dining position, which is still never the doorway.
+
+    The ordinary search wants four things at once: inside the room, clear of the
+    keep-clear zones, clear of the furniture already placed, and well scored for
+    circulation. When it comes back empty, this drops three of them. It keeps
+    the room boundary, because a table half inside a wall is not a placement at
+    all, and it keeps the entrance keep-clear, because that is the whole point.
+    Overlapping the sofa is untidy and the user can drag the table off it in
+    seconds; standing across the front door is not something they should have to
+    fix at all.
+
+    This replaces a version that started at the room centre and, only if that
+    happened to intersect the entrance, tried a handful of offsets along two
+    axes — so a table whose *first* position missed the zone by a centimetre
+    stayed there, and one that could not be walked clear within 3.2 m was placed
+    in the doorway regardless. Returns None when the room has nowhere, and the
+    caller then leaves the floor open.
+    """
+    keepout = self.entrance_keepout()
+    safe_room = self.poly.buffer(-0.10)
+    if safe_room.is_empty:
+        return None
+
+    width = selected["zone_width"]
+    depth = selected["zone_depth"]
+    yaws = list(structural_yaws) or [0.0]
+    anchor = (
+        np.asarray(position, dtype=float)
+        if position is not None
+        else self.centroid
+    )
+
+    # The same grid the ordinary search walks, so a room that has any legal
+    # position at all is very unlikely to miss it twice.
+    minx, miny, maxx, maxy = safe_room.bounds
+    spacing = 0.32
+    points = [
+        (float(x), float(y))
+        for x in np.arange(minx, maxx + 0.01, spacing)
+        for y in np.arange(miny, maxy + 0.01, spacing)
+    ]
+    representative = safe_room.representative_point()
+    points = [
+        (float(anchor[0]), float(anchor[1])),
+        (float(self.centroid[0]), float(self.centroid[1])),
+        (representative.x, representative.y),
+    ] + points
+
+    best = None
+    for x, y in points:
+        centre = np.array([x, y], dtype=float)
+        for candidate_yaw in yaws:
+            footprint = original.footprint_poly(centre, candidate_yaw, width, depth)
+            if not footprint.within(safe_room):
+                continue
+            if any(footprint.intersects(zone) for zone in keepout):
+                continue
+            # Nothing else is a veto here, so the score is what keeps the result
+            # sensible: stay near where the room wanted the table, and prefer
+            # the position that overlaps the least of what is already down.
+            overlap = sum(
+                footprint.intersection(placed).area
+                for placed in self.placed
+                if footprint.intersects(placed)
+            )
+            score = -overlap * 1.6 - float(np.linalg.norm(centre - anchor)) * 0.22
+            if best is None or score > best[0]:
+                best = (score, centre, candidate_yaw, footprint)
+
+    if best is None:
+        return None
+    _score, centre, chosen_yaw, footprint = best
+    return {"pos": centre, "yaw": chosen_yaw, "footprint": footprint}
+
+
 def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarantee=False):
     """Choose and align a dining set from usable room geometry and style.
 
@@ -519,64 +595,23 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         )
     if pose is None:
         # A dining room with no dining table is not a dining room. Once every
-        # size, shape and allowance has been tried, stand the set on the room's
-        # centre and let the person move it, rather than hand back an empty
-        # floor. Other rooms keep the old behaviour and simply go without.
+        # size, shape and allowance has been tried, stand the set somewhere the
+        # person can move it from, rather than hand back an empty floor. Other
+        # rooms keep the old behaviour and simply go without.
         if not guarantee and not dedicated_dining:
             return None
-        forced = np.asarray(position, dtype=float) if position is not None else self.centroid
-        forced_yaw = structural_yaws[0]
-        forced_footprint = original.footprint_poly(
-            forced,
-            forced_yaw,
-            selected["zone_width"],
-            selected["zone_depth"],
-        )
-        # Anywhere but the front door.
-        #
-        # This path exists to guarantee a table, and it gets one by ignoring
-        # every keep-clear zone in the room. There is exactly one it must not
-        # ignore: a table standing in the entry is the single placement that
-        # makes a home unusable rather than merely awkward, and the entry is
-        # often the widest clear floor left, which is why the forced position
-        # lands there. Walk the set off the entrance zone along the room's own
-        # axes before falling back to standing it on the spot.
-        entrance_zones = [
-            zone.buffer(0.20)
-            for zone in (
-                list(getattr(self, "entrance_zones", ()))
-                + list(getattr(self, "route_zones", ()))
+        pose = _forced_dining_pose(self, selected, position, structural_yaws)
+        if pose is None:
+            # Every position in the room either falls outside it or stands in
+            # the doorway. This is the one case where the guarantee is refused,
+            # and refusing is the right answer: a table across the front door
+            # closes the way into the home, and the room is more usable with
+            # bare floor than with the one piece of furniture that shuts it.
+            print(
+                "[WALK] No dining position clear of the entrance in "
+                f"'{self.config.get('name', 'room')}'; leaving the floor open."
             )
-        ]
-        if entrance_zones and any(
-            forced_footprint.intersects(zone) for zone in entrance_zones
-        ):
-            axis_x = np.array([math.cos(forced_yaw), math.sin(forced_yaw)])
-            axis_y = np.array([-math.sin(forced_yaw), math.cos(forced_yaw)])
-            safe_room = self.poly.buffer(-0.10)
-            for step in (0.40, 0.80, 1.20, 1.60, 2.00, 2.60, 3.20):
-                for axis in (axis_y, -axis_y, axis_x, -axis_x):
-                    shifted = forced + axis * step
-                    candidate = original.footprint_poly(
-                        shifted,
-                        forced_yaw,
-                        selected["zone_width"],
-                        selected["zone_depth"],
-                    )
-                    if candidate.within(safe_room) and not any(
-                        candidate.intersects(zone) for zone in entrance_zones
-                    ):
-                        forced = shifted
-                        forced_footprint = candidate
-                        break
-                else:
-                    continue
-                break
-        pose = {
-            "pos": forced,
-            "yaw": forced_yaw,
-            "footprint": forced_footprint,
-        }
+            return None
 
     # Once a valid open-plan pose is found, slide the complete set toward the
     # kitchen along the room's long axis. This clears the sofa-to-TV sightline
@@ -697,6 +732,24 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
 
     center = np.asarray(pose["pos"], dtype=float)
     table_yaw = float(pose["yaw"])
+
+    # One check, after every path that can produce a pose has had its say.
+    #
+    # There are five of them now — the preferred-position shortcut, the scored
+    # search, the forced fallback, the slide toward the kitchen and the walk
+    # back toward the sofa — and each was written to respect the doorway in its
+    # own way. That is five chances to be the one that does not, and the failure
+    # is always the same: a table across the way in. So the rule is stated once,
+    # last, where nothing can get past it. If a pose lands here still standing
+    # in the entrance, no table is placed at all.
+    if self.blocks_entrance(pose["footprint"]):
+        print(
+            "[WALK] Dining pose in "
+            f"'{self.config.get('name', 'room')}' fell inside the entrance; "
+            "leaving the floor open."
+        )
+        return None
+
     self.place_rug(center, table_yaw, zone_width - 0.1, zone_depth - 0.1)
     self.add(
         table_builder(self.P, w=table_width, d=table_depth),
@@ -734,6 +787,23 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
     def place_chair_pair(one, two, force=False):
         nonlocal placed_chair_count
         if not force and not (one["fits"] and two["fits"]):
+            return False
+        # `force` overrules the fit test — a table with no chairs at all does
+        # not read as a place to eat, so a tight room seats one pair anyway.
+        # It does not overrule the doorway. A chair in the entrance is a
+        # smaller obstruction than a table and it is still an obstruction, and
+        # this is the path that would otherwise put one there.
+        if force and any(
+            self.blocks_entrance(
+                original.footprint_poly(
+                    entry["pos"],
+                    entry["yaw"],
+                    *chair_builder(self.P)[1:],
+                ),
+                margin=0.06,
+            )
+            for entry in (one, two)
+        ):
             return False
         for entry in (one, two):
             self.add(
@@ -2165,39 +2235,38 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
             # opening rather than with the room. A double front door reserves
             # more floor than a single one, because more of the wall swings.
             #
-            # They were 1.90 m x (width + 0.90 m), which is a person standing
-            # just inside with the door shut behind them. An entrance is used
-            # with the door open, with something in both hands, by more than one
-            # person at a time — and it is where a pushchair, a bike or the
-            # week's shopping gets parked while somebody deals with the door. So
-            # it is 3.40 m x (width + 2.10 m), raised a second time after
-            # furniture kept arriving inside the first increase. It stacks with
-            # the splayed zone in the engine's own `__init__`; between them the
-            # front door of a flat keeps the floor a front door is used on.
+            # The entrance figures are the deepest and widest here, and they
+            # stack on the splayed zone the engine's own `__init__` builds. That
+            # zone was inflated twice chasing a dining table that was never
+            # being placed by the rules these numbers feed — see the note there
+            # — and this followed it up to 3.40 m x (width + 2.10 m). Both are
+            # back to the size of the job: room to come in, put something down
+            # and turn round, which is 2.20 m x (width + 1.10 m).
+            #
+            # What keeps the table out of the doorway now is
+            # `RoomFurnisher.entrance_keepout`, which no placement path can
+            # ignore. That is a guarantee; a bigger rectangle never was.
             corridor_depth = (
                 1.15 if is_balcony
                 else 0.80 if cased
-                else 3.40 if entrance
+                else 2.20 if entrance
                 else 0.95
             )
             corridor_width = (
                 min(opening_width, original.PASSAGE_W) + 0.10
                 if cased
-                else opening_width + 2.10
+                else opening_width + 1.10
                 if entrance
                 else min(opening_width, 1.30) + 0.10
             )
             if entrance:
-                # Same rule the engine's own entry zone follows: take the
-                # biggest version the room can afford, and fall back no further
-                # than the size this guard already was. A one-room entrance
-                # lobby keeps its console table.
+                # The room that is all entrance keeps a shallower version, so a
+                # one-room lobby still gets its console table.
                 room_area = max(float(self.poly.area), 0.01)
                 for depth, span in (
                     (corridor_depth, corridor_width),
-                    (2.70, opening_width + 1.50),
-                    (2.30, opening_width + 1.20),
                     (1.90, opening_width + 0.90),
+                    (1.50, opening_width + 0.70),
                 ):
                     trial = original.footprint_poly(
                         center + inward * depth / 2,
@@ -2206,7 +2275,7 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                         depth,
                     ).intersection(self.poly)
                     corridor_depth, corridor_width = depth, span
-                    if trial.area <= room_area * 0.62:
+                    if trial.area <= room_area * 0.45:
                         break
             corridor_center = center + inward * corridor_depth / 2
             corridor = original.footprint_poly(
