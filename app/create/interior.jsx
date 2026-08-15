@@ -295,6 +295,12 @@ export default function Interior() {
         lighting: "Natural daylight",
         preserveGeometry: true,
         creativity: 42,
+        // The engine's seed is hashed from the brief, which is what stops a
+        // kitchen and a bedroom coming back as the same arrangement. It also
+        // means an identical request reproduces its render exactly — so a fresh
+        // number per attempt is what makes pressing generate again give a
+        // genuinely different design rather than the same one.
+        variation: Date.now() % 1000000,
       };
 
       if (imageDataUrl) {

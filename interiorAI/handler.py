@@ -113,6 +113,14 @@ def _engine(name):
     return engine
 
 
+def _int_or_zero(value):
+    """A client-supplied integer, or 0 for anything that is not one."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def handler(event):
     try:
         body = event.get("input") or {}
@@ -171,6 +179,10 @@ def handler(event):
             preserve_geometry=body.get("preserve_geometry", True),
             creativity=int(body.get("creativity") or 42),
             color_palette=color_palette,
+            # Which re-roll of this brief the user is on. Both engines hash their
+            # seed from the brief, so without this a second attempt at the same
+            # room would reproduce the first exactly.
+            variation=_int_or_zero(body.get("variation")),
             **source_kwargs,
         )
 

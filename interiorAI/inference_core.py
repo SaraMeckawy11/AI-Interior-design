@@ -45,9 +45,11 @@ from prompt_engine import (
     build_gen_klein_interior_prompt,
     build_prompt,
     build_short_prompt,
+    design_seed,
     resolve_mode,
     resolve_render_source,
 )
+from structure_guard import StructureGuard, guard_candidates
 
 # ---------------------------------------------------------------------------
 # MODEL IDS
@@ -332,6 +334,7 @@ class ExteriorGenKleinEngine(_Engine):
         preserve_geometry: bool = True,
         creativity: int = 42,
         color_palette: dict = None,
+        variation: int = 0,
     ):
         from PIL import Image, ImageEnhance, ImageOps
 
@@ -354,16 +357,49 @@ class ExteriorGenKleinEngine(_Engine):
             color_palette=color_palette,
         )
 
-        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
-        result = self.pipe(
-            prompt=prompt,
-            image=[source],
-            width=width,
-            height=height,
-            num_inference_steps=4,
-            guidance_scale=1.0,
-            generator=self.torch.Generator(device=self.device).manual_seed(seed),
-        ).images[0].convert("RGB")
+        # Was `7 + creativity * 97`; creativity is a constant for every exterior
+        # space but Building, so two seeds served every exterior render. See
+        # prompt_engine.design_seed.
+        base_seed = design_seed(
+            space_type=room_type,
+            design_style=design_style,
+            color_tone=color_tone,
+            color_palette=color_palette,
+            mode=resolved_mode,
+            variation=variation,
+        )
+
+        def render(seed):
+            return self.pipe(
+                prompt=prompt,
+                image=[source],
+                width=width,
+                height=height,
+                num_inference_steps=4,
+                guidance_scale=1.0,
+                generator=self.torch.Generator(device=self.device).manual_seed(seed),
+            ).images[0].convert("RGB")
+
+        if preserve_geometry:
+            guard = StructureGuard(source, (width, height))
+            result, report = guard.best_of(
+                render, base_seed=base_seed, candidates=guard_candidates()
+            )
+            if not report["accepted"]:
+                print(
+                    f"[exterior] shipping best-effort render for '{room_type}': "
+                    f"score={report['score']} veto={report['veto'] or 'none'}"
+                )
+        else:
+            result = render(base_seed)
+            report = {
+                "score": None,
+                "accepted": None,
+                "veto": "",
+                "seed": base_seed,
+                "candidates": 1,
+                "attempts": [],
+            }
 
         result = ImageEnhance.Contrast(result).enhance(1.025)
         result = ImageEnhance.Sharpness(result).enhance(1.08)
@@ -374,6 +410,11 @@ class ExteriorGenKleinEngine(_Engine):
             "message": "Image generated successfully",
             "generatedImage": base64.b64encode(buf.getvalue()).decode(),
             "prompt": prompt,
+            "structure_score": report["score"],
+            "structure": report,
+            "structure_guarded": bool(preserve_geometry),
+            "seed": report["seed"],
+            "candidates": report["candidates"],
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,
@@ -473,8 +514,9 @@ class GenKleinEngine(_Engine):
         creativity: int = 42,
         color_palette: dict = None,
         render_source: str = "",
+        variation: int = 0,
     ):
-        from PIL import Image, ImageChops, ImageFilter, ImageOps
+        from PIL import Image, ImageOps
 
         source = ImageOps.exif_transpose(
             Image.open(io.BytesIO(decode_base64_image_bytes(image)))
@@ -482,6 +524,16 @@ class GenKleinEngine(_Engine):
         width, height = self._target_size(source)
 
         resolved_mode = resolve_mode(mode, room_type)
+        # Picks both the noise field and the room's layout strategy, so two room
+        # types cannot be handed the same composition.
+        base_seed = design_seed(
+            space_type=room_type,
+            design_style=design_style,
+            color_tone=color_tone,
+            color_palette=color_palette,
+            mode=resolved_mode,
+            variation=variation,
+        )
         if resolved_mode == "interior" and room_type.strip().lower() != "prompt only":
             prompt = build_gen_klein_interior_prompt(
                 space_type=room_type or "Living Room",
@@ -490,6 +542,7 @@ class GenKleinEngine(_Engine):
                 color_palette=color_palette,
                 # Photograph or captured 3D frame; absent means photograph.
                 source=render_source,
+                variation_index=base_seed,
             )
         elif room_type.strip().lower() == "prompt only" and custom_prompt.strip():
             prompt = custom_prompt.strip()
@@ -506,13 +559,31 @@ class GenKleinEngine(_Engine):
                 custom_prompt=(custom_prompt or "")[:280],
                 color_palette=color_palette,
             )
-        chat_prompt = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
-        )
-        prompt_tokens = len(self.tokenizer(chat_prompt)["input_ids"])
+        def count_tokens(text):
+            chat_prompt = self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": text}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            return len(self.tokenizer(chat_prompt)["input_ids"])
+
+        prompt_tokens = count_tokens(prompt)
+        # A long custom room name is the only realistic way over the ceiling, and
+        # raising there would turn a paid render into an error. The compact brief
+        # keeps the architecture lock and the room's own exclusions.
+        if prompt_tokens > 512 and resolved_mode == "interior" and room_type.strip().lower() != "prompt only":
+            print(f"[gen-klein] brief was {prompt_tokens} tokens; retrying compact")
+            prompt = build_gen_klein_interior_prompt(
+                space_type=room_type or "Living Room",
+                design_style=design_style or "Modern",
+                color_tone=color_tone or "Neutral",
+                color_palette=color_palette,
+                source=render_source,
+                variation_index=base_seed,
+                compact=True,
+            )
+            prompt_tokens = count_tokens(prompt)
         if prompt_tokens > 512:
             raise ValueError(
                 f"Interior brief is {prompt_tokens} tokens; maximum is 512."
@@ -525,45 +596,48 @@ class GenKleinEngine(_Engine):
                 dtype=self.torch.bfloat16,
                 device=self.device,
             ).cpu()
-        def structure_score(candidate):
-            source_edges = source.resize((width, height)).convert("L").filter(
-                ImageFilter.GaussianBlur(1.2)
-            ).filter(ImageFilter.FIND_EDGES).point(
-                lambda value: 255 if value >= 24 else 0
-            )
-            candidate_edges = candidate.convert("L").filter(
-                ImageFilter.GaussianBlur(0.8)
-            ).filter(ImageFilter.FIND_EDGES).point(
-                lambda value: 255 if value >= 24 else 0
-            ).filter(ImageFilter.MaxFilter(7))
-            source_edges = source_edges.crop((8, 8, width - 8, height - 8))
-            candidate_edges = candidate_edges.crop((8, 8, width - 8, height - 8))
-            source_count = source_edges.histogram()[255]
-            if not source_count:
-                return 0.0
-            kept = ImageChops.multiply(source_edges, candidate_edges).histogram()[255]
-            return kept / source_count
-
-        # Match Gen_klein.py's preferred seed. Edge recall stays diagnostic and
-        # cannot replace the design with a semantically worse composition.
         embeds_device = prompt_embeds.to(self.device)
-        selected_seed = 7
-        result = self.pipe(
-            prompt=None,
-            prompt_embeds=embeds_device,
-            image=[source],
-            width=width,
-            height=height,
-            num_inference_steps=4,
-            guidance_scale=1.0,
-            generator=self.torch.Generator(device=self.device).manual_seed(selected_seed),
-        ).images[0].convert("RGB")
+
+        def render(seed):
+            return self.pipe(
+                prompt=None,
+                prompt_embeds=embeds_device,
+                image=[source],
+                width=width,
+                height=height,
+                num_inference_steps=4,
+                guidance_scale=1.0,
+                generator=self.torch.Generator(device=self.device).manual_seed(seed),
+            ).images[0].convert("RGB")
+
+        # The old edge-recall number was measured and then ignored, so a render
+        # that moved a window shipped like one that did not. It now decides —
+        # except where preserving the input is not what was asked for.
+        guarded = bool(preserve_geometry) and room_type.strip().lower() != "prompt only"
+        if guarded:
+            guard = StructureGuard(source, (width, height))
+            result, report = guard.best_of(
+                render, base_seed=base_seed, candidates=guard_candidates()
+            )
+            if not report["accepted"]:
+                print(
+                    f"[gen-klein] shipping best-effort render for '{room_type}': "
+                    f"score={report['score']} veto={report['veto'] or 'none'}"
+                )
+        else:
+            result = render(base_seed)
+            report = {
+                "score": None,
+                "accepted": None,
+                "veto": "",
+                "seed": base_seed,
+                "candidates": 1,
+                "attempts": [],
+            }
 
         # Living rooms used to get a second 4-step cleanup pass here. It also
         # re-rendered the furniture it was told to leave alone and softened the
         # coffee table; the restraint it bought is now in the brief itself.
-        score = structure_score(result)
-
         buf = io.BytesIO()
         result.save(buf, format="PNG", optimize=True)
         return {
@@ -571,9 +645,11 @@ class GenKleinEngine(_Engine):
             "generatedImage": base64.b64encode(buf.getvalue()).decode(),
             "prompt": prompt,
             "prompt_tokens": prompt_tokens,
-            "structure_score": round(score, 4),
-            "seed": selected_seed,
-            "candidates": 1,
+            "structure_score": report["score"],
+            "structure": report,
+            "structure_guarded": guarded,
+            "seed": report["seed"],
+            "candidates": report["candidates"],
             "render_source": resolve_render_source(render_source),
             "cleanup_applied": False,
             "negative_prompt": "",

@@ -276,6 +276,12 @@ router.post("/", isAuthenticated, async (req, res) => {
       // that names a price list row, and billing must not decide what the model
       // is asked for. Absent means photograph.
       renderSource,
+      // Which re-roll of this brief the user is on. The engines hash their seed
+      // from the brief itself so two different rooms cannot start from the same
+      // noise; that also makes the same request reproduce exactly, which is
+      // wrong for somebody pressing generate again wanting a different design.
+      // The client sends a fresh number per attempt, and this passes it on.
+      variation,
     } = req.body;
 
     if (!roomType || !designStyle || !colorTone || !image) {
@@ -410,6 +416,7 @@ router.post("/", isAuthenticated, async (req, res) => {
       preserve_geometry: preserveGeometry !== false,
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
       render_source: typeof renderSource === "string" ? renderSource : "",
+      variation: Number.isFinite(Number(variation)) ? Number(variation) : 0,
     };
 
     // Modal first, RunPod second. Whatever was held above is given back on every

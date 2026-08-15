@@ -22,6 +22,8 @@ FLUX.2 [klein]. `build_short_prompt` compresses the same brief into CLIP's
 
 from __future__ import annotations
 
+import hashlib
+
 STYLE_SPECS = {
     "modern": {
         "interior": "sculptural furniture, warm oak, honed travertine, boucle, linen, restrained brushed brass",
@@ -74,24 +76,123 @@ STYLE_SPECS = {
 }
 
 # Literal prompt programme from C:\Sara\Interior_design\Gen_klein.py.
-# Keep it separate because STYLE_SPECS also serves exterior and ControlNet.
+#
+# Keep this separate from STYLE_SPECS: the latter serves the exterior and
+# ControlNet paths too, while this table is the exact FLUX.2 Klein room-editing
+# recipe the standalone reference script uses.
 GEN_KLEIN_STYLE_SPECS = {
-    "modern": dict(sofa="a sculptural curved sofa with a velvet back and boucle seat", table="a round travertine pedestal coffee table", floor="wide-plank warm honey oak laid straight", rug="a LARGE chunky-woven jute rug", curtains="cream double-layer drapery, sheer plus linen panels", art="an oversized abstract artwork", plants="tall olive trees in matte travertine planters", lamp="a brass floor lamp with tapered fabric shade", ceiling="ONE wide brass disc pendant close under the ceiling", textures="boucle, velvet, travertine, jute and warm oak, subtle brass; warm golden ambience"),
-    "classic": dict(sofa="a tailored roll-arm sofa with carved wooden legs", table="a rectangular marble-top coffee table with carved legs", floor="herringbone oak parquet", rug="a LARGE bordered wool rug", curtains="heavy pleated drapery with elegant tiebacks", art="a large framed classical painting", plants="sculpted plants in ceramic urns", lamp="a column floor lamp with a pleated shade", ceiling="ONE crystal chandelier on a short chain, close to the ceiling", textures="rich deeper accents; silk, velvet, marble and dark polished wood, antique gold details; stately warm mood"),
-    "scandinavian": dict(sofa="a clean-lined fabric sofa on tapered wooden legs", table="a round pale-wood coffee table", floor="pale matte oak boards", rug="a LARGE soft wool rug", curtains="airy white linen curtains", art="simple framed line-art prints", plants="a leafy plant in a simple white pot", lamp="a minimalist tripod floor lamp", ceiling="ONE small white dome pendant close to the ceiling", textures="muted tone-on-tone accents; wool, linen, pale birch and sheepskin, matte black details; bright airy calm"),
-    "boho": dict(sofa="a relaxed low sofa with layered patterned cushions", table="a round carved-wood or rattan coffee table", floor="warm rustic wood boards", rug="LAYERED patterned rugs", curtains="light flowing natural-cotton curtains", art="an eclectic mix of woven and framed wall pieces", plants="abundant potted and trailing plants in terracotta and baskets", lamp="a woven rattan floor lamp", ceiling="ONE woven rattan pendant close to the ceiling", textures="earthy playful accents; rattan, macrame, layered woven textiles, jute and terracotta; relaxed sunlit warmth"),
-    "japandi": dict(sofa="a low clean-lined sofa in natural linen", table="a low round dark-wood coffee table", floor="light matte wood boards", rug="a LARGE flat-woven neutral rug", curtains="plain linen panels", art="one minimal ink-brush artwork", plants="a single sculptural branch arrangement in a stone vessel", lamp="a paper-lantern floor lamp", ceiling="ONE round paper lantern close to the ceiling", textures="quiet deeper accents; linen, pale and dark wood, stone and paper, matte black; serene zen calm"),
-    "industrial": dict(sofa="a cognac leather sofa", table="a rectangular reclaimed-wood and black steel coffee table", floor="wide dark wood boards", rug="a LARGE worn-look neutral rug", curtains="simple dark linen panels", art="large monochrome photography prints", plants="a tall plant in a black metal planter", lamp="a black tripod spotlight floor lamp", ceiling="ONE black metal ceiling light close to the ceiling", textures="bold contrast accents; leather, black steel, reclaimed wood and aged brass; moody warm light"),
-    "minimalist": dict(sofa="a low straight-lined sofa in soft neutral fabric", table="a low rectangular seamless coffee table", floor="seamless pale oak boards", rug="a LARGE plain low-pile rug", curtains="plain full-height panels near the wall tone", art="one single large calm artwork", plants="one sculptural plant in a plain pot", lamp="a slim unobtrusive floor lamp", ceiling="ONE discreet flush ceiling light", textures="subtle tone-on-tone accents; smooth plaster, pale wood and soft matte fabric; serene uncluttered light"),
+    "modern": dict(
+        sofa="a sculptural curved sofa with a velvet back and boucle seat",
+        table="a round travertine pedestal coffee table",
+        floor="wide-plank warm honey oak laid straight",
+        rug="a LARGE chunky-woven jute rug",
+        curtains="cream double-layer drapery, sheer plus linen panels",
+        art="an oversized abstract artwork",
+        plants="tall olive trees in matte travertine planters",
+        lamp="a brass floor lamp with tapered fabric shade",
+        ceiling="ONE wide brass disc pendant close under the ceiling",
+        textures="boucle, velvet, travertine, jute and warm oak, subtle brass; warm golden ambience",
+    ),
+    "classic": dict(
+        sofa="a tailored roll-arm sofa with carved wooden legs",
+        table="a rectangular marble-top coffee table with carved legs",
+        floor="herringbone oak parquet",
+        rug="a LARGE bordered wool rug",
+        curtains="heavy pleated drapery with elegant tiebacks",
+        art="a large framed classical painting",
+        plants="sculpted plants in ceramic urns",
+        lamp="a column floor lamp with a pleated shade",
+        ceiling="ONE crystal chandelier on a short chain, close to the ceiling",
+        textures="rich deeper accents; silk, velvet, marble and dark polished wood, antique gold details; stately warm mood",
+    ),
+    "scandinavian": dict(
+        sofa="a clean-lined fabric sofa on tapered wooden legs",
+        table="a round pale-wood coffee table",
+        floor="pale matte oak boards",
+        rug="a LARGE soft wool rug",
+        curtains="airy white linen curtains",
+        art="simple framed line-art prints",
+        plants="a leafy plant in a simple white pot",
+        lamp="a minimalist tripod floor lamp",
+        ceiling="ONE small dome pendant close to the ceiling",
+        textures="muted tone-on-tone accents; wool, linen, pale birch and sheepskin, matte black details; bright airy calm",
+    ),
+    "boho": dict(
+        sofa="a relaxed low sofa with layered patterned cushions",
+        table="a round carved-wood or rattan coffee table",
+        floor="warm rustic wood boards",
+        rug="LAYERED patterned rugs",
+        curtains="light flowing natural-cotton curtains",
+        art="an eclectic mix of woven and framed wall pieces",
+        plants="abundant potted and trailing plants in terracotta and baskets",
+        lamp="a woven rattan floor lamp",
+        ceiling="ONE woven rattan pendant close to the ceiling",
+        textures="earthy playful accents; rattan, macrame, layered woven textiles, jute and terracotta; relaxed sunlit warmth",
+    ),
+    "japandi": dict(
+        sofa="a low clean-lined sofa in natural linen",
+        table="a low round dark-wood coffee table",
+        floor="light matte wood boards",
+        rug="a LARGE flat-woven neutral rug",
+        curtains="plain linen panels",
+        art="one minimal ink-brush artwork",
+        plants="a single sculptural branch arrangement in a stone vessel",
+        lamp="a paper-lantern floor lamp",
+        ceiling="ONE round paper lantern close to the ceiling",
+        textures="quiet deeper accents; linen, pale and dark wood, stone and paper, matte black; serene zen calm",
+    ),
+    "industrial": dict(
+        sofa="a cognac leather sofa",
+        table="a rectangular reclaimed-wood and black steel coffee table",
+        floor="wide dark wood boards",
+        rug="a LARGE worn-look neutral rug",
+        curtains="simple dark linen panels",
+        art="large monochrome photography prints",
+        plants="a tall plant in a black metal planter",
+        lamp="a black tripod spotlight floor lamp",
+        ceiling="ONE black metal ceiling light close to the ceiling",
+        textures="bold contrast accents; leather, black steel, reclaimed wood and aged brass; moody warm light",
+    ),
+    "minimalist": dict(
+        sofa="a low straight-lined sofa in soft neutral fabric",
+        table="a low rectangular seamless coffee table",
+        floor="seamless pale oak boards",
+        rug="a LARGE plain low-pile rug",
+        curtains="plain full-height panels near the wall tone",
+        art="one single large calm artwork",
+        plants="one sculptural plant in a plain pot",
+        lamp="a slim unobtrusive floor lamp",
+        ceiling="ONE discreet flush ceiling light",
+        textures="subtle tone-on-tone accents; smooth plaster, pale wood and soft matte fabric; serene uncluttered light",
+    ),
 }
 
 GEN_KLEIN_FURNITURE_BY_ROOM = {
-    "bedroom": "an upholstered bed with layered premium bedding, two nightstands with warm lamps, and a bench at the foot of the bed",
-    "dining room": "a solid-wood dining table with sculptural chairs and a styled sideboard",
-    "kitchen": "fitted cabinetry with stone countertops, a breakfast counter with designer stools, and integrated appliances",
-    "home office": "a wide desk with a refined chair, full bookshelves, and a reading armchair",
-    "kids room": "a cozy bed with playful bedding, a study desk, a soft rug, and generous storage",
-    "bathroom": "a floating stone-top vanity with a backlit mirror, a glass shower, and premium tile",
+    "living room": None,  # Filled from the selected style below.
+    "bedroom": (
+        "an upholstered bed with layered premium bedding, two nightstands "
+        "with warm lamps, and a bench at the foot of the bed"
+    ),
+    "dining room": (
+        "a solid-wood dining table with sculptural chairs and a styled "
+        "sideboard"
+    ),
+    "kitchen": (
+        "fitted cabinetry with stone countertops, a breakfast counter with "
+        "designer stools, and integrated appliances"
+    ),
+    "home office": (
+        "a wide desk with a refined chair, full bookshelves, and a reading "
+        "armchair"
+    ),
+    "kids room": (
+        "a cozy bed with playful bedding, a study desk, a soft rug, and "
+        "generous storage"
+    ),
+    "bathroom": (
+        "a floating stone-top vanity with a backlit mirror, a glass shower, "
+        "and premium tile"
+    ),
 }
 
 
@@ -105,13 +206,22 @@ _ARCHITECTURE_LOCKS = {
     # A photograph of a real room. The model will silently move or invent an
     # opening unless it is told what preserving one means, so this spells it out
     # and claims the only priority marker in the brief.
+    #
+    # Two things were added after users reported rooms coming back the wrong
+    # shape. "Same count" was already here and was still not enough, because the
+    # brief never said the *shell* was fixed — so a render could keep three
+    # windows and still hand back a wider room with a different ceiling. And the
+    # override sentence matters: everything below this block asks for a design,
+    # and without it the design and the lock read as peers.
     PHOTO_SOURCE: (
-        "ARCHITECTURE - HIGHEST PRIORITY:\n"
-        "- Change finishes and movable contents only. Keep every wall, door, "
-        "window and balcony opening exactly as it appears: same count, size, "
-        "shape, position and sill height. Never add, remove, move, resize, cover "
-        "or reshape an opening.\n"
-        "- Keep the camera position, framing and perspective identical.\n"
+        "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
+        "- The shell is fixed: every wall, corner, ceiling and floor edge stays on "
+        "the same pixels; the room keeps its exact size, shape and proportions.\n"
+        "- Openings are fixed: the same number of doors and windows, each at the "
+        "same position, size, sill height and shape. Add none, remove none, move "
+        "none, resize none, cover none.\n"
+        "- Camera position, lens, framing and perspective stay identical. Change "
+        "finishes and movable contents only.\n"
     ),
     # A frame captured out of the 3D walkthrough. Its openings are the user's own
     # plan geometry, already exactly where they asked for them — the problem here
@@ -122,9 +232,46 @@ _ARCHITECTURE_LOCKS = {
     WALKTHROUGH_SOURCE: (
         "ARCHITECTURE:\n"
         "- Change finishes and movable contents only. Preserve all walls, doors, "
-        "windows, balcony openings and camera framing.\n"
+        "windows, balcony openings and camera framing, at the same count and in "
+        "the same places. Add no opening that is not already there.\n"
     ),
 }
+
+
+def design_seed(
+    *,
+    space_type: str = "",
+    design_style: str = "",
+    color_tone: str = "",
+    color_palette=None,
+    mode: str = "interior",
+    variation=0,
+) -> int:
+    """A stable starting seed that differs for every different brief.
+
+    Both image-editing paths used to pin the seed: interiors to a literal 7,
+    exteriors to ``7 + creativity * 97``. Creativity is a fixed 42 for every
+    space the app offers except Building, so in practice *every* render in the
+    app started from one of two noise fields. That is why a kitchen and a
+    bedroom came back as the same arrangement wearing different furniture — the
+    prompt changed, the noise did not, and at four steps the noise decides the
+    composition.
+
+    Hashing the brief means a bedroom and a kitchen can no longer land on the
+    same layout, while the same request twice still reproduces exactly. The
+    ``variation`` the client sends is what makes a deliberate re-roll differ.
+    """
+    palette = ""
+    if isinstance(color_palette, dict):
+        names = _palette_names(color_palette)
+        palette = "|".join(names) if names else ""
+    material = "␟".join(
+        str(part or "").strip().lower()
+        for part in (space_type, design_style, color_tone, palette, mode, variation)
+    )
+    # 31 bits: torch generators want a non-negative int, and this stays well
+    # inside every platform's seed range.
+    return int(hashlib.sha256(material.encode("utf-8")).hexdigest()[:8], 16) & 0x7FFFFFFF
 
 
 def resolve_render_source(source) -> str:
@@ -209,6 +356,423 @@ def build_floor_plan_prompt(*, design_style: str, color_rule: str) -> str:
     )
 
 
+#: Everything that is true of one room type and not of the others.
+#:
+#: This table exists because the brief used to state most of it once, for every
+#: room. "Group seating around a correctly sized rug", "one floor lamp beside
+#: seating" and "mid-tones on upholstery, curtains and rugs" were sent to the
+#: model whether it was designing a living room or a kitchen — which is exactly
+#: why kitchens came back with armchairs and a rug on the floor. A room's brief
+#: now names its own furniture, its own lighting, its own styling, and, most
+#: importantly, what it must never contain.
+#:
+#: Each entry carries:
+#:   programme — the functions the room must resolve
+#:   hero      — the one piece the room is judged on, and its honest materials
+#:   decor     — styling appropriate to this room and no other
+#:   limits    — how much lighting and greenery this room type may have
+#:   forbid    — the furniture that does not belong here, stated as a negative
+#:   layouts   — credible arrangements, one picked per render (see below)
+#:
+#: `layouts` is the other half of the "every room looks the same" fix. A single
+#: arrangement sentence shared by every render made every living room the same
+#: living room; rotating through a few genuinely different, equally valid plans
+#: means two runs of the same room diverge in structure and not just in colour.
+ROOM_BRIEFS = {
+    "living room": dict(
+        programme=(
+            "a conversation group with sofa and complementary seating, and a TV "
+            "centred above a media console on a solid wall"
+        ),
+        hero=(
+            "The coffee table is the hero piece: one sculptural low table in stone, "
+            "solid timber or slim metal and glass, centred on the rug"
+        ),
+        decor=(
+            "layered cushions, a folded throw, one large artwork at eye level, one "
+            "tight group per surface - books, a tray, a ceramic"
+        ),
+        limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
+        forbid="no bed, no desk, no dining table, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Set the sofa square to the longest solid wall, with the rug under the front legs of every seat.",
+            "Float the seating off the walls around the rug, with a console table behind the sofa.",
+            "Run an L-shaped sofa into the corner furthest from the door, with the lounge chairs facing it.",
+        ),
+    ),
+    "living + dining": dict(
+        programme=(
+            "one room zoned twice - a conversation group at one end, a dining "
+            "table and chairs at the other, a clear route between"
+        ),
+        hero=(
+            "The dining table is the hero piece: one solid timber or stone table "
+            "with matched chairs, and a coffee table that answers it"
+        ),
+        decor=(
+            "cushions and a folded throw on the seating, one artwork per zone at "
+            "eye level, one low centrepiece on the table"
+        ),
+        limits="one pendant over the dining table, one floor lamp beside the seating, one potted floor plant",
+        forbid="no bed, no desk, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Put the dining zone nearest the window and the seating nearest the solid wall.",
+            "Back the sofa onto the dining zone so it divides the room, a chair's depth clear round the table.",
+            "Run both zones along the room's long axis, each on its own rug, sharing one route to the door.",
+        ),
+    ),
+    "salon": dict(
+        programme=(
+            "a formal reception room: seating arranged around the perimeter so the "
+            "floor stays open, matched occasional tables and a grounded rug"
+        ),
+        hero=(
+            "The seating suite is the hero piece: matched tailored sofas and chairs "
+            "in one fabric, facing each other across the rug"
+        ),
+        decor=(
+            "matched cushions, one large artwork at eye level, one group on each "
+            "occasional table - a ceramic, a tray, candles"
+        ),
+        limits="one ceiling fixture, matched table or floor lamps in pairs, one potted floor plant",
+        forbid="no dining table, no TV, no bed, no desk, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Face two matched sofas across the rug, with the occasional tables at the ends.",
+            "Line the seating along three walls around an open centre, leaving the fourth for the entrance.",
+            "Set a symmetrical suite on the room's centre line, anchored on the fireplace or largest solid wall.",
+        ),
+    ),
+    "bedroom": dict(
+        programme="a restful sleeping area, useful bedside surfaces and calm closed storage",
+        hero=(
+            "The bed is the hero piece: a well-proportioned upholstered headboard, "
+            "crisp layered bedding and two matched nightstands"
+        ),
+        decor=(
+            "one large artwork above the headboard, a folded throw across the foot "
+            "of the bed, and one small group on each nightstand"
+        ),
+        limits="one ceiling fixture, two matched bedside lights, one potted floor plant",
+        forbid="no sofa, no dining table, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Centre the headboard on the largest solid wall, with the rug running past both sides of the bed.",
+            "Face the bed towards the window wall and put the closed storage on the wall behind the door.",
+            "Set the bed against the solid wall off-centre, and give the freed corner a bench or a reading chair.",
+        ),
+    ),
+    # The room the whole complaint was about. `forbid` is deliberately the
+    # longest in the table and names the pieces that actually turned up:
+    # armchairs, a coffee table, a rug. Counter stools are allowed, but only
+    # against an island the worktop really forms — otherwise "stools" is read as
+    # licence for loose seating again.
+    "kitchen": dict(
+        programme=(
+            "fitted floor and wall cabinetry along the existing walls, a continuous "
+            "worktop, sink, hob, integrated appliances and under-cabinet task light"
+        ),
+        hero=(
+            "The run of cabinetry is the hero piece: honest stone worktops, flush "
+            "handleless fronts and one considered splashback"
+        ),
+        decor="one counter group - a board, a bowl, a ceramic - and clear worktop everywhere else",
+        limits=(
+            "one ceiling fixture, or pendants only over an island the room can "
+            "hold; no floor lamp; no floor plant"
+        ),
+        forbid=(
+            "no sofa, armchair, lounge seating, coffee table, dining table, bed, "
+            "desk or area rug; the only seating is counter stools at an island the "
+            "worktop itself forms"
+        ),
+        layouts=(
+            "Keep the sink, hob and fridge within one easy triangle and the floor between them clear.",
+            "Run the tall units and appliances along one wall and keep the opposite run low and unbroken.",
+            "Wrap the worktop into an L and leave the route to the door at full width.",
+        ),
+    ),
+    "bathroom": dict(
+        programme=(
+            "a vanity with basin and mirror, a bathing or shower zone on the "
+            "existing plumbing wall, storage and damp-safe lighting"
+        ),
+        hero=(
+            "The vanity is the hero piece: a well-proportioned stone top, honest "
+            "cabinetry and one considered mirror and light"
+        ),
+        decor="folded towels, one framed piece at eye level, a small tray with a ceramic and a candle",
+        limits="one ceiling fixture and one mirror light; no floor lamp; at most one small plant on a surface",
+        forbid=(
+            "no sofa, armchair, bed, desk, dining furniture, kitchen cabinetry or "
+            "area rug; seating only as one compact stool"
+        ),
+        layouts=(
+            "Leave every fitting on the wall it already stands on and keep the door swing clear.",
+            "Run the vanity along the longest wall and glaze the shower into the far corner.",
+            "Face the vanity and the bathing zone across the room from each other, with a clear walkway between.",
+        ),
+    ),
+    "dining room": dict(
+        programme=(
+            "a correctly scaled dining group, room to pull every chair out, and a "
+            "sideboard only where circulation allows"
+        ),
+        hero=(
+            "The dining table is the hero piece: one well-proportioned solid stone "
+            "or timber table with matched sculptural chairs"
+        ),
+        decor=(
+            "one large artwork at eye level, a linen runner, and one low centrepiece "
+            "group - a bowl, a ceramic and candles"
+        ),
+        limits="one pendant or one matched row centred over the table, one potted floor plant; no floor lamp",
+        forbid="no bed, no sofa, no desk, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Centre the table under the light with at least a chair's depth clear on every side.",
+            "Set the table to one side of the room and run a low sideboard along the opposite wall.",
+            "Lay the table's long axis along the room's long axis, with a bench on the window side.",
+        ),
+    ),
+    "balcony": dict(
+        programme=(
+            "a weather-safe floor finish, compact outdoor seating and a small table, "
+            "and planting that blocks neither the door nor the drainage"
+        ),
+        hero=(
+            "The seating is the hero piece: one weatherproof pair of chairs or a "
+            "bench in teak, powder-coated metal or rope, with a small table"
+        ),
+        decor="outdoor cushions, one lantern, grouped planters against the railing",
+        limits="one wall or ceiling light and one string of warm outdoor lighting; two or three planters",
+        forbid=(
+            "no indoor upholstery, bed, desk, dining suite, kitchen cabinetry or "
+            "sanitaryware; nothing blocking the door or railing"
+        ),
+        layouts=(
+            "Set the seating against the solid wall facing out, planters along the railing.",
+            "Tuck the seating into one end and keep the rest of the floor clear to the railing.",
+            "Face two chairs across a small table at the outward corner, planting behind them.",
+        ),
+    ),
+    "office": dict(
+        programme="an ergonomic work area, closed and open storage, and layered task light",
+        hero=(
+            "The desk is the hero piece: one well-proportioned solid-topped desk "
+            "with a refined chair and aligned shelving"
+        ),
+        decor=(
+            "one artwork at eye level, a short row of books, and one small group on "
+            "the desk - a tray, a ceramic, a lamp"
+        ),
+        limits="one ceiling fixture, one task lamp on the desk, one potted floor plant",
+        forbid="no bed, no dining table, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Set the desk square to the window so the light falls across it, not into the screen.",
+            "Face the desk into the room with full-height shelving on the wall behind it.",
+            "Run the desk along the longest wall and put a single reading chair in the far corner.",
+        ),
+    ),
+    "kids room": dict(
+        programme=(
+            "a safe sleeping zone, a study surface, clear floor to play on, and "
+            "storage a child can reach"
+        ),
+        hero=(
+            "The bed is the hero piece: a well-proportioned frame in honest timber "
+            "with calm bedding and one playful accent"
+        ),
+        decor=(
+            "two or three small framed pieces hung at child height, a soft rug, and "
+            "a few tidy toys in open baskets"
+        ),
+        limits="one ceiling fixture, one bedside light and one desk lamp; no floor lamp",
+        forbid="no sofa, no dining table, no kitchen cabinetry, no sanitaryware, no adult formal furniture",
+        layouts=(
+            "Put the bed against the solid wall and the desk under the window, with the play floor between them.",
+            "Tuck the bed into the corner furthest from the door and run the storage along the opposite wall.",
+            "Set the bed and desk on the same wall, leaving the whole opposite side as clear play floor.",
+        ),
+    ),
+    "closet": dict(
+        programme=(
+            "full-height hanging, shelving and drawer stacks, a mirror, and even "
+            "shadow-free light"
+        ),
+        hero=(
+            "The hanging run is the hero piece: aligned rails, matched shelving and "
+            "honest timber or lacquered fronts"
+        ),
+        decor="neatly folded stacks, a few matched boxes, and one small tray of accessories",
+        limits="one ceiling fixture and integrated shelf lighting; no floor lamp; no plant",
+        forbid=(
+            "no bed, no sofa, no desk, no dining table, no kitchen cabinetry, no "
+            "sanitaryware; seating only as one compact island bench"
+        ),
+        layouts=(
+            "Run hanging along both long walls with the drawers between them and the mirror on the end wall.",
+            "Line one wall with full-height hanging and face it with open shelving and a bench.",
+            "Wrap the storage into a U and keep the centre of the floor completely clear.",
+        ),
+    ),
+    "laundry room": dict(
+        programme=(
+            "washer and dryer side by side or stacked, a folding surface, a sink "
+            "where the plumbing allows, and closed storage"
+        ),
+        hero=(
+            "The worktop over the appliances is the hero piece: one durable "
+            "continuous top with matched cabinetry above and below"
+        ),
+        decor="one basket, folded linen, and a single small group on the worktop",
+        limits="one ceiling fixture and under-cabinet task light; no floor lamp; no floor plant",
+        forbid=(
+            "no sofa, no armchair, no bed, no desk, no dining table, no coffee "
+            "table and no area rug"
+        ),
+        layouts=(
+            "Run the appliances and worktop along one wall with tall storage at the end.",
+            "Stack the appliances into a tall bay and give the rest of the wall a folding counter.",
+            "Face the appliance run with a narrow counter, leaving a full-width walkway between.",
+        ),
+    ),
+    "hallway": dict(
+        programme=(
+            "an unobstructed route, a durable continuous floor, restrained wall art "
+            "and even lighting"
+        ),
+        hero=(
+            "The floor is the hero piece: one continuous, well-laid finish running "
+            "the length of the space"
+        ),
+        decor="a small run of framed pieces at eye level and one narrow runner",
+        limits="one ceiling fixture or a matched row; no floor lamp; at most one potted plant against a wall",
+        forbid=(
+            "no sofa, no bed, no dining table, no desk, no kitchen cabinetry, no "
+            "sanitaryware; nothing that narrows the walkway"
+        ),
+        layouts=(
+            "Keep the full width of the floor clear and hang the art in one aligned run.",
+            "Put a single narrow console against the longest blank wall and leave everything else open.",
+            "Light the route evenly from the ceiling and let the floor finish carry the whole space.",
+        ),
+    ),
+    "entryway": dict(
+        programme=(
+            "a console or bench, a mirror, concealed coat and shoe storage, and a "
+            "durable floor finish"
+        ),
+        hero=(
+            "The console or bench is the hero piece: one well-proportioned piece in "
+            "solid timber or stone with a mirror above it"
+        ),
+        decor="a tray for keys, one ceramic, and a single framed piece or mirror at eye level",
+        limits="one ceiling fixture, one wall light or table lamp, one potted floor plant",
+        forbid="no sofa, no bed, no dining table, no desk, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Set the console against the wall facing the door with the storage beside it.",
+            "Run a bench along one wall with hooks and closed shoe storage above and below.",
+            "Keep the floor clear to the door and put every piece on the one wall that allows it.",
+        ),
+    ),
+    "basement": dict(
+        programme=(
+            "a clearly zoned multipurpose room with comfortable seating, warm "
+            "layered lighting and moisture-tolerant finishes"
+        ),
+        hero=(
+            "The seating group is the hero piece: one generous sofa in a hard-wearing "
+            "fabric with a low table on a grounded rug"
+        ),
+        decor="layered cushions, a folded throw, one large artwork, and one tight group per surface",
+        limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
+        forbid="no bed, no dining suite, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Set the seating against the longest wall facing the media zone, with storage behind it.",
+            "Zone the room in two - seating at one end, a games or work surface at the other.",
+            "Float the seating on a rug in the middle and line the walls with low closed storage.",
+        ),
+    ),
+    # Not one room: a whole flat seen from inside it. The brief has to say that
+    # explicitly, because every other entry in this table is written for one room
+    # and the model will happily furnish an open plan as a single living room.
+    "full apartment": dict(
+        programme=(
+            "each visible zone resolved for its own use - sitting, dining, cooking "
+            "and circulation - reading as one continuous scheme"
+        ),
+        hero=(
+            "Give each zone one hero piece, and let one flooring and one wall finish "
+            "run continuously between them"
+        ),
+        decor="one large artwork per zone at eye level, and one tight group per surface",
+        limits="one ceiling fixture per zone, one floor lamp beside the seating, one potted floor plant per zone",
+        forbid=(
+            "no bed in a sitting, cooking or dining zone; no sanitaryware outside a "
+            "bathroom; nothing standing in the route between zones"
+        ),
+        layouts=(
+            "Put the cooking zone on its existing wall, dining beside it, and seating furthest from the door.",
+            "Back the sofa onto the dining zone so the furniture itself divides the plan.",
+            "Run the zones along one axis with a single clear route past all of them.",
+        ),
+    ),
+}
+
+#: Names the app or a user may send for a room this table already describes.
+ROOM_BRIEF_ALIASES = {
+    "home office": "office",
+    "study": "office",
+    "guest room": "bedroom",
+    "master bedroom": "bedroom",
+    "kids bedroom": "kids room",
+    "children room": "kids room",
+    "walk-in closet": "closet",
+    "wardrobe": "closet",
+    "dressing room": "closet",
+    "laundry": "laundry room",
+    "utility room": "laundry room",
+    "corridor": "hallway",
+    "foyer": "entryway",
+    "hall": "entryway",
+    "living and dining": "living + dining",
+    "living dining": "living + dining",
+    "open plan": "full apartment",
+    "whole apartment": "full apartment",
+    "studio": "full apartment",
+    "sitting room": "living room",
+    "lounge": "living room",
+    "terrace": "balcony",
+    "sunroom": "balcony",
+    "attic": "basement",
+    "powder room": "bathroom",
+    "toilet": "bathroom",
+    "wc": "bathroom",
+}
+
+#: What an unrecognised room type gets. A user can type any room name they like
+#: into the selector, so this has to be a usable brief and not a placeholder —
+#: but it must not smuggle in a sofa, which is what made every custom room read
+#: as a living room.
+_GENERIC_ROOM_BRIEF = dict(
+    programme="the essential functions this room type actually needs, and nothing from another room",
+    hero="Give the room one well-proportioned hero piece in an honest material and let everything else support it",
+    decor="one artwork at eye level and one tight group per surface at varied heights",
+    limits="one ceiling fixture, at most one additional lamp, at most one potted floor plant",
+    forbid="nothing that belongs to a different room type",
+    layouts=(
+        "Arrange the furniture square to the room's own walls and keep the centre of the floor open.",
+        "Anchor the main pieces on the longest solid wall and leave the window wall clear.",
+        "Zone the room around its one focal point and keep every route through it unobstructed.",
+    ),
+)
+
+
+def room_brief(space_type: str) -> dict:
+    """The per-room brief for ``space_type``, following aliases."""
+    key = str(space_type or "").strip().lower()
+    key = ROOM_BRIEF_ALIASES.get(key, key)
+    return ROOM_BRIEFS.get(key, _GENERIC_ROOM_BRIEF)
+
+
 def build_gen_klein_interior_prompt(
     *,
     space_type: str,
@@ -216,8 +780,19 @@ def build_gen_klein_interior_prompt(
     color_tone: str,
     color_palette=None,
     source: str = PHOTO_SOURCE,
+    variation_index: int = 0,
+    compact: bool = False,
 ) -> str:
-    """Return a flexible, whole-room brief that leaves architecture untouched."""
+    """Return a flexible, whole-room brief that leaves architecture untouched.
+
+    ``compact`` drops the styling and color-distribution detail, which is worth
+    roughly 45 words. It exists for one case: a room name long enough — a custom
+    one the user typed — to push the brief past Qwen3's 512-token ceiling. The
+    engine used to raise there, which turns a paid render into an error; it now
+    asks for this version instead. The architecture lock and the room's own
+    programme, limits and exclusions survive, because those are the parts a
+    render cannot be correct without.
+    """
     room_type = space_type or "Living Room"
     style = design_style or "Modern"
     tone = color_tone or "Neutral"
@@ -247,88 +822,17 @@ def build_gen_klein_interior_prompt(
     if is_floor_plan(room_type):
         return build_floor_plan_prompt(design_style=style, color_rule=color_rule)
 
-    room_key = room_type.lower().strip()
-    programmes = {
-        # Coffee table and rug are briefed in detail below, so they are not
-        # repeated here: the token budget is tight and Klein weights a
-        # once-stated instruction more heavily than a twice-stated one.
-        "living room": (
-            "a conversation group with sofa and complementary seating, and a TV "
-            "centred above a media console on a solid wall"
-        ),
-        "bedroom": "a restful sleeping area, useful bedside surfaces and calm storage",
-        "dining room": "a correctly scaled dining group and practical circulation",
-        "kitchen": "functional cabinetry, work surfaces, appliances and task lighting",
-        "home office": "an ergonomic work area, storage and layered task lighting",
-        "kids room": "safe sleep, study, play and accessible storage zones",
-        "bathroom": "a functional vanity, bathing zone, storage and suitable lighting",
-    }
-    programme = programmes.get(
-        room_key,
-        f"the essential functions of a well-designed {room_type}",
-    )
-
-    # The one piece the room is judged on. Naming it, and naming the materials
-    # it may be made from, is what stops Klein from filling the focal slot with
-    # a vague low box; the brief is shared by every room type, so the coffee
-    # table has to be asked for only where a coffee table belongs.
-    heroes = {
-        "living room": (
-            "The coffee table is the hero piece: one sculptural, well-proportioned "
-            "table in stone, solid timber or slim metal and glass, low, centred on the rug"
-        ),
-        "bedroom": (
-            "The bed is the hero piece: a well-proportioned upholstered headboard, "
-            "crisp layered bedding and two matched nightstands"
-        ),
-        "dining room": (
-            "The dining table is the hero piece: one well-proportioned solid stone "
-            "or timber table with matched sculptural chairs"
-        ),
-        "kitchen": (
-            "The island or run of cabinetry is the hero piece: honest stone tops, "
-            "flush hardware and one considered splashback"
-        ),
-        "home office": (
-            "The desk is the hero piece: one well-proportioned solid-topped desk "
-            "with a refined chair and aligned shelving"
-        ),
-        "kids room": (
-            "The bed is the hero piece: a well-proportioned frame in honest timber "
-            "with calm bedding and one playful accent"
-        ),
-        "bathroom": (
-            "The vanity is the hero piece: a well-proportioned stone top, honest "
-            "cabinetry and one considered mirror and light"
-        ),
-    }
-    hero = heroes.get(
-        room_key,
-        "Give the room one well-proportioned hero piece in an honest material and "
-        "let everything else support it",
-    )
-
-    # Styling asked for by room, so a bathroom is not briefed for cushions and a
-    # book stack. Only the selected line reaches the model, so the specific ones
-    # cost nothing against the token ceiling.
-    decor = {
-        "bathroom": (
-            "neatly folded towels, one framed piece at eye level, and a small "
-            "tray holding a ceramic and a candle"
-        ),
-        "kitchen": (
-            "one framed piece at eye level and a single restrained counter group "
-            "at varied heights - a board, a bowl and a ceramic"
-        ),
-        "dining room": (
-            "one large artwork at eye level, a linen runner, and one low "
-            "centrepiece group - a bowl, a ceramic and candles"
-        ),
-    }.get(
-        room_key,
-        "layered cushions, a folded throw, one large artwork at eye level, and "
-        "one tight group per surface at varied heights - books, a "
-        "tray, a ceramic, a sculptural object",
+    brief = room_brief(room_type)
+    layout = brief["layouts"][variation_index % len(brief["layouts"])]
+    styling = (
+        f"- COLOR: {color_rule}, lightest over the large fields.\n"
+        if compact
+        else (
+            f"- DECORATE: {brief['decor']}. Leave most surfaces bare; nothing on the floor.\n"
+            f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on the "
+            "mid-sized surfaces, the deepest in a few small touches, each echoed in "
+            "two or three places. All finishes as one scheme.\n"
+        )
     )
 
     # The opening sentence is the wording that holds geometry; "a senior interior
@@ -340,24 +844,15 @@ def build_gen_klein_interior_prompt(
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
         f"{_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
-        "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
-        "potted floor plant; no other lamps or greenery.\n\n"
+        f"THIS IS A {room_type.upper()}, not any other room. It contains "
+        f"{brief['forbid']}.\n"
+        f"ITEM LIMITS: {brief['limits']}; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
-        "- Design as a senior interior designer: balanced proportions, a mix of "
-        "large, medium and small forms, one focal point.\n"
-        f"- Resolve {programme}. Choose the layout, furniture count and scale from the visible space.\n"
-        f"- Designer furniture, clean silhouettes, honest materials. {hero}.\n"
-        "- Group seating around a correctly sized rug; align art and lighting with "
-        "the furniture below.\n"
-        "- Choose all finishes and furnishings as one scheme; force no "
-        "predetermined material or color.\n"
-        f"- DECORATE: {decor}. Leave most surfaces bare; nothing on the floor.\n"
-        f"- COLOR: {color_rule}, weighted as a designer would: lightest or most "
-        "muted over the large fields, mid-tones on upholstery, curtains and rugs, "
-        "the deepest color in a few small touches.\n"
-        "- Consistent undertones, each color echoed in two or three separated "
-        "places; no flat wash, muddy neutrals or oversaturation.\n"
-        "- Keep walkways clear; no clutter or duplicates.\n"
+        f"- Resolve {brief['programme']}. Take furniture count and scale from the visible space.\n"
+        f"- Designer furniture, clean silhouettes, honest materials. {brief['hero']}.\n"
+        f"- LAYOUT: {layout} Align art and lighting with the furniture.\n"
+        f"{styling}"
+        "- Keep walkways and door swings clear; no clutter or duplicates.\n"
         "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
     )
 
@@ -365,6 +860,7 @@ ROOM_PROGRAMS = {
     "living room": "a coherent conversation group, correctly scaled sofa and lounge chairs, coffee table, grounded rug, media or art focal point",
     "living + dining": "one room zoned twice — a conversation group at one end and a correctly scaled dining table and chairs at the other, with a clear route between them and a single pendant over the table",
     "salon": "a formal reception room: seating arranged around the perimeter so the floor stays open, matched occasional tables, a grounded rug, and no dining table",
+    "salon + dining": "a formal reception room that also seats guests at table: perimeter seating around an open centre at one end, a correctly scaled dining table and chairs at the other, one pendant centred above the table",
     "balcony": "weather-safe floor finish, compact outdoor seating and a small table, planting that does not block the door, and an unobstructed outlook",
     "bedroom": "an upholstered bed, two nightstands, layered bedding, a bench or chair where circulation allows, calm storage",
     "dining room": "a correctly scaled dining table and chairs, one pendant centred above, sideboard only where circulation permits",
@@ -398,6 +894,59 @@ EXTERIOR_PROGRAMS = {
 #: Space types that are always treated as exterior briefs, whichever mode the
 #: client sends. Balcony appears in both maps, so mode wins for that one.
 EXTERIOR_SPACES = set(EXTERIOR_PROGRAMS) - {"balcony"}
+
+#: The architecture an exterior render is standing in front of, and must not
+#: edit, stated per space type.
+#:
+#: Every one of these used to get the generic geometry clause, because the hard
+#: lock in `build_prompt` was gated on ``space_type == "building"``. A garden or
+#: a driveway brief therefore said "preserve every opening" once, in a sentence
+#: mostly about walls and columns, and the model read the house behind the
+#: planting as background it was free to redraw — which is exactly how a render
+#: came back with a window or a door the house does not have.
+#:
+#: The point of naming it per type is that the wall behind a driveway is not the
+#: subject of the render, and a lock has to say so explicitly to be read.
+EXTERIOR_OPENING_LOCKS = {
+    "building": (
+        "the facade's openings: reproduce every window, door, vent and balcony at "
+        "the same count, size, shape and position, sills and heads included"
+    ),
+    "balcony": (
+        "the wall and railing behind: the same doors, windows and balustrade, at "
+        "the same count and size. Do not glaze in, open up or wall off anything"
+    ),
+    "terrace": (
+        "the building the terrace belongs to: the same doors and windows onto it, "
+        "at the same count and size, and the same parapet"
+    ),
+    "garden": (
+        "every building, wall, fence and gate in shot: the same doors and windows "
+        "in the same places. Plant in front of nothing that changes their count"
+    ),
+    "driveway": (
+        "the house and the garage: the same doors, windows and garage openings, at "
+        "the same count, width and position"
+    ),
+    "swimming pool area": (
+        "the pool's own outline and every building around it: the same doors and "
+        "windows, and the same pool shape, size and edge"
+    ),
+    "garage": (
+        "the garage shell: the same door opening, windows and roof line, at the "
+        "same count and size"
+    ),
+}
+
+
+def exterior_opening_lock(space_type: str) -> str:
+    """The 'do not invent an opening' clause for an exterior space type."""
+    key = str(space_type or "").strip().lower()
+    return EXTERIOR_OPENING_LOCKS.get(
+        key,
+        "every building, wall and boundary in shot: the same doors and windows, at "
+        "the same count, size and position",
+    )
 
 NEGATIVE_PROMPT = (
     "blurry, lowres, distorted, warped geometry, deformed architecture, wrong perspective, "
@@ -529,6 +1078,23 @@ def build_prompt(
     creativity = max(10, min(80, int(creativity or 42)))
 
     is_building = mode == "exterior" and (space_type or "").strip().lower() == "building"
+    # Every exterior render stands in front of architecture, not just the
+    # Building one — see EXTERIOR_OPENING_LOCKS. The named lock is appended to
+    # whichever geometry clause applies so a garden, a driveway or a pool brief
+    # can no longer treat the house behind it as redrawable background.
+    #
+    # Building is excluded because its own clause already enumerates openings
+    # down to sill and head heights, and because that brief is the longest one
+    # this engine produces: 45 more words would push its closing quality rules
+    # past the text encoder's 512-token window, trading a lock it already has
+    # for the rules it needs.
+    openings = (
+        f" THE OPENINGS ARE NOT YOURS TO CHANGE: keep {exterior_opening_lock(space_type)}. "
+        "Adding a window, door, gate or opening that is not in the photo, or "
+        "removing one that is, is a failed render."
+        if mode == "exterior" and preserve_geometry and not is_building
+        else ""
+    )
     geometry = (
         "THE INPUT BUILDING IS AN IMMUTABLE STRUCTURAL TEMPLATE. Preserve 100% of its visible "
         "architecture and pixel layout: identical footprint, silhouette, massing, story count, "
@@ -548,7 +1114,7 @@ def build_prompt(
         if preserve_geometry
         else "Keep the same camera and recognisable structure. Small plausible finish-level "
         "architectural refinements are allowed, but do not invent impossible structure."
-    )
+    ) + openings
     freedom = (
         "highly restrained and spatially conservative"
         if creativity < 30
