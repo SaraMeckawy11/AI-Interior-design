@@ -45,6 +45,7 @@ const RoomTypeSelector = ({
         // dining table is coming, and the formal seating room that never does.
         'Living + Dining',
         'Salon',
+        'Salon + Dining',
         'Bedroom',
         'Kitchen',
         'Bathroom',
@@ -93,6 +94,7 @@ const RoomTypeSelector = ({
       case 'living room': return 'tv-outline';
       case 'living + dining': return 'restaurant-outline';
       case 'salon': return 'cafe-outline';
+      case 'salon + dining': return 'restaurant-outline';
       case 'balcony': return 'sunny-outline';
       case 'bedroom': return 'bed-outline';
       case 'kitchen': return 'restaurant-outline';

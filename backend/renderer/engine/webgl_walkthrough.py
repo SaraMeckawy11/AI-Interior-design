@@ -2168,21 +2168,22 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
             # They were 1.90 m x (width + 0.90 m), which is a person standing
             # just inside with the door shut behind them. An entrance is used
             # with the door open, with something in both hands, by more than one
-            # person at a time — so it is 2.70 m x (width + 1.50 m), which is
-            # that same person with room to put the shopping down and turn
-            # round. It stacks with the splayed zone in the engine's own
-            # `__init__`; between them the front door of a flat now keeps the
-            # floor a front door is actually used on.
+            # person at a time — and it is where a pushchair, a bike or the
+            # week's shopping gets parked while somebody deals with the door. So
+            # it is 3.40 m x (width + 2.10 m), raised a second time after
+            # furniture kept arriving inside the first increase. It stacks with
+            # the splayed zone in the engine's own `__init__`; between them the
+            # front door of a flat keeps the floor a front door is used on.
             corridor_depth = (
                 1.15 if is_balcony
                 else 0.80 if cased
-                else 2.70 if entrance
+                else 3.40 if entrance
                 else 0.95
             )
             corridor_width = (
                 min(opening_width, original.PASSAGE_W) + 0.10
                 if cased
-                else opening_width + 1.50
+                else opening_width + 2.10
                 if entrance
                 else min(opening_width, 1.30) + 0.10
             )
@@ -2194,6 +2195,7 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                 room_area = max(float(self.poly.area), 0.01)
                 for depth, span in (
                     (corridor_depth, corridor_width),
+                    (2.70, opening_width + 1.50),
                     (2.30, opening_width + 1.20),
                     (1.90, opening_width + 0.90),
                 ):
@@ -2204,7 +2206,7 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                         depth,
                     ).intersection(self.poly)
                     corridor_depth, corridor_width = depth, span
-                    if trial.area <= room_area * 0.55:
+                    if trial.area <= room_area * 0.62:
                         break
             corridor_center = center + inward * corridor_depth / 2
             corridor = original.footprint_poly(

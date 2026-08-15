@@ -2874,23 +2874,33 @@ class RoomFurnisher:
                 #
                 #  * It reaches further in. A generous entry is about the depth
                 #    of a hallway, not the depth of a doormat, and the scaling
-                #    term drives it: a 20 m² room now reserves 3.2 m of approach
+                #    term drives it: a 20 m² room reserves 4.2 m of approach
                 #    where it reserved 2.5 m, and a big open-plan living room
-                #    reserves the full 3.6 m rather than stopping at 2.6 m.
-                #  * It is wider at the door. Half a metre either side of the
-                #    leaf is what it takes to stand beside the door and open it.
+                #    takes the full 4.4 m rather than stopping at 2.6 m.
+                #  * It is wider at the door. Three quarters of a metre either
+                #    side of the leaf is what it takes to stand beside the door,
+                #    open it, and let somebody past you while it is open.
                 #  * It splays. A rectangle guards the line you walk in along;
                 #    it does not guard the turn you make at the end of it, which
                 #    is where the sofa arm or the table corner actually was. The
                 #    zone is a trapezoid now, widening as it goes in, which is
                 #    the shape of the floor an entrance really uses.
                 #
-                # The lower bound is deliberately unchanged. A small entrance
-                # hall is guarded exactly as it was, because in a 4 m² lobby the
-                # old zone was already most of the room and growing it would
-                # leave nowhere for the console table and the mirror that make
-                # it an entrance hall at all. Only rooms with floor to spare
-                # give more of it up.
+                # These numbers have been raised twice. The first pass took the
+                # reach from 2.6 m to 3.6 m and furniture was still arriving
+                # inside the zone, which says the limiting factor was never the
+                # figures on their own — it is that the clamps below decide how
+                # much of this a room actually keeps. So both went up together:
+                # a deeper, wider, more splayed zone, and clamps loosened from
+                # 55% to 62% of the room and from 62% to 70% of the way across
+                # it, so a room with the floor to spare actually gives it up.
+                #
+                # The lower bound is deliberately unchanged, through both
+                # passes. A small entrance hall is guarded exactly as it was,
+                # because in a 4 m² lobby the old zone was already most of the
+                # room and growing it would leave nowhere for the console table
+                # and the mirror that make it an entrance hall at all. Only
+                # rooms with floor to spare give more of it up.
                 room_span = math.sqrt(max(float(self.poly.area), 0.01))
                 door_half = max(width, MIN_DOOR_W) / 2.0
                 # How far the room actually goes in the direction you walk when
@@ -2924,11 +2934,11 @@ class RoomFurnisher:
                     # to shrink it below where it started.
                     reach=float(max(
                         legacy["reach"],
-                        min(3.60, room_depth * 0.62, max(1.70, room_span * 0.78)),
+                        min(4.40, room_depth * 0.70, max(1.90, room_span * 0.95)),
                     )),
-                    half=door_half + 0.52,
-                    splay=float(min(0.85, max(0.0, room_span * 0.22))),
-                    radius=1.45,
+                    half=door_half + 0.75,
+                    splay=float(min(1.25, max(0.0, room_span * 0.30))),
+                    radius=1.75,
                 )
 
                 def _entry_zone(blend):
@@ -2951,7 +2961,13 @@ class RoomFurnisher:
                 # How much of a room the entrance may claim. A living room with
                 # the front door in it has floor to spare; a 4 m² lobby does
                 # not, and in one the full-size zone is the whole room.
-                budget = float(self.poly.area) * 0.55
+                #
+                # This is the clamp that was actually holding the guard back —
+                # at 55% the full-size zone was being blended away in exactly
+                # the mid-size rooms it was written for. A room that can afford
+                # to give up three fifths of its floor to its own front door
+                # should.
+                budget = float(self.poly.area) * 0.62
                 corridor, radius = _entry_zone(1.0)
                 for blend in (1.0, 0.75, 0.5, 0.25, 0.0):
                     corridor, radius = _entry_zone(blend)
@@ -4485,10 +4501,13 @@ class RoomFurnisher:
         """Furnish the formal seating room.
 
         A salon is the room kept for receiving people: seating placed around the
-        edges so the middle of the floor stays open, and no dining table — that
-        is what makes it a salon rather than a second living room. The seating
-        recipe is the living room's, and `hosts_dining` is what keeps the table
-        out, so this only has to say which recipe to run.
+        edges so the middle of the floor stays open. The seating recipe is the
+        living room's, so this only has to say which recipe to run.
+
+        Whether it also gets the formal table is not decided here — it is
+        `hosts_dining`, and through it the whole plan. A plain "Salon" never
+        eats while any everyday seating room could take the table instead; a
+        "Salon + Dining" is an explicit answer and always does.
         """
         self.furnish_living()
 
