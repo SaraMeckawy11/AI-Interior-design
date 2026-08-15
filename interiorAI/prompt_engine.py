@@ -442,6 +442,28 @@ ROOM_BRIEFS = {
             "Set a symmetrical suite on the room's centre line, anchored on the fireplace or largest solid wall.",
         ),
     ),
+    "salon + dining": dict(
+        programme=(
+            "a formal reception room that also seats guests at table: perimeter "
+            "seating around an open centre at one end, a dining table and chairs "
+            "at the other"
+        ),
+        hero=(
+            "The dining table is the hero piece: one formal timber or stone table "
+            "with matched chairs, answered by a matched seating suite in one fabric"
+        ),
+        decor=(
+            "matched cushions on the suite, one large artwork at eye level, one low "
+            "centrepiece on the table"
+        ),
+        limits="one pendant centred over the dining table, matched lamps in pairs beside the seating, one potted floor plant",
+        forbid="no TV, no bed, no desk, no kitchen cabinetry, no sanitaryware",
+        layouts=(
+            "Put the table nearest the window and the seating suite around the open centre at the far end.",
+            "Line the seating along three walls and set the table on the room's centre line beyond it.",
+            "Run both zones along the long axis, each symmetrical about the same centre line, sharing one route to the door.",
+        ),
+    ),
     "bedroom": dict(
         programme="a restful sleeping area, useful bedside surfaces and calm closed storage",
         hero=(
@@ -735,6 +757,9 @@ ROOM_BRIEF_ALIASES = {
     "hall": "entryway",
     "living and dining": "living + dining",
     "living dining": "living + dining",
+    "salon and dining": "salon + dining",
+    "salon dining": "salon + dining",
+    "reception": "salon",
     "open plan": "full apartment",
     "whole apartment": "full apartment",
     "studio": "full apartment",
