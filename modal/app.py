@@ -1510,7 +1510,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v26-positive-counts-and-refinish",
+        "promptEngine": "gen-klein-per-room-briefs-v27-two-variation-axes",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1524,7 +1524,7 @@ def health():
             # Counted in the positive — "one sofa and one or two lounge chairs"
             # — rather than by forbidding a second one. Naming a piece in order
             # to exclude it tends to summon it, so the count does the work.
-            "seating": "one-sofa-counted-positively-facing-the-tv",
+            "seating": "one-sofa-two-chairs-angled-in-facing-the-tv",
         },
         # Walls kept the source photo's own masonry because "the shell is fixed"
         # was read as fixing the material too. Stated positively, and without
@@ -1546,6 +1546,11 @@ def health():
         # Seeds are hashed from the brief instead of pinned, so two different
         # rooms cannot start from the same noise.
         "seeding": "hashed-from-brief-plus-variation",
+        # Layout rotates every variation, hero material every third, so a
+        # room has nine distinguishable briefs per style rather than three.
+        # The hero used to offer the model a list of materials to pick from,
+        # which returned its favourite one every time.
+        "variationAxes": {"layout": 3, "heroMaterial": 3, "combinations": 9},
         # A plan-view capture is briefed as a plan rather than as a room. Named
         # here so a deployment that still gives it the room brief is visible
         # from the health check instead of only from the picture.

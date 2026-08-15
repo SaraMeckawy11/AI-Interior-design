@@ -104,9 +104,11 @@ def interior(room, style="Modern", variation=0, palette=PALETTE, source="photo")
 
 
 def test_every_brief_fits_the_token_window():
+    # 9 covers both variation axes: layout rotates every step, material every
+    # third, so a shorter layout can hide a longer material and vice versa.
     for room in APP_ROOM_TYPES:
         for style in STYLES:
-            for variation in range(3):
+            for variation in range(9):
                 prompt = interior(room, style, variation)
                 tokens = estimated_tokens(prompt)
                 assert tokens <= TOKEN_CEILING, (
@@ -129,7 +131,7 @@ def test_compact_brief_is_shorter_and_keeps_the_lock():
         # The parts a render cannot be correct without survive compaction.
         assert "ARCHITECTURE - HIGHEST PRIORITY" in compact
         assert "WINDOWS ARE UNTOUCHABLE" in compact
-        assert "Doors and all other openings are fixed" in compact
+        assert "Doors and other openings" in compact
         assert pe.room_brief(room)["forbid"] in compact
         assert pe.room_brief(room)["programme"] in compact
 
@@ -386,11 +388,65 @@ def test_quality_rules_survive_in_every_brief():
             assert rule in lowered, f"{room} brief lost the quality rule '{rule}'"
 
 
+def test_variation_moves_layout_and_material_independently():
+    """Nine distinguishable rooms per style, not three.
+
+    One axis alone made every render of a room share its materials, which is a
+    large part of why the designs read as the same design. Layout and material
+    rotate on different divisors so their combinations multiply.
+    """
+    for room in APP_ROOM_TYPES:
+        briefs = {interior(room, variation=index) for index in range(9)}
+        expected = 3 * len(pe.room_brief(room).get("materials") or (None,))
+        assert len(briefs) == expected, (
+            f"{room} produces {len(briefs)} briefs across 9 variations, expected {expected}"
+        )
+
+
+def test_hero_names_one_material_not_a_choice():
+    """A prompt that lists alternatives gets the model's favourite every time."""
+    for room in APP_ROOM_TYPES:
+        brief = pe.room_brief(room)
+        materials = brief.get("materials")
+        if not materials:
+            continue
+        assert "{material}" in brief["hero"], f"{room} has materials but no slot to put them in"
+        assert len(set(materials)) == len(materials), f"{room} repeats a material"
+        for variation in range(9):
+            hero_line = [
+                line for line in interior(room, variation=variation).splitlines()
+                if "hero piece" in line
+            ]
+            assert hero_line, f"{room} lost its hero line"
+            # Exactly one of the material options may appear in a given render.
+            present = [m for m in materials if m in hero_line[0]]
+            assert len(present) == 1, (
+                f"{room} v{variation} names {len(present)} materials: {hero_line[0]}"
+            )
+
+
+def test_seating_rooms_place_their_chairs():
+    """Chairs were arriving unplaced, reading as spare seating pushed in."""
+    for layout in pe.room_brief("Living Room")["layouts"]:
+        assert "chair" in layout.lower(), f"living room layout does not place the chairs: {layout}"
+    programme = pe.room_brief("Living Room")["programme"].lower()
+    assert "two lounge chairs" in programme
+    # And they are a form of their own, not the sofa repeated small.
+    assert "distinct shape" in programme or "lighter" in programme
+
+
+def test_every_brief_asks_for_breathing_room():
+    for room in APP_ROOM_TYPES:
+        assert "space every piece clear of its neighbours" in interior(room).lower(), (
+            f"{room} brief has no spacing rule"
+        )
+
+
 def test_photo_lock_fixes_both_the_shell_and_the_openings():
     prompt = interior("Living Room", source="photo")
     lowered = prompt.lower()
     assert "the shell is fixed" in lowered
-    assert "doors and all other openings are fixed the same way" in lowered
+    assert "doors and other openings: same rule" in lowered
     assert "add, remove, move or resize none" in lowered
     # The lock has to be read before anything creative asks for a redesign.
     assert lowered.index("the shell is fixed") < lowered.index("senior design direction")

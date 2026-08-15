@@ -226,8 +226,7 @@ _ARCHITECTURE_LOCKS = {
         "outline, width, height, sill and frame bars. Never widen, narrow, "
         "shorten, extend one to the floor, reshape one, make one a door, wall one "
         "over, or hide one behind drapery.\n"
-        "- Doors and all other openings are fixed the same way: add, remove, move "
-        "or resize none.\n"
+        "- Doors and other openings: same rule, add, remove, move or resize none.\n"
         # The tail of this line is the other half of the shell lock. "Every wall
         # stays on the same pixels" was read as keeping what the wall was *made
         # of*, and rooms came back with the original masonry still on them under
@@ -405,13 +404,22 @@ ROOM_BRIEFS = {
         # fixes the count without ever writing the words "no second sofa": a
         # diffusion text encoder reads the nouns and barely the negation, so
         # forbidding a sofa by name is a good way to get another one.
+        # The chairs are given a form of their own. A designer does not repeat
+        # the sofa in miniature: the chairs are a lighter, distinct shape that
+        # answers it, which is also what stops them reading as spare seating
+        # pushed in from the edge of the room.
         programme=(
-            "one sofa and one or two lounge chairs facing a wall-mounted TV on a "
-            "low media unit"
+            "one sofa and two lounge chairs of a lighter, distinct shape facing "
+            "a wall-mounted TV on a low media unit"
         ),
         hero=(
-            "The coffee table is the hero piece: one sculptural low table in stone, "
-            "solid timber or slim metal and glass, centred on the rug"
+            "The coffee table is the hero piece: one sculptural low table in "
+            "{material}, centred on the rug"
+        ),
+        materials=(
+            "honed travertine",
+            "solid walnut with a softened edge",
+            "slim blackened steel and glass",
         ),
         decor=(
             "layered cushions, a folded throw, one large artwork at eye level, one "
@@ -426,20 +434,21 @@ ROOM_BRIEFS = {
         # with the media console. All three now seat the sofa by where the TV
         # is, which is how the arrangement is actually decided.
         layouts=(
-            "Set the sofa on the wall facing the TV, rug under the front legs of every seat.",
-            "Float the sofa off the wall facing the TV, lounge chairs at right angles across the rug.",
-            "Run an L-shaped sofa into the corner that faces the TV, lounge chairs closing the group.",
+            "Set the sofa on the wall facing the TV, both chairs angled in from the far corners, rug under every front leg.",
+            "Float the sofa off the wall facing the TV, the chairs turned in at right angles across the rug.",
+            "Run an L-shaped sofa into the corner that faces the TV, one chair angled across from it to close the group.",
         ),
     ),
     "living + dining": dict(
         programme=(
-            "one room zoned twice - one sofa facing a wall-mounted TV over a low "
-            "media unit at one end, a dining table and chairs at the other"
+            "one room zoned twice - one sofa facing a wall-mounted TV on a low "
+            "media unit, a dining table and chairs beyond it"
         ),
         hero=(
-            "The dining table is the hero piece: one solid timber or stone table "
-            "with matched chairs, and a coffee table that answers it"
+            "The dining table is the hero piece: one {material} table with "
+            "matched chairs, answered by a coffee table"
         ),
+        materials=("solid oak", "honed stone", "stained ash"),
         decor=(
             "cushions and a folded throw on the seating, one artwork per zone at "
             "eye level, one low centrepiece on the table"
@@ -482,14 +491,14 @@ ROOM_BRIEFS = {
     ),
     "salon + dining": dict(
         programme=(
-            "a formal reception room that also seats guests at table: perimeter "
-            "seating round an open centre at one end, a dining table and chairs "
-            "at the other"
+            "a formal reception room that also dines: perimeter seating round an "
+            "open centre at one end, a dining table and chairs at the other"
         ),
         hero=(
-            "The dining table is the hero piece: one formal timber or stone table "
-            "with matched chairs, answered by a seating suite in one fabric"
+            "The dining table is the hero piece: one formal {material} table with "
+            "matched chairs, answered by a seating suite"
         ),
+        materials=("polished walnut", "veined marble", "lacquered ebony"),
         decor=(
             "matched cushions on the suite, one large artwork at eye level, one low "
             "centrepiece on the table"
@@ -499,15 +508,16 @@ ROOM_BRIEFS = {
         layouts=(
             "Put the table nearest the window and the seating suite around the open centre at the far end.",
             "Line the seating along three walls and set the table on the room's centre line beyond it.",
-            "Run both zones along the long axis, each symmetrical about the same centre line, sharing one route to the door.",
+            "Run both zones along the long axis, symmetrical about one centre line, sharing a route to the door.",
         ),
     ),
     "bedroom": dict(
         programme="a restful sleeping area, useful bedside surfaces and calm closed storage",
         hero=(
-            "The bed is the hero piece: a well-proportioned upholstered headboard, "
-            "crisp layered bedding and two matched nightstands"
+            "The bed is the hero piece: a well-proportioned headboard in "
+            "{material}, crisp layered bedding and two matched nightstands"
         ),
+        materials=("upholstered wool boucle", "channel-tufted linen", "soft-edged leather"),
         decor=(
             "one large artwork above the headboard, a folded throw across the foot "
             "of the bed, and one small group on each nightstand"
@@ -528,20 +538,21 @@ ROOM_BRIEFS = {
     "kitchen": dict(
         programme=(
             "fitted floor and wall cabinetry on the existing walls, a continuous "
-            "worktop, sink, hob, integrated appliances and under-cabinet task light"
+            "worktop, sink, hob, integrated appliances, under-cabinet task light"
         ),
         hero=(
-            "The cabinetry run is the hero piece: honest stone worktops, flush "
+            "The cabinetry run is the hero piece: {material} worktops, flush "
             "handleless fronts, one considered splashback"
         ),
+        materials=("honed stone", "veined marble", "matte composite"),
         decor="one counter group - a board, a bowl, a ceramic - and clear worktop elsewhere",
         limits=(
             "one ceiling fixture, or pendants over an island the room can hold; "
-            "no floor lamp; no floor plant"
+            "no floor lamp or plant"
         ),
         forbid=(
             "no sofa, armchair, coffee table, dining table, bed, desk, TV or area "
-            "rug; seating only as counter stools at an island the worktop forms"
+            "rug; seating only as counter stools at an island"
         ),
         layouts=(
             "Keep the sink, hob and fridge within one easy triangle and the floor between them clear.",
@@ -576,9 +587,10 @@ ROOM_BRIEFS = {
             "sideboard only where circulation allows"
         ),
         hero=(
-            "The dining table is the hero piece: one well-proportioned solid stone "
-            "or timber table with matched sculptural chairs"
+            "The dining table is the hero piece: one well-proportioned {material} "
+            "table with matched sculptural chairs"
         ),
+        materials=("solid oak", "honed stone", "warm walnut"),
         decor=(
             "one large artwork at eye level, a linen runner, and one low centrepiece "
             "group - a bowl, a ceramic and candles"
@@ -720,9 +732,10 @@ ROOM_BRIEFS = {
             "durable floor finish"
         ),
         hero=(
-            "The console or bench is the hero piece: one well-proportioned piece in "
-            "solid timber or stone with a mirror above it"
+            "The console or bench is the hero piece: one well-proportioned piece "
+            "in {material} with a mirror above it"
         ),
+        materials=("solid oak", "honed stone", "lacquered timber"),
         decor="a tray for keys, one ceramic, and a single framed piece or mirror at eye level",
         limits="one ceiling fixture, one wall light or table lamp, one potted floor plant",
         forbid="no sofa, no bed, no dining table, no desk, no TV, no kitchen cabinetry, no sanitaryware",
@@ -738,9 +751,10 @@ ROOM_BRIEFS = {
             "low media unit, warm layered light, moisture-tolerant finishes"
         ),
         hero=(
-            "The seating group is the hero piece: one generous sofa in a hard-wearing "
-            "fabric with a low table on a grounded rug"
+            "The seating group is the hero piece: one generous sofa in {material} "
+            "with a low table on a grounded rug"
         ),
+        materials=("hard-wearing wool", "brushed cotton canvas", "worn leather"),
         decor="layered cushions, a folded throw, one large artwork, and one tight group per surface",
         limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
         forbid="no bed, no dining suite, no kitchen cabinetry, no sanitaryware",
@@ -885,7 +899,23 @@ def build_gen_klein_interior_prompt(
         return build_floor_plan_prompt(design_style=style, color_rule=color_rule)
 
     brief = room_brief(room_type)
+    # Two independent axes, so the combinations multiply instead of moving in
+    # lockstep: three layouts against three material directions is nine
+    # distinguishable rooms per style, not three.
+    #
+    # The material axis is also the answer to a subtler cause of sameness. The
+    # hero used to offer the model a choice — "in stone, solid timber or slim
+    # metal and glass" — and a prompt that lists alternatives gets the model's
+    # favourite one every single time. Naming exactly one material per render
+    # is what a designer would do anyway, and it costs fewer tokens than the
+    # list it replaces.
     layout = brief["layouts"][variation_index % len(brief["layouts"])]
+    hero = brief["hero"]
+    materials = brief.get("materials")
+    if materials:
+        hero = hero.format(
+            material=materials[(variation_index // len(brief["layouts"])) % len(materials)]
+        )
     styling = (
         f"- COLOR: {color_rule}, lightest over the large fields.\n"
         if compact
@@ -915,8 +945,13 @@ def build_gen_klein_interior_prompt(
         f"LIMITS: {brief['limits']}; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
         f"- Resolve {brief['programme']}. Take furniture count and scale from the space.\n"
-        f"- Designer furniture, honest materials. {brief['hero']}.\n"
-        f"- LAYOUT: {layout} Align art and lighting with the furniture.\n"
+        f"- Designer furniture, honest materials. {hero}.\n"
+        # The spacing rule is scaffold rather than per-room because the failure
+        # is general: pieces crowding the front of the frame, too close to each
+        # other and to the camera, which reads as a room that was assembled
+        # rather than designed.
+        f"- LAYOUT: {layout} Space every piece clear of its neighbours, and align "
+        "art and lighting with the furniture.\n"
         f"{styling}"
         "- Keep walkways and door swings clear; no clutter or duplicates.\n"
         "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
