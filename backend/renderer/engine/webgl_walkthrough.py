@@ -126,7 +126,9 @@ def _forced_dining_pose(self, selected, position, structural_yaws):
     in the doorway regardless. Returns None when the room has nowhere, and the
     caller then leaves the floor open.
     """
-    keepout = self.entrance_keepout()
+    # Every door, not only the one filed as the entrance — see
+    # `RoomFurnisher.dining_keepout`.
+    keepout = self.dining_keepout()
     safe_room = self.poly.buffer(-0.10)
     if safe_room.is_empty:
         return None
@@ -166,14 +168,28 @@ def _forced_dining_pose(self, selected, position, structural_yaws):
             if any(footprint.intersects(zone) for zone in keepout):
                 continue
             # Nothing else is a veto here, so the score is what keeps the result
-            # sensible: stay near where the room wanted the table, and prefer
-            # the position that overlaps the least of what is already down.
+            # sensible: stay near where the room wanted the table, prefer the
+            # position that overlaps the least of what is already down, and
+            # stand back from the doorways rather than merely outside them.
+            #
+            # That last term matters even on a last-resort path. Without it this
+            # settles for the first legal spot it scores well on, which is
+            # routinely four centimetres from a door — technically clear, and
+            # still a table you edge past to get in.
             overlap = sum(
                 footprint.intersection(placed).area
                 for placed in self.placed
                 if footprint.intersects(placed)
             )
-            score = -overlap * 1.6 - float(np.linalg.norm(centre - anchor)) * 0.22
+            clearance = min(
+                (float(footprint.distance(zone)) for zone in keepout),
+                default=1.2,
+            )
+            score = (
+                -overlap * 1.6
+                - float(np.linalg.norm(centre - anchor)) * 0.22
+                + min(clearance, 1.20) * 1.40
+            )
             if best is None or score > best[0]:
                 best = (score, centre, candidate_yaw, footprint)
 
@@ -561,12 +577,15 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                     float(sofa["width"]),
                     float(sofa["depth"]),
                 )
-    walkways = [
-        zone for zone in (
-            list(getattr(self, "entrance_zones", ()))
-            + list(getattr(self, "route_zones", ()))
-            + list(getattr(self, "circulation_zones", ()))
-        )
+    # Where a table may not stand, at all: the entrance, the routes through the
+    # room, and the standing space in front of every door. `dining_keepout` no
+    # longer depends on a door having been *classified* as the entrance, which
+    # is what let a table land in front of the apartment door on plans where the
+    # front door touches two rooms and is therefore filed as internal.
+    forbidden = self.dining_keepout()
+    # And where it should merely stand well back from, as a score.
+    walkways = forbidden + [
+        zone for zone in getattr(self, "circulation_zones", ())
         if zone is not None and not zone.is_empty
     ]
 
@@ -597,6 +616,10 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                         preferred_footprint.intersects(placed)
                         for placed in self.placed
                     )
+                    and not any(
+                        preferred_footprint.intersects(zone)
+                        for zone in forbidden
+                    )
                     # This shortcut takes the room's preferred spot without
                     # scoring anything, which is right when that spot is good
                     # and is how the table kept landing in the walkway when it
@@ -617,6 +640,7 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
             yaws=structural_yaws,
             beside=seating,
             clear_of=walkways,
+            forbid=forbidden,
         )
 
     selected = None
@@ -709,6 +733,10 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                             for zone in self.door_zones
                         )
                         and not any(
+                            shifted_footprint.intersects(zone)
+                            for zone in forbidden
+                        )
+                        and not any(
                             shifted_footprint.intersects(placed)
                             for placed in self.placed
                         )
@@ -775,6 +803,8 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                     if not candidate.within(safe_room) or any(
                         candidate.intersects(zone) for zone in self.door_zones
                     ) or any(
+                        candidate.intersects(zone) for zone in forbidden
+                    ) or any(
                         candidate.intersects(placed) for placed in self.placed
                     ) or standoff(candidate) < room_to_walk:
                         break
@@ -802,10 +832,10 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
     # is always the same: a table across the way in. So the rule is stated once,
     # last, where nothing can get past it. If a pose lands here still standing
     # in the entrance, no table is placed at all.
-    if self.blocks_entrance(pose["footprint"]):
+    if any(pose["footprint"].intersects(zone) for zone in forbidden):
         print(
             "[WALK] Dining pose in "
-            f"'{self.config.get('name', 'room')}' fell inside the entrance; "
+            f"'{self.config.get('name', 'room')}' fell in a doorway; "
             "leaving the floor open."
         )
         return None

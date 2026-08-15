@@ -3015,6 +3015,52 @@ class RoomFurnisher:
             for zone in self.entrance_keepout(margin)
         )
 
+    def door_approach_zones(self, depth=1.30, spread=0.30):
+        """Standing room in front of every door in this room.
+
+        `entrance_zones` only exists where a door was *classified* as the way
+        into the home, and that classification can be wrong in a way nobody
+        drawing a plan would ever suspect. A door belongs to the entrance only
+        if it reached exactly one room; draw the flat with an entry hall and a
+        living room meeting at the front wall, and the front door lands within
+        tolerance of both, counts as internal, and the room gets no guard at
+        all. Which is how a dining table ends up squarely in front of the
+        apartment door with every check in this file passing.
+
+        So the dining rules stop depending on that classification. A table in
+        front of a door is wrong whichever door it is — you cannot open it, and
+        the people coming through it arrive in the middle of dinner — and
+        `door_axes` records every one of them.
+        """
+        zones = []
+        for axis in getattr(self, "door_axes", ()):
+            centre = np.asarray(axis["c"], dtype=float)
+            normal = np.asarray(axis["normal"], dtype=float)
+            tangent = np.asarray(axis["tangent"], dtype=float)
+            half = float(axis["half"]) + spread
+            approach = Polygon([
+                (point[0], point[1])
+                for point in (
+                    centre + tangent * half,
+                    centre + tangent * half + normal * depth,
+                    centre - tangent * half + normal * depth,
+                    centre - tangent * half,
+                )
+            ])
+            if approach.is_valid and not approach.is_empty:
+                zones.append(approach)
+        return zones
+
+    def dining_keepout(self, margin=0.20):
+        """Every piece of floor a dining table may not stand on.
+
+        The entrance and the routes through the room, which nothing may block,
+        plus the swing and standing space of every other door. A table is the
+        largest thing placed in a home and the last, so it is the piece that
+        ends up wherever the room has not been told to keep clear.
+        """
+        return self.entrance_keepout(margin) + self.door_approach_zones()
+
     @property
     def wants_media(self):
         """Whether a television belongs in this room at all.
@@ -3410,13 +3456,15 @@ class RoomFurnisher:
         return worst * 6.0
 
     def find_open_pose(self, width, depth, preferred=None, yaws=None,
-                       beside=None, clear_of=()):
+                       beside=None, clear_of=(), forbid=()):
         """Find the best empty interior zone for a complete furniture group.
 
         `beside` names a piece of furniture the group belongs *next to* — the
         seating, for a dining table sharing a room with it. `clear_of` names
         zones it should stand well back from rather than merely outside: the
-        entrance, and the routes through the room.
+        entrance, and the routes through the room. `forbid` names zones it may
+        not touch at all, on top of the room's own keep-clear list, for a caller
+        whose rules are stricter than the room's.
 
         Both change what "best" means, and they have to, because the default
         scoring wants the opposite of what a dining table wants. It rewards
@@ -3479,6 +3527,8 @@ class RoomFurnisher:
                 if not fp.within(safe_room):
                     continue
                 if any(fp.intersects(zone) for zone in self.door_zones):
+                    continue
+                if any(fp.intersects(zone) for zone in forbid):
                     continue
                 if any(fp.intersects(placed) for placed in self.placed):
                     continue
@@ -3815,15 +3865,26 @@ class RoomFurnisher:
         chair_builder = self.furniture_builder("armchair", build_armchair)
         table_builder = self.furniture_builder("coffee_table", build_coffee_table)
         tv_builder = self.furniture_builder("tv_unit", build_tv_unit)
+        # Decide up-front whether this room will also host dining, so the sofa
+        # can be zoned to one end instead of centring and stranding the space
+        # the dining table needs. Mirrors the gate used further below.
+        self.config["_livinai_expects_dining"] = self.hosts_dining
         sofa_width = (
             2.60
             if self.poly.area >= 28.0
             else 2.35 if self.poly.area >= 18.0 else 2.10
         )
-        # Decide up-front whether this room will also host dining, so the sofa
-        # can be zoned to one end instead of centring and stranding the space
-        # the dining table needs. Mirrors the gate used further below.
-        self.config["_livinai_expects_dining"] = self.hosts_dining
+        # A room doing two jobs furnishes smaller for both.
+        #
+        # The seating was sized from floor area alone, as though the room had
+        # only the sofa in it, and the dining table — placed last, and the
+        # largest thing in the room — got whatever was left. Which is how it
+        # ended up in the only clear floor remaining, in front of a door.
+        #
+        # A room that eats gives the seating group a size down. Nobody notices
+        # 25 cm off a sofa; everybody notices a dining table in the hall.
+        if self.hosts_dining:
+            sofa_width = min(sofa_width, 2.35 if self.poly.area >= 30.0 else 2.10)
         anchor_slots = self.living_anchor_slots(sofa_width)
         sofa = (
             self.against_wall(
@@ -4608,8 +4669,25 @@ class RoomFurnisher:
         the room's whole job is receiving people and you receive them facing
         them. Everything after it is a side, taken in order of length.
         """
+        # Windows count as wall here, and that is deliberate.
+        #
+        # `wall_slots` treats glazing as blocking, which is right for a wardrobe
+        # or a media unit and wrong for a sofa. Backing the seating onto a window
+        # is not a compromise in a reception room — it is what these rooms
+        # usually do, because it leaves the long solid wall free for the unit
+        # and puts the light behind the people sitting rather than in their
+        # eyes. Excluding glazed walls was also making the suite fall down its
+        # size ladder in exactly the bright rooms it should look best in: a
+        # salon with two windows had two of its four walls disqualified.
+        try:
+            runs = self.wall_slots(include_windows=True)
+        except TypeError:
+            # The engine's own `wall_slots` takes no arguments; the exporter
+            # replaces it with one that does. Either is fine here.
+            runs = self.wall_slots()
+
         sides = []
-        for slot in self.wall_slots():          # already longest-first
+        for slot in runs:                       # already longest-first
             if any(
                 float(np.dot(slot["n"], kept["n"])) > 0.92
                 for kept in sides
@@ -4821,6 +4899,7 @@ class RoomFurnisher:
         instead; a "Salon + Dining" always does, and its suite gives up the
         closing chairs so the table has an end of the room to itself.
         """
+        area = float(self.poly.area)
         dining = self.hosts_dining
         group = self.place_salon_group(dining=dining)
         if group is None:
@@ -4871,6 +4950,45 @@ class RoomFurnisher:
                  n=axis_y, s=axis_x, w=principal["w"], d=principal["d"]),
             w=min(1.60, float(principal["w"]) * 0.72),
         )
+
+        # The unit every salon has and this one did not.
+        #
+        # A reception room is not only seating. There is a long case piece
+        # against the solid wall — a buffet, a console, a display cabinet,
+        # whatever the household calls it — and it is where the good glasses and
+        # the serving dishes live, which is most of what the room is used for.
+        # Leaving it out was why a finished salon still read as a showroom of
+        # sofas: nothing in it belonged to anybody.
+        #
+        # It goes on a solid wall rather than the suite's, and never on glazing,
+        # so `wall_slots` is asked in its ordinary form here.
+        unit_slots = [
+            slot for slot in self.wall_slots()
+            if float(np.dot(slot["n"], axis_y)) < 0.55
+        ]
+        unit = (
+            self.against_wall(
+                self.furniture_builder("sideboard", build_sideboard),
+                slots=unit_slots, w=min(1.85, max(1.10, area * 0.055)), d=0.46,
+            )
+            or self.against_wall(
+                self.furniture_builder("sideboard", build_sideboard),
+                slots=unit_slots, w=1.10, d=0.42,
+            )
+        )
+        if unit is not None:
+            # A mirror over the buffet rather than a second picture: it is what
+            # goes there, and it doubles the light a formal room is showing off.
+            self.add(
+                build_round_mirror(
+                    self.P, diameter=min(0.86, float(unit["w"]) * 0.55), z=1.42
+                ),
+                np.asarray(unit["pos"], dtype=float)
+                - np.asarray(unit["n"], dtype=float) * (float(unit["d"]) / 2 + 0.01),
+                float(unit["yaw"]),
+                block=False,
+                check=False,
+            )
 
         if dining:
             self.place_dining_zone() or self.place_dining_zone(compact=True)
