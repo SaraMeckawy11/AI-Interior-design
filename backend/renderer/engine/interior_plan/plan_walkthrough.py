@@ -3051,6 +3051,78 @@ class RoomFurnisher:
                 zones.append(approach)
         return zones
 
+    #: The smallest dining zone this engine will ever place — a two-seat table
+    #: at the tightest pull-back allowance on the ladder, which is 1.10 x 0.78 m
+    #: of table plus 0.50 m to get a chair out on each side. If this does not
+    #: fit, no dining zone does.
+    SMALLEST_DINING_ZONE = (2.10, 1.78)
+
+    def dining_space_exists(self, reserved=None, zone=None):
+        """Whether a dining zone would still fit with `reserved` floor taken.
+
+        Asked *before* a seating group is committed, so a room that has to do
+        both jobs can choose a suite it can afford rather than discovering
+        afterwards that the table has nowhere to go. That was the failure this
+        exists for: the suite was sized from the room, placed, and only then was
+        the table looked for — and in a room that could hold a large suite or a
+        table but not both, the suite always won, because it went first.
+
+        Cheap on purpose. It answers "is there room at all", not "where", and
+        the real search runs later with the full ladder of sizes and shapes.
+        """
+        width, depth = zone or self.SMALLEST_DINING_ZONE
+        safe_room = self.poly.buffer(-0.12)
+        if safe_room.is_empty:
+            return False
+        blocked = list(self.placed) + list(self.door_zones) + self.dining_keepout()
+        if reserved is not None and not reserved.is_empty:
+            blocked.append(reserved)
+
+        # The free floor, worked out once. Testing a candidate is then a single
+        # `within` rather than a scan of every zone in the room, which is what
+        # makes it affordable to sample finely enough to be trusted.
+        free = safe_room
+        for taken in blocked:
+            if taken is None or taken.is_empty:
+                continue
+            free = free.difference(taken)
+        if free.is_empty:
+            return False
+
+        yaws = [yaw_facing(slot["n"]) for slot in self.wall_slots()[:4]] or [0.0]
+        axes = []
+        for yaw in yaws:
+            axis = float(yaw) % math.pi
+            if not any(abs(math.sin(axis - known)) < 0.08 for known in axes):
+                axes.append(axis)
+
+        parts = list(getattr(free, "geoms", [free]))
+        # Nowhere near big enough is the common answer, and it is free to give.
+        if not any(part.area >= width * depth for part in parts):
+            return False
+
+        # A fine step, because this is a yes/no question and a "no" costs the
+        # room its dining table. The last one was 0.30 m and stepped straight
+        # over a 0.25 m window in a room that genuinely had space: the same
+        # mistake as the search grid in `find_open_pose`, in a place where it is
+        # even less forgiving — there, a coarse grid finds a worse position, and
+        # here it reports there is none.
+        step = 0.12
+        for part in parts:
+            if part.area < width * depth:
+                continue
+            minx, miny, maxx, maxy = part.bounds
+            for axis in axes:
+                for x in np.arange(minx, maxx + 0.01, step):
+                    for y in np.arange(miny, maxy + 0.01, step):
+                        footprint = footprint_poly(
+                            np.array([float(x), float(y)], dtype=float),
+                            axis, width, depth,
+                        )
+                        if footprint.within(part):
+                            return True
+        return False
+
     def dining_keepout(self, margin=0.20):
         """Every piece of floor a dining table may not stand on.
 
@@ -3597,8 +3669,17 @@ class RoomFurnisher:
             return None
         return dict(pos=best[1], yaw=best[2], footprint=best[3])
 
-    def place_dining_zone(self, position=None, yaw=None, compact=False):
-        """Place one coordinated dining composition as a guaranteed group."""
+    def place_dining_zone(self, position=None, yaw=None, compact=False,
+                          guarantee=False):
+        """Place one coordinated dining composition as a guaranteed group.
+
+        `guarantee` is honoured by the exporter's replacement for this method,
+        which has a forced last-resort placement to fall back on. It is accepted
+        and ignored here so that callers can ask for it without having to know
+        which of the two is installed — this one already tries as hard as it
+        can, and a `TypeError` from the engine-only path would be swallowed by
+        the try/except around every recipe and lose the rest of the room.
+        """
         table_builder = self.furniture_builder(
             "dining_table", build_dining_table
         )
@@ -4794,7 +4875,7 @@ class RoomFurnisher:
             ))
         return built
 
-    def place_salon_group(self, dining=False):
+    def place_salon_group(self, dining=False, require_dining_space=False):
         """Place one complete seating suite, backed onto the best wall.
 
         The suite is positioned as a single object: its footprint is tested
@@ -4810,8 +4891,17 @@ class RoomFurnisher:
         if not sides:
             return None
 
-        for template in self.salon_group_templates(area, dining=dining):
+        templates = self.salon_group_templates(area, dining=dining)
+        for index, template in enumerate(templates):
             sofa_width = template["pieces"][0]["size"][0]
+            # Normally the last rung is placed whatever else it costs, because a
+            # salon with no seating in it is not a salon. When the caller says
+            # the table comes first, every rung has to earn its place instead,
+            # and coming back with nothing is a real answer — it means the room
+            # should seat the table and then fit what it can around it.
+            last_resort = (
+                index == len(templates) - 1 and not require_dining_space
+            )
             for slot in sides:
                 if slot["len"] + 0.45 < sofa_width:
                     continue                      # wall too short for the sofa
@@ -4828,6 +4918,15 @@ class RoomFurnisher:
                 # The suite as one object, against the room and against
                 # everything already standing in it.
                 if not self._ok(footprint, block=True, avoid_doors=True):
+                    continue
+                # A room that also dines does not get to spend all of itself on
+                # seating. This suite fits — the question is whether the table
+                # still would once it is standing there, and if not, the next
+                # suite down is asked instead. Decreasing the seating is the
+                # right way to find the room; leaving the table out is not.
+                if dining and not last_resort and not self.dining_space_exists(
+                    reserved=footprint
+                ):
                     continue
 
                 placed = []
@@ -4872,6 +4971,35 @@ class RoomFurnisher:
                 )
         return None
 
+    def place_minimal_seating(self):
+        """A sofa and something to put a cup on, for a room with room for that.
+
+        The floor left over in a small salon once its table is down. Not a
+        composition and not pretending to be one — the alternative here is an
+        empty half-room, and a sofa facing a low table is what somebody would
+        actually put in the space.
+        """
+        sofa_builder = self.furniture_builder("sofa", build_sofa)
+        sofa = (
+            self.against_wall(sofa_builder, w=1.85, d=0.90)
+            or self.against_wall(sofa_builder, w=1.55, d=0.86)
+            or self.against_wall(sofa_builder, w=1.30, d=0.82)
+        )
+        if sofa is None:
+            return None
+        facing = np.asarray(sofa["n"], dtype=float)
+        centre = np.asarray(sofa["pos"], dtype=float) + facing * 0.92
+        self.place_rug(centre, float(sofa["yaw"]), float(sofa["w"]) + 0.40, 1.55)
+        self.add(
+            self.furniture_builder("coffee_table", build_coffee_table)(
+                self.P, w=min(1.00, float(sofa["w"]) * 0.58), d=0.50
+            ),
+            centre,
+            float(sofa["yaw"]),
+        )
+        self.art_on(sofa, w=min(1.20, float(sofa["w"]) * 0.70))
+        return sofa
+
     def furnish_salon(self):
         """Furnish the formal reception room, the way one is actually arranged.
 
@@ -4901,13 +5029,45 @@ class RoomFurnisher:
         """
         area = float(self.poly.area)
         dining = self.hosts_dining
-        group = self.place_salon_group(dining=dining)
+
+        # Seating first, but only on terms that leave the table a place to go.
+        group = self.place_salon_group(
+            dining=dining, require_dining_space=dining
+        )
+        seated_first = group is not None
+
+        table_placed = False
+        if dining and not seated_first:
+            # No suite at any size leaves room for the table, so the order is
+            # wrong rather than the sizes. "Salon + Dining" is an explicit
+            # answer to an explicit question and the table is the half that
+            # cannot be shrunk out of existence, so it goes down first and the
+            # seating takes what is left. In a room this tight that is a sofa
+            # and a pair of chairs, which is the honest answer.
+            table_placed = bool(
+                self.place_dining_zone()
+                or self.place_dining_zone(compact=True)
+                or self.place_dining_zone(compact=True, guarantee=True)
+            )
+            group = self.place_salon_group(dining=dining)
+
         if group is None:
-            # No suite fits at any size. A lounge is a worse salon than a salon
-            # and a far better room than half of one — and it still has no
-            # television, because that is decided by the room and not the
-            # recipe.
-            self.furnish_living()
+            if table_placed:
+                # The table is already down and nothing is left for a suite.
+                # Falling through to the lounge recipe here would place a second
+                # dining set, because that recipe asks `hosts_dining` too and
+                # this room says yes. A sofa with a low table in front of it is
+                # what the room can honestly hold.
+                self.place_minimal_seating()
+            else:
+                # No suite fits at any size and there is no table either. A
+                # lounge is a worse salon than a salon and a far better room
+                # than half of one — and it still has no television, because
+                # that is decided by the room and not the recipe.
+                self.furnish_living()
+            if self.wants_plants:
+                self.in_corner(build_plant)
+            self.pendant()
             return
 
         template = group["template"]
@@ -4990,8 +5150,20 @@ class RoomFurnisher:
                 check=False,
             )
 
-        if dining:
-            self.place_dining_zone() or self.place_dining_zone(compact=True)
+        if dining and not table_placed:
+            # The table is not optional. The suite above has already stepped
+            # down its size to leave room for it — see `dining_space_exists` —
+            # and this walks the rest of the way: the full zone, then a compact
+            # one, then the guaranteed placement.
+            #
+            # What none of them will do is stand it in a doorway. The guarantee
+            # is over the seating, which can be made smaller and moved, not over
+            # the way in and out of the room, which cannot.
+            (
+                self.place_dining_zone()
+                or self.place_dining_zone(compact=True)
+                or self.place_dining_zone(compact=True, guarantee=True)
+            )
 
         if self.wants_plants:
             self.in_corner(build_plant)
