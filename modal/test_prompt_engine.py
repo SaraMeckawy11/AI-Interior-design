@@ -50,9 +50,19 @@ PALETTE = {
 #: had been measured. Against the real tokenizer these briefs run 1.34–1.38,
 #: so 1.45 was rejecting briefs that fit — 1.42 keeps a margin over the
 #: observed worst case without inventing 5% of phantom length.
+#: The chat wrapper the engine adds around the brief, measured rather than
+#: guessed. Rendering the model's own chat_template.jinja for one empty user
+#: message gives exactly:
+#:
+#:     '<|im_start|>user\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+#:
+#: which is 12 tokens. This was 32, invented for safety before it was checked,
+#: and those 20 phantom tokens were rejecting briefs that fit — which is what
+#: pushed an earlier attempt into cutting real quality rules to make room. 16
+#: keeps a margin over the measurement without inflating it threefold.
 TOKEN_CEILING = 512
 TOKENS_PER_WORD = 1.42
-TEMPLATE_OVERHEAD = 32
+TEMPLATE_OVERHEAD = 16
 
 
 def _real_tokenizer():
@@ -290,6 +300,90 @@ def test_walkthrough_lock_also_holds_window_shape():
     prompt = interior("Living Room", source="walkthrough").lower()
     assert "window" in prompt
     assert "outline and proportions" in prompt
+
+
+#: The four rooms a television belongs in.
+_TV_ROOMS = ["Living Room", "Living + Dining", "Basement", "Full Apartment"]
+
+#: Materials that were surviving from the source photo onto the redesigned
+#: walls. An earlier attempt listed these *in the brief* in order to forbid
+#: them, and the renders got worse: the text encoder reads the nouns and barely
+#: the negation around them, so naming a material is a way of asking for it.
+#: The repainting instruction must stay positive.
+_UNWANTED_WALL_MATERIALS = ["brick", "raw concrete", "exposed stone", "old paint"]
+
+
+def test_tv_rooms_count_the_sofa_positively():
+    """Two sofas appeared, the second one over the media unit.
+
+    The fix is the count, stated as a positive. Writing "no second sofa" would
+    put the word 'sofa' into an exclusion the encoder mostly reads as 'sofa'.
+    """
+    for room in _TV_ROOMS:
+        programme = pe.room_brief(room)["programme"].lower()
+        assert "one sofa" in programme, f"{room} does not count the sofa"
+        forbid = pe.room_brief(room)["forbid"].lower()
+        assert "sofa" not in forbid, (
+            f"{room} forbids a sofa by name, which tends to summon one: {forbid}"
+        )
+
+
+def test_living_room_seats_the_sofa_by_the_television():
+    """The variant that caused the bug aimed the sofa at the media wall.
+
+    'Set the sofa square to the longest solid wall' is an instruction to put
+    the sofa exactly where the TV and its unit go, because the longest solid
+    wall is the media wall.
+    """
+    for layout in pe.room_brief("Living Room")["layouts"]:
+        lowered = layout.lower()
+        assert "longest solid wall" not in lowered, f"still seats the sofa on the media wall: {layout}"
+        # "a console table behind the sofa" merged with the media console.
+        assert "console" not in lowered, f"layout mentions a console: {layout}"
+        assert "tv" in lowered, f"layout does not place the seating by the TV: {layout}"
+
+
+def test_walls_are_repainted_without_naming_what_to_avoid():
+    prompt = interior("Living Room")
+    lowered = prompt.lower()
+    # Positive instruction, in the architecture block and again where colour is
+    # actually assigned.
+    assert "every surface is refinished" in lowered
+    assert "across every wall, ceiling and floor" in lowered
+    # And the brief must not recite the materials it is trying to get rid of.
+    for material in _UNWANTED_WALL_MATERIALS:
+        assert material not in lowered, (
+            f"the brief names '{material}', which asks for it rather than removing it"
+        )
+
+
+def test_no_room_brief_names_an_unwanted_wall_material():
+    """Applies to every room, not just the one that was reported."""
+    for room in APP_ROOM_TYPES:
+        for variation in range(3):
+            lowered = interior(room, variation=variation).lower()
+            for material in _UNWANTED_WALL_MATERIALS:
+                assert material not in lowered, f"{room} brief names '{material}'"
+
+
+def test_quality_rules_survive_in_every_brief():
+    """The regression that made the reverted attempt worse than the bug.
+
+    Paying for new clauses by deleting these is what turned two specific
+    failures into a general drop in quality, so they are pinned here.
+    """
+    required = [
+        "no clutter or duplicates",
+        "nothing on the floor",
+        "all finishes one scheme",
+        "take furniture count and scale from the space",
+        "leave most surfaces bare",
+        "align art and lighting with the furniture",
+    ]
+    for room in APP_ROOM_TYPES:
+        lowered = interior(room).lower()
+        for rule in required:
+            assert rule in lowered, f"{room} brief lost the quality rule '{rule}'"
 
 
 def test_photo_lock_fixes_both_the_shell_and_the_openings():

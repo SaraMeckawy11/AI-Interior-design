@@ -228,8 +228,14 @@ _ARCHITECTURE_LOCKS = {
         "over, or hide one behind drapery.\n"
         "- Doors and all other openings are fixed the same way: add, remove, move "
         "or resize none.\n"
+        # The tail of this line is the other half of the shell lock. "Every wall
+        # stays on the same pixels" was read as keeping what the wall was *made
+        # of*, and rooms came back with the original masonry still on them under
+        # new furniture. It is stated in the positive and without naming a
+        # single unwanted material: listing the finishes that were surviving, in
+        # order to forbid them, only painted them back on.
         "- Camera, lens, framing and perspective stay identical. Change finishes "
-        "and movable contents only.\n"
+        "and movable contents only: every surface is refinished.\n"
     ),
     # A frame captured out of the 3D walkthrough. Its openings are the user's own
     # plan geometry, already exactly where they asked for them — the problem here
@@ -392,9 +398,16 @@ ROOM_BRIEFS = {
         # The everyday sitting room, so it gets the television — named as a
         # wall-mounted set over a low unit, because "a TV" on its own is
         # rendered as a floating black rectangle with nothing under it.
+        # Counted, and stated as a positive. "Sofa and complementary seating"
+        # left the number open and the model filled it with a second sofa, which
+        # then had to stand somewhere — usually against the media wall, in front
+        # of the television. Saying "one sofa and one or two lounge chairs"
+        # fixes the count without ever writing the words "no second sofa": a
+        # diffusion text encoder reads the nouns and barely the negation, so
+        # forbidding a sofa by name is a good way to get another one.
         programme=(
-            "a conversation group of sofa and complementary seating, and a "
-            "wall-mounted TV centred over a low media unit on a solid wall"
+            "one sofa and one or two lounge chairs facing a wall-mounted TV on a "
+            "low media unit"
         ),
         hero=(
             "The coffee table is the hero piece: one sculptural low table in stone, "
@@ -406,16 +419,22 @@ ROOM_BRIEFS = {
         ),
         limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
         forbid="no bed, no desk, no dining table, no kitchen cabinetry, no sanitaryware",
+        # The first of these caused the reported failure outright: the longest
+        # solid wall is the media wall, so "set the sofa square to the longest
+        # solid wall" is an instruction to put the sofa where the television is.
+        # The second offered "a console table behind the sofa", which merges
+        # with the media console. All three now seat the sofa by where the TV
+        # is, which is how the arrangement is actually decided.
         layouts=(
-            "Set the sofa square to the longest solid wall, with the rug under the front legs of every seat.",
-            "Float the seating off the walls around the rug, with a console table behind the sofa.",
-            "Run an L-shaped sofa into the corner furthest from the door, with the lounge chairs facing it.",
+            "Set the sofa on the wall facing the TV, rug under the front legs of every seat.",
+            "Float the sofa off the wall facing the TV, lounge chairs at right angles across the rug.",
+            "Run an L-shaped sofa into the corner that faces the TV, lounge chairs closing the group.",
         ),
     ),
     "living + dining": dict(
         programme=(
-            "one room zoned twice - a sofa group facing a wall-mounted TV over a "
-            "low media unit at one end, a dining table and chairs at the other"
+            "one room zoned twice - one sofa facing a wall-mounted TV over a low "
+            "media unit at one end, a dining table and chairs at the other"
         ),
         hero=(
             "The dining table is the hero piece: one solid timber or stone table "
@@ -715,8 +734,8 @@ ROOM_BRIEFS = {
     ),
     "basement": dict(
         programme=(
-            "a zoned multipurpose room: a sofa group facing a wall-mounted TV "
-            "over a low media unit, warm layered light, moisture-tolerant finishes"
+            "a zoned multipurpose room: one sofa facing a wall-mounted TV over a "
+            "low media unit, warm layered light, moisture-tolerant finishes"
         ),
         hero=(
             "The seating group is the hero piece: one generous sofa in a hard-wearing "
@@ -736,8 +755,8 @@ ROOM_BRIEFS = {
     # and the model will happily furnish an open plan as a single living room.
     "full apartment": dict(
         programme=(
-            "each zone resolved for its own use - sitting with a wall-mounted TV "
-            "over a media unit, dining, cooking, circulation - as one scheme"
+            "each zone for its own use - sitting with one sofa facing a "
+            "wall-mounted TV over a media unit, dining, cooking, circulation"
         ),
         hero=(
             "Give each zone one hero piece, and let one flooring and one wall finish "
@@ -872,7 +891,11 @@ def build_gen_klein_interior_prompt(
         if compact
         else (
             f"- DECORATE: {brief['decor']}. Leave most surfaces bare; nothing on the floor.\n"
-            f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on "
+            # "across every wall, ceiling and floor" is the second, cheap half of
+            # the repainting fix: it says at the point colour is assigned that
+            # the walls are among the things receiving it.
+            f"- COLOR: {color_rule} across every wall, ceiling and floor: "
+            "lightest over the large fields, mid-tones on "
             "mid-sized surfaces, the deepest in a few touches, each echoed two or "
             "three times. All finishes one scheme.\n"
         )

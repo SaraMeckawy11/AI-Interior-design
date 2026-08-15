@@ -1510,7 +1510,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v24-windows-untouchable",
+        "promptEngine": "gen-klein-per-room-briefs-v26-positive-counts-and-refinish",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1521,7 +1521,16 @@ def health():
         "television": {
             "briefed": ["living room", "living + dining", "basement", "full apartment"],
             "refused": "every other room, by name in its exclusions",
+            # Counted in the positive — "one sofa and one or two lounge chairs"
+            # — rather than by forbidding a second one. Naming a piece in order
+            # to exclude it tends to summon it, so the count does the work.
+            "seating": "one-sofa-counted-positively-facing-the-tv",
         },
+        # Walls kept the source photo's own masonry because "the shell is fixed"
+        # was read as fixing the material too. Stated positively, and without
+        # listing the finishes being replaced — writing those names into the
+        # brief painted them back on.
+        "surfaces": "refinished-positively-no-unwanted-materials-named",
         # Each room type now carries its own programme, hero, limits, styling,
         # layout variants and — the part that stops a kitchen being furnished
         # like a living room — its own list of what it must not contain.
