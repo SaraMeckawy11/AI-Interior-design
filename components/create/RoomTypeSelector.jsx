@@ -42,10 +42,8 @@ const RoomTypeSelector = ({
         'Full Apartment',
         'Living Room',
         // The living room that eats, named so nobody has to guess whether a
-        // dining table is coming, and the formal seating room that never does.
+        // dining table is coming.
         'Living + Dining',
-        'Salon',
-        'Salon + Dining',
         'Bedroom',
         'Kitchen',
         'Bathroom',
