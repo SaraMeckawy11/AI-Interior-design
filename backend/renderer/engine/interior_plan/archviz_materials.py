@@ -250,6 +250,11 @@ def floor_material(config, room_type: str, style: str) -> str:
         return "bathroom_tile"
     if "kitchen" in room_key:
         return "bathroom_tile"
+    # A balcony is outside. Nobody lays oak boards out there, and a timber floor
+    # running straight through the glazing is the single thing that makes a
+    # balcony read as an indoor room in the walkthrough.
+    if any(word in room_key for word in ("balcony", "terrace", "veranda")):
+        return "bathroom_tile"
     if "industrial" in style_key:
         return "concrete"
     if any(word in style_key for word in ("classic", "traditional", "rustic")):

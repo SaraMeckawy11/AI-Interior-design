@@ -147,11 +147,11 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
     ):
         major_direction = -major_direction
     room_type = str(self.config.get("room_type", "")).lower()
-    dedicated_dining = "dining" in room_type
-    open_plan_dining = (
-        "living" in room_type
-        and not self.config.get("_plan_has_dining_room", False)
-    )
+    # "Living + Dining" carries both words. It is a seating room that also eats,
+    # so it is zoned and sized as an open plan — the table shares the floor with
+    # a sofa — and not as a dining room, which has the whole room to itself.
+    dedicated_dining = original.is_dedicated_dining_room(room_type)
+    open_plan_dining = original.is_lounge_room(room_type) and not dedicated_dining
     door_entries = list(getattr(self, "door_access_entries", ()))
     circulation_sensitive = open_plan_dining and bool(door_entries)
 
@@ -2160,19 +2160,52 @@ def _room_furnisher_init_with_balconies(self, *args, **kwargs):
                 and not cased
                 and original.entrance_door_at(center)
             )
+            # The entrance figures are the deepest and widest here on purpose,
+            # and they are the half of the front-door guard that scales with the
+            # opening rather than with the room. A double front door reserves
+            # more floor than a single one, because more of the wall swings.
+            #
+            # They were 1.90 m x (width + 0.90 m), which is a person standing
+            # just inside with the door shut behind them. An entrance is used
+            # with the door open, with something in both hands, by more than one
+            # person at a time — so it is 2.70 m x (width + 1.50 m), which is
+            # that same person with room to put the shopping down and turn
+            # round. It stacks with the splayed zone in the engine's own
+            # `__init__`; between them the front door of a flat now keeps the
+            # floor a front door is actually used on.
             corridor_depth = (
                 1.15 if is_balcony
                 else 0.80 if cased
-                else 1.90 if entrance
+                else 2.70 if entrance
                 else 0.95
             )
             corridor_width = (
                 min(opening_width, original.PASSAGE_W) + 0.10
                 if cased
-                else opening_width + 0.90
+                else opening_width + 1.50
                 if entrance
                 else min(opening_width, 1.30) + 0.10
             )
+            if entrance:
+                # Same rule the engine's own entry zone follows: take the
+                # biggest version the room can afford, and fall back no further
+                # than the size this guard already was. A one-room entrance
+                # lobby keeps its console table.
+                room_area = max(float(self.poly.area), 0.01)
+                for depth, span in (
+                    (corridor_depth, corridor_width),
+                    (2.30, opening_width + 1.20),
+                    (1.90, opening_width + 0.90),
+                ):
+                    trial = original.footprint_poly(
+                        center + inward * depth / 2,
+                        original.yaw_facing(inward),
+                        span,
+                        depth,
+                    ).intersection(self.poly)
+                    corridor_depth, corridor_width = depth, span
+                    if trial.area <= room_area * 0.55:
+                        break
             corridor_center = center + inward * corridor_depth / 2
             corridor = original.footprint_poly(
                 corridor_center,
@@ -3928,14 +3961,13 @@ def _place_required_coffee_table(self, sofa):
 def _furnish_aligned_living(self):
     """Normalize the finished seating group around one measured focal axis."""
     _ORIGINAL_FURNISH_LIVING(self)
-    wants_dining = (
-        not self.config.get("_plan_has_dining_room", False)
-        and float(self.poly.area) >= 10.0
-        and not any(
-            phrase in self.brief
-            for phrase in ("no dining", "without dining", "living only")
-        )
-    )
+    # One room in the home eats, and the plan builder already worked out which.
+    # This used to decide again from "no dining room was drawn", at a floor of
+    # 10 m² and with a `guarantee=True` pass at the end that forced a table in
+    # even after the room had refused one — so a second living room, and a
+    # living room barely big enough for its own sofa, both came back with a
+    # dining table jammed into them.
+    wants_dining = self.hosts_dining
     dining_table = _furniture_with_suffix(self, "dining_table")
     if wants_dining and not dining_table:
         # The living/dining allocation is a required zone when the plan has no

@@ -55,6 +55,7 @@ import { COIN_COST, FREE_DESIGNS, coinLabel } from "../../constants/pricing";
 import useRewardedCoins from "../../lib/useRewardedCoins";
 import { LAYOUT, MOTION, RADIUS, SHADOW, SPACING, TYPE, ms } from "../../constants/theme";
 import {
+  DEFAULT_ROOM_SEQUENCE,
   DEFAULT_WALKTHROUGH_SETTINGS,
   DESIGN_PROFILES,
   FLOOR_FINISHES,
@@ -1042,7 +1043,7 @@ export default function WalkthroughScreen() {
   // decorated is a property of the home, and lives in `settings.style`.
   const configFor = (index) => ({
     name: `Room ${index + 1}`,
-    roomType: ROOM_TYPES[index % ROOM_TYPES.length],
+    roomType: DEFAULT_ROOM_SEQUENCE[index % DEFAULT_ROOM_SEQUENCE.length],
   });
 
   const currentPlanSnapshot = useCallback(
@@ -3915,6 +3916,8 @@ const ROOM_ICONS = [
   ["kitchen", "restaurant-outline"],
   ["dining", "restaurant-outline"],
   ["living", "tv-outline"],
+  ["salon", "cafe-outline"],
+  ["lounge", "cafe-outline"],
   ["office", "laptop-outline"],
   ["study", "laptop-outline"],
   ["entry", "enter-outline"],

@@ -1651,6 +1651,77 @@ def circulation_door_at(centre) -> bool:
 #: Room names that mean "this space is a route, not a destination".
 CIRCULATION_ROOM_WORDS = ("hall", "corridor", "entry", "foyer", "landing", "passage")
 
+#: Room names that are furnished as a seating room.
+#:
+#: "Salon" is here because it is what a great many homes call their formal
+#: seating room — the reception room kept for guests, with the sofas around the
+#: walls and no television and, emphatically, no dining table. It furnishes like
+#: a living room and it is never the room that eats; see `hosts_dining`.
+LOUNGE_ROOM_WORDS = ("living", "lounge", "salon", "sitting", "reception", "studio")
+
+#: The floor area below which a room cannot carry a dining group as well as a
+#: seating group.
+#:
+#: A four-seat table with chairs pulled back is about 2.6 m x 2.6 m, and a sofa,
+#: a coffee table and the walking route around them is about eight square metres
+#: more. Under this, one of the two ends up unusable, and it was always the
+#: dining: a table wedged against the sofa with no room to pull a chair out.
+#: A small living room is a living room.
+#:
+#: **These are areas of the built shell, not of the drawn plan.** `build_scene`
+#: divides the scale by `SCALE_BOOST`, and the web exporter divides it again by
+#: `WEB_SPATIAL_BOOST`, so the polygon a furnisher measures is about 1.66x the
+#: area of the room the user drew. 22 m² here is a room drawn at roughly 13 m² —
+#: about the smallest living room that genuinely seats four people at a table.
+#:
+#: This gate used to be 15 in `furnish_living` and then 10 again in the web
+#: exporter's override, which ran second and won: a room drawn at 6 m² was
+#: getting a dining table forced into it.
+LIVING_DINING_MIN_AREA = 22.0
+
+#: The same floor, for a room the user has explicitly labelled as a living room
+#: that dines. An explicit choice is honoured further down than a guess is — the
+#: user can see the room and we cannot — but there is still a size below which
+#: the table has nowhere to go. About 9.5 m² as drawn.
+EXPLICIT_LIVING_DINING_MIN_AREA = 16.0
+
+
+def room_type_key(room_type) -> str:
+    """A room name reduced to the form every rule below matches against."""
+    return str(room_type or "").strip().lower()
+
+
+def is_lounge_room(room_type) -> bool:
+    """Whether this space is furnished as a seating room."""
+    key = room_type_key(room_type)
+    return any(word in key for word in LOUNGE_ROOM_WORDS)
+
+
+def is_dedicated_dining_room(room_type) -> bool:
+    """Whether this space is a dining room and nothing else.
+
+    A name carrying both words — "Living + Dining" — is a seating room that also
+    eats, not a dining room, and it is sized and zoned as the former.
+    """
+    key = room_type_key(room_type)
+    return "dining" in key and not is_lounge_room(key)
+
+
+def is_explicit_dining_lounge(room_type) -> bool:
+    """Whether the user named this room as the seating room that also dines."""
+    key = room_type_key(room_type)
+    return "dining" in key and is_lounge_room(key)
+
+
+#: Seating rooms of the formal kind: the room kept for receiving people.
+FORMAL_LOUNGE_WORDS = ("salon", "reception")
+
+
+def is_formal_lounge(room_type) -> bool:
+    """Whether this seating room is the formal one rather than the everyday one."""
+    key = room_type_key(room_type)
+    return any(word in key for word in FORMAL_LOUNGE_WORDS)
+
 
 def assign_openings(all_room_edges, doors_m, windows_m):
     """Cut door/window spans into EVERY wall edge they touch.
@@ -2796,17 +2867,102 @@ class RoomFurnisher:
                 # So this one is generous on purpose: a real entry zone, not a
                 # threshold. It and the hall passages above are the only guards
                 # left in the plan, so it can afford to be the size the job
-                # actually needs.
-                reach = float(min(2.60, max(1.70, math.sqrt(self.poly.area) * 0.55)))
-                half = max(width, MIN_DOOR_W) / 2.0 + 0.45
-                self.door_zones.append(Point(c[0], c[1]).buffer(1.15))
-                corners = [
-                    c + tangent * half,
-                    c + tangent * half + normal * reach,
-                    c - tangent * half + normal * reach,
-                    c - tangent * half,
-                ]
-                corridor = Polygon([(p[0], p[1]) for p in corners])
+                # actually needs — and it was still not the size the job needs.
+                # Furniture kept landing a stride inside the door.
+                #
+                # Three things changed, and the shape is the important one:
+                #
+                #  * It reaches further in. A generous entry is about the depth
+                #    of a hallway, not the depth of a doormat, and the scaling
+                #    term drives it: a 20 m² room now reserves 3.2 m of approach
+                #    where it reserved 2.5 m, and a big open-plan living room
+                #    reserves the full 3.6 m rather than stopping at 2.6 m.
+                #  * It is wider at the door. Half a metre either side of the
+                #    leaf is what it takes to stand beside the door and open it.
+                #  * It splays. A rectangle guards the line you walk in along;
+                #    it does not guard the turn you make at the end of it, which
+                #    is where the sofa arm or the table corner actually was. The
+                #    zone is a trapezoid now, widening as it goes in, which is
+                #    the shape of the floor an entrance really uses.
+                #
+                # The lower bound is deliberately unchanged. A small entrance
+                # hall is guarded exactly as it was, because in a 4 m² lobby the
+                # old zone was already most of the room and growing it would
+                # leave nowhere for the console table and the mirror that make
+                # it an entrance hall at all. Only rooms with floor to spare
+                # give more of it up.
+                room_span = math.sqrt(max(float(self.poly.area), 0.01))
+                door_half = max(width, MIN_DOOR_W) / 2.0
+                # How far the room actually goes in the direction you walk when
+                # you come in. A room can be large and still be shallow in front
+                # of its front door — a wide living room entered from the long
+                # side — and in one of those, a zone measured only from floor
+                # area reaches the opposite wall and takes the sofa's place with
+                # it. The zone stops well short of the far side, whatever the
+                # area says.
+                probe = LineString([
+                    (float(c[0]), float(c[1])),
+                    (float(c[0] + normal[0] * 60.0), float(c[1] + normal[1] * 60.0)),
+                ]).intersection(self.poly)
+                room_depth = float(getattr(probe, "length", 0.0)) or room_span
+                # The zone as it was, and the zone as it should be. The build
+                # below takes the largest blend of the two that still leaves the
+                # room usable, and the old geometry is the floor: a room that
+                # cannot afford the bigger guard keeps exactly the guard it had,
+                # never less. Growing this must not be able to empty a small
+                # entrance hall of the console table and mirror that make it one.
+                legacy = dict(
+                    reach=float(min(2.60, max(1.70, room_span * 0.55))),
+                    half=door_half + 0.45,
+                    splay=0.0,
+                    radius=1.15,
+                )
+                grown = dict(
+                    # Never shorter than the zone already was, whatever the
+                    # probe says — the point of this change is a bigger guard,
+                    # and the depth clamp is here to stop it overshooting, not
+                    # to shrink it below where it started.
+                    reach=float(max(
+                        legacy["reach"],
+                        min(3.60, room_depth * 0.62, max(1.70, room_span * 0.78)),
+                    )),
+                    half=door_half + 0.52,
+                    splay=float(min(0.85, max(0.0, room_span * 0.22))),
+                    radius=1.45,
+                )
+
+                def _entry_zone(blend):
+                    """The entry zone at `blend` of the way from old to new."""
+                    def value(key):
+                        return legacy[key] + (grown[key] - legacy[key]) * blend
+                    reach, half = value("reach"), value("half")
+                    outer = half + value("splay")
+                    shape = Polygon([
+                        (point[0], point[1])
+                        for point in (
+                            c + tangent * half,
+                            c + tangent * outer + normal * reach,
+                            c - tangent * outer + normal * reach,
+                            c - tangent * half,
+                        )
+                    ])
+                    return shape, value("radius")
+
+                # How much of a room the entrance may claim. A living room with
+                # the front door in it has floor to spare; a 4 m² lobby does
+                # not, and in one the full-size zone is the whole room.
+                budget = float(self.poly.area) * 0.55
+                corridor, radius = _entry_zone(1.0)
+                for blend in (1.0, 0.75, 0.5, 0.25, 0.0):
+                    corridor, radius = _entry_zone(blend)
+                    if not corridor.is_valid or corridor.is_empty:
+                        continue
+                    if (
+                        blend <= 0.0
+                        or corridor.intersection(self.poly).area <= budget
+                    ):
+                        break
+                self.door_zones.append(Point(c[0], c[1]).buffer(radius))
                 if corridor.is_valid and not corridor.is_empty:
                     self.door_zones.append(corridor)
                     self.entrance_zones.append(corridor)
@@ -2818,6 +2974,41 @@ class RoomFurnisher:
     @property
     def airy(self):
         return self.design_profile.lower() == "airy"
+
+    @property
+    def hosts_dining(self):
+        """Whether this room is the one room in the home that eats.
+
+        The plan builder decides this once, with every room in view, and hands
+        the answer down in the config — see `_dining_hosts` in `build_scene`.
+        Every dining gate in the furnisher asks here rather than re-deriving it
+        from "no dining room was drawn", which is how a flat with two seating
+        rooms used to end up with two dining tables.
+
+        The fallback path is for a furnisher built directly, outside a plan, by
+        a test or a single-room export. There is no second room to conflict
+        with, so it keeps the old rule.
+        """
+        room_type = self.config.get("room_type", "")
+        if is_dedicated_dining_room(room_type):
+            return True
+        decided = self.config.get("_livinai_dining_host")
+        if decided is None:
+            floor = (
+                EXPLICIT_LIVING_DINING_MIN_AREA
+                if is_explicit_dining_lounge(room_type)
+                else LIVING_DINING_MIN_AREA
+            )
+            decided = (
+                not self.config.get("_plan_has_dining_room", False)
+                and float(self.poly.area) >= floor
+            )
+        if not decided:
+            return False
+        return not any(
+            word in self.brief
+            for word in ("no dining", "without dining", "living only")
+        )
 
     @property
     def wants_plants(self):
@@ -2886,6 +3077,22 @@ class RoomFurnisher:
                 )
             scale -= 0.08
         return False
+
+    def register_editable(self, asset_key, procedural_builder):
+        """Make a locally built piece selectable and movable in the walkthrough.
+
+        `furniture_builder` only registers the keys the catalog has models for,
+        so anything built purely from geometry — the balcony set, for one — is
+        placed and then cannot be tapped. This is the same registration the
+        catalog path performs, for a builder that has no catalog model.
+        """
+        def build_registered(P, **kw):
+            built = procedural_builder(P, **kw)
+            for mesh in built[0]:
+                self._editable_mesh_assets[id(mesh)] = (mesh, asset_key)
+            return built
+
+        return build_registered
 
     def furniture_builder(self, asset_key, procedural_builder):
         """Load a native catalog model, with Tripo kept for compatibility."""
@@ -3498,15 +3705,7 @@ class RoomFurnisher:
         # Decide up-front whether this room will also host dining, so the sofa
         # can be zoned to one end instead of centring and stranding the space
         # the dining table needs. Mirrors the gate used further below.
-        _has_dining_room = self.config.get("_plan_has_dining_room", False)
-        self.config["_livinai_expects_dining"] = (
-            not _has_dining_room
-            and self.poly.area >= 15.0
-            and not any(
-                word in self.brief
-                for word in ("no dining", "without dining", "living only")
-            )
-        )
+        self.config["_livinai_expects_dining"] = self.hosts_dining
         anchor_slots = self.living_anchor_slots(sofa_width)
         sofa = (
             self.against_wall(
@@ -3630,21 +3829,12 @@ class RoomFurnisher:
         # rooms. Treating them as one sofa vignette left most of the apartment
         # empty, so automatically zone the largest remaining clear area.
         dining_zone = None
-        # When the plan has no dedicated dining room, the living room is where
-        # people actually eat, so a dining set is a priority here and is tried
-        # in quite modest rooms.
-        #
-        # When the plan *does* have one, the living room gets none. This used to
-        # overflow a second dining set into any living room over 30 m², on the
-        # theory that a large open plan can carry both — but the person drawing
-        # the plan already said where dinner happens by drawing a dining room,
-        # and a home with two dining tables in it is not a home. A large living
-        # room is a large living room.
-        has_dining_room = self.config.get("_plan_has_dining_room", False)
-        if not has_dining_room and self.poly.area >= 15.0 and not any(
-            word in self.brief
-            for word in ("no dining", "without dining", "living only")
-        ):
+        # Only the one room in the home that eats gets a table — see
+        # `hosts_dining`. A dining room elsewhere in the plan, a bigger seating
+        # room elsewhere in the plan, a salon, or simply a room too small to
+        # hold a table and a sofa at once: all of them come back False here, and
+        # this room is furnished as the living room it is.
+        if self.hosts_dining:
             compact_dining = self.poly.area < 24.0
             dining_zone = (
                 self.place_dining_zone(compact=compact_dining)
@@ -4234,10 +4424,82 @@ class RoomFurnisher:
             self.against_wall(build_round_mirror, block=False)
         self.pendant()
 
+    def furnish_balcony(self):
+        """Furnish a balcony as outdoor floor, not as a very small room.
+
+        A balcony has sky above it and a rail around it, so it gets no ceiling
+        pendant, no media wall and no sofa. What it gets is what a balcony
+        actually has: somewhere to sit, something to put a cup on, and planting.
+
+        The pieces are deliberately small. A real balcony is between 1.2 m and
+        2 m deep, and anything at living-room scale blocks the door it is
+        reached through — which is the whole of the balcony's job.
+        """
+        rectangle = list(self.poly.minimum_rotated_rectangle.exterior.coords)
+        vectors = [
+            np.asarray(rectangle[index + 1], dtype=float)
+            - np.asarray(rectangle[index], dtype=float)
+            for index in range(min(4, len(rectangle) - 1))
+        ]
+        lengths = [float(np.linalg.norm(vector)) for vector in vectors]
+        if not lengths:
+            return
+        major_index = int(np.argmax(lengths))
+        minor = max(0.01, min(lengths))
+        along = vectors[major_index] / max(lengths[major_index], 1e-9)
+        across = np.array([-along[1], along[0]], dtype=float)
+
+        table_builder = self.register_editable(
+            "balcony_table", build_side_table
+        )
+        chair_builder = self.register_editable("balcony_chair", build_chair)
+        seated = False
+        if minor >= 1.45 and float(self.poly.area) >= 2.6:
+            # Deep enough for a bistro set: a small round table with a chair
+            # either side of it, squared to the balcony's long axis.
+            centre = self.centroid
+            yaw = yaw_facing(across)
+            if self.add(table_builder(self.P, diameter=0.52), centre, yaw):
+                seated = True
+                for side in (-1, 1):
+                    self.add(
+                        chair_builder(self.P, w=0.44, d=0.46),
+                        centre + along * side * 0.62,
+                        yaw + (0.0 if side > 0 else math.pi),
+                    )
+        if not seated:
+            # A narrow balcony seats along its length, not across it.
+            self.against_wall(
+                self.register_editable("balcony_bench", build_bench),
+                w=min(1.35, max(0.85, lengths[major_index] - 0.5)),
+                d=0.38,
+            )
+
+        # Planting is not decor on a balcony, it is what a balcony is for, so it
+        # does not wait for the decor set to ask for it.
+        self.in_corner(build_plant, tall=minor >= 1.6)
+        if float(self.poly.area) >= 5.0:
+            self.in_corner(build_plant, tall=False)
+
+    def furnish_salon(self):
+        """Furnish the formal seating room.
+
+        A salon is the room kept for receiving people: seating placed around the
+        edges so the middle of the floor stays open, and no dining table — that
+        is what makes it a salon rather than a second living room. The seating
+        recipe is the living room's, and `hosts_dining` is what keeps the table
+        out, so this only has to say which recipe to run.
+        """
+        self.furnish_living()
+
     def furnish(self, room_type):
         rt = (room_type or "").lower()
         try:
-            if "living" in rt or "studio" in rt:
+            if "balcony" in rt or "terrace" in rt or "veranda" in rt:
+                self.furnish_balcony()
+            elif is_formal_lounge(rt):
+                self.furnish_salon()
+            elif is_lounge_room(rt):
                 self.furnish_living()
             elif "bed" in rt or "guest" in rt or "kids" in rt:
                 self.furnish_bedroom()
@@ -4386,12 +4648,74 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
     ))
 
     # Whole-plan context computed once and shared with every room furnisher.
-    _plan_has_dining_room = any(
-        "dining" in str(
-            (room_configs[i] if i < len(room_configs) else {}).get("room_type", "")
-        ).lower()
+    _room_types = [
+        str((room_configs[i] if i < len(room_configs) else {}).get("room_type", ""))
         for i in range(len(rooms_m))
+    ]
+    _plan_has_dining_room = any(
+        is_dedicated_dining_room(name) for name in _room_types
     )
+
+    # ---- Which room eats -------------------------------------------------
+    #
+    # Exactly one room in a home does, and until now every living room in the
+    # plan worked that out for itself from the same fact — "no dining room was
+    # drawn" — and every one of them reached the same answer. A flat with a
+    # living room and a salon got two dining tables, one of them wedged into
+    # whichever room was smaller, which is not a home anybody lives in.
+    #
+    # So it is decided once, here, where the whole plan is visible:
+    #
+    #   * If the user labelled a room "Living + Dining", that is the answer.
+    #     They were asked and they said. Every such room gets a table and no
+    #     other seating room does.
+    #   * Otherwise, if a dining room was drawn, no seating room dines.
+    #   * Otherwise the largest seating room dines, and only if it is big
+    #     enough to hold a table as well as a sofa. The rest are lounges.
+    #
+    # A room that is not the host never places a dining table, at any size, by
+    # any path — including the "guarantee" fallbacks, whose whole purpose was to
+    # force a table into a room that had refused one.
+    _room_areas = []
+    for room in rooms_m:
+        room_poly = Polygon([(p[0], p[1]) for p in room])
+        if not room_poly.is_valid:
+            room_poly = room_poly.buffer(0)
+        _room_areas.append(float(room_poly.area))
+
+    _explicit_dining_lounges = {
+        index
+        for index, name in enumerate(_room_types)
+        if is_explicit_dining_lounge(name)
+        and _room_areas[index] >= EXPLICIT_LIVING_DINING_MIN_AREA
+    }
+    if _explicit_dining_lounges:
+        _dining_hosts = _explicit_dining_lounges
+    elif _plan_has_dining_room:
+        _dining_hosts = set()
+    else:
+        _candidates = [
+            index
+            for index, name in enumerate(_room_types)
+            if is_lounge_room(name)
+            and not is_explicit_dining_lounge(name)
+            and _room_areas[index] >= LIVING_DINING_MIN_AREA
+        ]
+        # A salon is the formal seating room — the one kept for guests — and it
+        # is the last room in the home that wants a dining table in the middle
+        # of it. It only becomes the host if it is the only seating room drawn,
+        # because a home has to eat somewhere.
+        _everyday = [
+            index for index in _candidates
+            if not is_formal_lounge(_room_types[index])
+        ]
+        _candidates = _everyday or _candidates
+        _dining_hosts = (
+            {max(_candidates, key=lambda index: _room_areas[index])}
+            if _candidates
+            else set()
+        )
+
     _kitchen_center = None
     for i, room in enumerate(rooms_m):
         rtype_i = str(
@@ -4508,6 +4832,12 @@ def build_scene(rooms_px, doors_px, windows_px, px_per_m=None, room_configs=None
             # room, and where is the kitchen? Used so an open living room can
             # host dining and align it toward the kitchen.
             cfg["_plan_has_dining_room"] = _plan_has_dining_room
+            # And the answer to "is this the room that eats?", decided once for
+            # the whole plan above. Every dining gate in the furnisher reads
+            # this and nothing else, so the decision cannot be reached twice
+            # and come back different.
+            cfg["_livinai_dining_host"] = i in _dining_hosts
+            cfg["_livinai_dining_explicit"] = is_explicit_dining_lounge(rtype)
             furnisher = RoomFurnisher(room, all_edges[i], P, cfg)
             if _kitchen_center is not None:
                 furnisher._kitchen_position = _kitchen_center

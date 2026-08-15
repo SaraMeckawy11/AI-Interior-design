@@ -130,11 +130,11 @@ def _sectional_roomy(furnisher, width: float) -> bool:
     ]
     minor = min(edges, default=0.0)
     area = float(furnisher.poly.area)
-    room_type = str(furnisher.config.get("room_type", "")).lower()
-    open_plan = (
-        "living" in room_type
-        and not furnisher.config.get("_plan_has_dining_room", False)
-    )
+    # A sectional is only cramped by a dining group if this room is the one that
+    # actually gets one. Asking "did the plan draw a dining room?" made every
+    # seating room in the home behave as though it were about to be given a
+    # table; only the host is.
+    open_plan = bool(getattr(furnisher, "hosts_dining", False))
     has_balcony = bool(getattr(furnisher, "balcony_access_zones", ()))
     requested_sectional = any(
         phrase in str(getattr(furnisher, "brief", "")).lower()

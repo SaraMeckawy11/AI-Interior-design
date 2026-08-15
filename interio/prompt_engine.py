@@ -75,6 +75,9 @@ STYLE_SPECS = {
 
 ROOM_PROGRAMS = {
     "living room": "a coherent conversation group, correctly scaled sofa and lounge chairs, coffee table, grounded rug, media or art focal point",
+    "living + dining": "one room zoned twice — a conversation group at one end and a correctly scaled dining table and chairs at the other, with a clear route between them and a single pendant over the table",
+    "salon": "a formal reception room: seating arranged around the perimeter so the floor stays open, matched occasional tables, a grounded rug, and no dining table",
+    "balcony": "weather-safe floor finish, compact outdoor seating and a small table, planting that does not block the door, and an unobstructed outlook",
     "bedroom": "an upholstered bed, two nightstands, layered bedding, a bench or chair where circulation allows, calm storage",
     "dining room": "a correctly scaled dining table and chairs, one pendant centred above, sideboard only where circulation permits",
     "kitchen": "fitted cabinetry, durable worktops, integrated appliances, task lighting, a clear functional work triangle",
