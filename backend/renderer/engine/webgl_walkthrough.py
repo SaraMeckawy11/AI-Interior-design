@@ -3762,7 +3762,11 @@ def _align_media_to_sofa(self, sofa):
     Only if neither works does the original go back, because a television in
     an awkward place still beats a living room with none.
     """
-    if "no tv" in self.brief or "without tv" in self.brief:
+    # `wants_media` covers the brief asking for no television and the room type
+    # that never has one. A salon reaching this function at all means the lounge
+    # recipe ran as a fallback for it, and the fallback must not be the thing
+    # that puts a television in a reception room.
+    if not self.wants_media:
         return
     pose = _sofa_pose_for_media(sofa)
     sofa_position, facing, lateral = pose["pos"], pose["n"], pose["s"]
@@ -3957,9 +3961,10 @@ def _place_required_living_group(self):
         table_position,
         sofa["yaw"],
     )
-    tv_builder = self.furniture_builder("tv_unit", original.build_tv_unit)
-    if not _place_opposite_wall_media(self, sofa, tv_builder):
-        _place_floating_media_safely(self, sofa, tv_builder)
+    if self.wants_media:
+        tv_builder = self.furniture_builder("tv_unit", original.build_tv_unit)
+        if not _place_opposite_wall_media(self, sofa, tv_builder):
+            _place_floating_media_safely(self, sofa, tv_builder)
     return sofa
 
 

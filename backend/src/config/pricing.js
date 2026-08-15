@@ -126,10 +126,30 @@ export const MAX_RENDERS_PER_DAY = 40;
  * mean something, and it is free: nobody redecorating renders two rooms at once.
  *
  * A hold has to expire, because the process that took it can die — a deploy
- * mid-render, an unhandled throw — and a hold that outlived its request would
- * lock the account out of the app permanently. Ten minutes is longer than any
- * honest render (a warm one answers in seconds; the RunPod fallback is budgeted
- * 150s after Modal has already given up) and short enough that a person who hit
- * the one crash that leaks a hold is not locked out for the evening.
+ * mid-render, an unhandled throw, an instance recycled under the request — and a
+ * hold that outlived its request would lock the account out permanently.
+ *
+ * This was ten minutes, chosen as "longer than any honest render". That is the
+ * right way to size a hold that cannot say whether it is still alive, and it is
+ * why people kept being told "one at a time" with every device idle: the render
+ * that took the hold had died, and nothing could tell the difference between a
+ * dead hold and a slow one until ten minutes had passed.
+ *
+ * So the hold now says so. A running render refreshes its lease every
+ * `RENDER_LEASE_RENEW_MS`, and the window below is what counts as *stale* rather
+ * than what counts as *long*: miss a couple of heartbeats and the slot is free.
+ * A dead render is now cleared in about a minute instead of ten, and a genuinely
+ * slow one holds the slot for as long as it actually runs, which the old fixed
+ * window could not do either.
  */
-export const RENDER_LEASE_MS = 10 * 60 * 1000;
+export const RENDER_LEASE_MS = 75 * 1000;
+
+/**
+ * How often a running render says it is still there.
+ *
+ * Three heartbeats inside the staleness window, so a single missed one — a
+ * hiccup on the database round trip, an event loop busy decoding a large
+ * image — never hands the slot to somebody else while the render is still
+ * going.
+ */
+export const RENDER_LEASE_RENEW_MS = 25 * 1000;

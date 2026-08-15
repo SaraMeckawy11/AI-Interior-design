@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import User from '../models/User.js';
 import { MAX_RENDERS_PER_DAY, RENDER_LEASE_MS } from '../config/pricing.js';
 
@@ -6,12 +8,20 @@ import { MAX_RENDERS_PER_DAY, RENDER_LEASE_MS } from '../config/pricing.js';
  *
  * Two limits, both on the account and neither on the wallet:
  *
- *  1. **One render in flight.** Held as a lease — a timestamp on the user row —
- *     rather than as a counter, so a request whose process died releases it by
- *     expiring instead of by being cleaned up. Nobody redecorating renders two
- *     rooms at once, so this costs a real user nothing; what it stops is a login
- *     being shared or scripted, where the same coin balance is read by ten
- *     requests at once and every one of them finds it sufficient.
+ *  1. **One render in flight.** Held as a lease — an id and a timestamp on the
+ *     user row — rather than as a counter, so a request whose process died
+ *     releases it by expiring instead of by being cleaned up. Nobody
+ *     redecorating renders two rooms at once, so this costs a real user nothing;
+ *     what it stops is a login being shared or scripted, where the same coin
+ *     balance is read by ten requests at once and every one of them finds it
+ *     sufficient.
+ *
+ *     The lease is a *heartbeat*, not a deadline. It used to be written once and
+ *     trusted for ten minutes, which meant a render killed by a deploy or an
+ *     instance recycle left the account locked out for the rest of those ten
+ *     minutes — every device idle, every one of them told a render was already
+ *     running. The holder now refreshes the timestamp while it works, and the
+ *     slot is free the moment that stops. See `renewRenderSlot`.
  *
  *  2. **A day's worth of renders**, for subscriptions only. Coins already meter
  *     themselves, one render at a time.
@@ -52,22 +62,25 @@ const secondsUntilDayEnd = (whenMs) => {
  * for the person who hit it.
  */
 export async function claimRenderSlot(userId, { capped = false, nowMs = Date.now() } = {}) {
-  const lease = new Date(nowMs);
+  const lease = randomUUID();
+  const heldAt = new Date(nowMs);
   const staleBefore = new Date(nowMs - RENDER_LEASE_MS);
   const day = renderDay(nowMs);
 
-  // Nothing is rendering, or what is rendering has outlived its lease. A missing
-  // field matches `null` in Mongo, so accounts written before this existed are
-  // idle rather than invisible.
+  // Nothing is rendering, or what is rendering has stopped saying so. A missing
+  // field matches `null` in Mongo, so accounts written before this existed — and
+  // rows left holding a lease by the version that never refreshed one — are idle
+  // rather than invisible.
   const slotFree = {
     $or: [{ renderLeaseAt: null }, { renderLeaseAt: { $lte: staleBefore } }],
   };
   const underDailyCap = capped ? { rendersToday: { $lt: MAX_RENDERS_PER_DAY } } : {};
+  const take = { renderLeaseAt: heldAt, renderLeaseId: lease };
 
   // Already rendered today: take the slot and count one more, if the day has room.
   let user = await User.findOneAndUpdate(
     { _id: userId, renderDay: day, ...underDailyCap, ...slotFree },
-    { $set: { renderLeaseAt: lease }, $inc: { rendersToday: 1 } },
+    { $set: take, $inc: { rendersToday: 1 } },
     { new: true },
   ).select('rendersToday');
 
@@ -76,7 +89,7 @@ export async function claimRenderSlot(userId, { capped = false, nowMs = Date.now
   if (!user) {
     user = await User.findOneAndUpdate(
       { _id: userId, renderDay: { $ne: day }, ...slotFree },
-      { $set: { renderLeaseAt: lease, renderDay: day, rendersToday: 1 } },
+      { $set: { ...take, renderDay: day, rendersToday: 1 } },
       { new: true },
     ).select('rendersToday');
   }
@@ -93,10 +106,18 @@ export async function claimRenderSlot(userId, { capped = false, nowMs = Date.now
   if (!current) return { ok: false, reason: 'missing', message: 'User not found' };
 
   if (current.renderLeaseAt && current.renderLeaseAt > staleBefore) {
+    // How long the caller would have to wait if the holder never spoke again.
+    // The old flat 15 seconds was a guess against a ten-minute hold, so "try
+    // again shortly" was wrong by minutes; against a heartbeat it is a real
+    // number, and small.
+    const staleInSeconds = Math.max(
+      1,
+      Math.ceil((current.renderLeaseAt.getTime() + RENDER_LEASE_MS - nowMs) / 1000),
+    );
     return {
       ok: false,
       reason: 'busy',
-      retryAfterSeconds: 15,
+      retryAfterSeconds: staleInSeconds,
       message: 'A render is already running on this account',
       // Second person, because this is shown as-is.
       detail: 'One render at a time. Wait for the one in progress to finish, then try again.',
@@ -118,20 +139,48 @@ export async function claimRenderSlot(userId, { capped = false, nowMs = Date.now
 }
 
 /**
+ * Say the render holding the slot is still running.
+ *
+ * This is what separates a slow render from a dead one. Without it the slot can
+ * only be sized by guessing how long a render might take, and every guess is
+ * wrong in both directions at once: too short and a real render loses its slot
+ * mid-flight, too long — which is what shipped — and a render killed by a deploy
+ * locks the account out for the rest of the window with nothing running at all.
+ *
+ * Matched on the lease id, so a render that already lost the slot to a
+ * replacement cannot revive its claim by heartbeating into it. Returns whether
+ * the lease is still ours, and never throws: a missed beat is not an error, it
+ * is the next one's job.
+ */
+export async function renewRenderSlot(userId, lease, { nowMs = Date.now() } = {}) {
+  if (!lease) return false;
+  try {
+    const result = await User.updateOne(
+      { _id: userId, renderLeaseId: lease },
+      { $set: { renderLeaseAt: new Date(nowMs) } },
+    );
+    return (result.matchedCount ?? result.n ?? 0) > 0;
+  } catch (error) {
+    console.warn(`Could not renew the render slot for user ${userId}:`, error.message);
+    return false;
+  }
+}
+
+/**
  * Give the slot back, whatever the render did.
  *
- * Matched on the exact lease this request took, so a claim that expired and was
- * taken over by a later render is not released by the abandoned one arriving
+ * Matched on the exact lease this request took, so a claim that went stale and
+ * was taken over by a later render is not released by the abandoned one arriving
  * late. Never throws: this runs in a `finally`, after the response, and a failure
- * to release must not become the error the user sees. The lease expires on its
+ * to release must not become the error the user sees. The lease goes stale on its
  * own anyway.
  */
 export async function releaseRenderSlot(userId, lease) {
   if (!lease) return;
   try {
     await User.updateOne(
-      { _id: userId, renderLeaseAt: lease },
-      { $set: { renderLeaseAt: null } },
+      { _id: userId, renderLeaseId: lease },
+      { $set: { renderLeaseAt: null, renderLeaseId: null } },
     );
   } catch (error) {
     console.warn(`Could not release the render slot for user ${userId}:`, error.message);

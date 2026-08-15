@@ -4,11 +4,12 @@ import cloudinary from "../lib/cloudinary.js";
 import Design from "../models/Design.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
-import { FREE_DESIGNS, coinCost } from "../config/pricing.js";
+import { FREE_DESIGNS, RENDER_LEASE_RENEW_MS, coinCost } from "../config/pricing.js";
 import {
   claimRenderSlot,
   refundRender,
   releaseRenderSlot,
+  renewRenderSlot,
 } from "../services/renderLimits.js";
 
 const router = express.Router();
@@ -239,6 +240,10 @@ router.post("/", isAuthenticated, async (req, res) => {
    */
   const held = { lease: null, coins: 0, freeDesign: false, day: null };
   let delivered = false;
+  // Keeps the render slot alive for exactly as long as this handler is running.
+  // Cleared in the `finally`, so the slot stops being defended the instant the
+  // request stops existing — including when it throws.
+  let heartbeat = null;
 
   try {
     const {
@@ -341,6 +346,17 @@ router.post("/", isAuthenticated, async (req, res) => {
     held.lease = slot.lease;
     held.day = slot.day;
     console.log(`Render slot taken by user ${user._id} (${slot.rendersToday} today)`);
+
+    // From here the slot is held only while this handler is alive to say so. If
+    // the process dies — a deploy, an instance recycled mid-render — the beats
+    // stop, the lease goes stale within the window, and the account can render
+    // again in about a minute rather than being told "one at a time" with
+    // nothing running for the next ten.
+    heartbeat = setInterval(() => {
+      renewRenderSlot(req.user._id, held.lease).catch(() => {});
+    }, RENDER_LEASE_RENEW_MS);
+    // Never let the beat be the reason the process stays up.
+    heartbeat.unref?.();
 
     /**
      * ✅ Free allowance, then coins, then the paywall.
@@ -528,6 +544,12 @@ router.post("/", isAuthenticated, async (req, res) => {
     console.error("POST /designs error:", error);
     res.status(500).json({ message: error.message || "Something went wrong" });
   } finally {
+    // Stop defending the slot before releasing it. A beat already awaiting the
+    // database can still land after the release, and is harmless when it does:
+    // it matches on the lease id, which the release has already cleared, so it
+    // updates nothing rather than marking an idle account busy again.
+    if (heartbeat) clearInterval(heartbeat);
+
     // No picture, no charge. This covers the ways out that are known — a refused
     // paywall, both engines down, an answer with no image, a Cloudinary or
     // database throw — and, more to the point, the ones added later, because a

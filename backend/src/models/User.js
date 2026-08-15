@@ -86,9 +86,27 @@ const userSchema = new mongoose.Schema(
     // updates — never by `user.save()`, which would let two requests arriving
     // together each write the count they read.
 
-    /** When the render running on this account took the slot; null when idle. */
+    /**
+     * When the render holding this account's slot last said it was alive.
+     *
+     * Refreshed on a heartbeat while the render runs, not written once when it
+     * starts, so "is this slot taken?" is answered by how long ago the holder
+     * last spoke rather than by how long ago it began. Null when idle.
+     */
     renderLeaseAt: {
       type: Date,
+      default: null,
+    },
+    /**
+     * Which render holds the slot.
+     *
+     * The heartbeat moves `renderLeaseAt`, so that field can no longer identify
+     * the holder — this does. It is what makes a release safe: a render whose
+     * lease went stale and was taken over by a later one must not be able to
+     * release the slot out from under its replacement when it finally finishes.
+     */
+    renderLeaseId: {
+      type: String,
       default: null,
     },
     /** The UTC day `rendersToday` is counting, as `YYYY-MM-DD`. */
