@@ -3409,8 +3409,28 @@ class RoomFurnisher:
         # separation bonuses, so it decides the placement rather than nudging it.
         return worst * 6.0
 
-    def find_open_pose(self, width, depth, preferred=None, yaws=None):
-        """Find the best empty interior zone for a complete furniture group."""
+    def find_open_pose(self, width, depth, preferred=None, yaws=None,
+                       beside=None, clear_of=()):
+        """Find the best empty interior zone for a complete furniture group.
+
+        `beside` names a piece of furniture the group belongs *next to* — the
+        seating, for a dining table sharing a room with it. `clear_of` names
+        zones it should stand well back from rather than merely outside: the
+        entrance, and the routes through the room.
+
+        Both change what "best" means, and they have to, because the default
+        scoring wants the opposite of what a dining table wants. It rewards
+        clearance from the walls and clearance from the furniture already
+        placed, which between them describe the middle of the empty floor —
+        and in an open-plan room the middle of the empty floor is the route
+        from the front door to the rest of the home. That is how a table ends
+        up marooned in the walkway with the sofa at the far end of the room.
+
+        With `beside` set, those two rewards are dropped and proximity is the
+        score instead: as close to the seating as the pull-out clearance
+        allows, which is where a table in a room with a sofa in it actually
+        goes.
+        """
         safe_room = self.poly.buffer(-0.12)
         if safe_room.is_empty:
             return None
@@ -3462,19 +3482,42 @@ class RoomFurnisher:
                     continue
                 if any(fp.intersects(placed) for placed in self.placed):
                     continue
-                boundary_clearance = fp.distance(self.poly.boundary)
-                placed_clearance = min(
-                    (fp.distance(placed) for placed in self.placed),
-                    default=0.0,
-                )
-                # Clearance is circulation, not distance for its own sake. This
-                # used to be `placed_clearance * 2.0` uncapped, which paid a
-                # group to keep retreating: every extra metre between the dining
-                # zone and the sofa scored, so the table ended up against the
-                # far wall of an open-plan room with a void in the middle.
-                # Anything past a comfortable walking gap adds nothing.
-                score = boundary_clearance * 1.2 + min(placed_clearance, 0.90) * 2.0
-                if self.placed:
+                if beside is not None:
+                    # Next to the seating, and the closer the better once the
+                    # hard checks above have guaranteed it is not touching it.
+                    # No reward for clearance from walls or from furniture: in a
+                    # room that already contains a sofa, both of those point at
+                    # the middle of the floor, which is the walkway.
+                    gap = float(fp.distance(beside))
+                    score = -gap * 2.40
+                else:
+                    boundary_clearance = fp.distance(self.poly.boundary)
+                    placed_clearance = min(
+                        (fp.distance(placed) for placed in self.placed),
+                        default=0.0,
+                    )
+                    # Clearance is circulation, not distance for its own sake.
+                    # This used to be `placed_clearance * 2.0` uncapped, which
+                    # paid a group to keep retreating: every extra metre between
+                    # the dining zone and the sofa scored, so the table ended up
+                    # against the far wall with a void in the middle. Anything
+                    # past a comfortable walking gap adds nothing.
+                    score = (
+                        boundary_clearance * 1.2
+                        + min(placed_clearance, 0.90) * 2.0
+                    )
+                # Standing back from the way in and the way through, rather than
+                # merely outside them. The hard veto above only says the table
+                # is not *in* the doorway; a table one centimetre outside the
+                # zone is still the thing you edge past with the shopping. Worth
+                # up to a metre and a half of distance, and nothing beyond that.
+                if clear_of:
+                    room_to_move = min(
+                        (float(fp.distance(zone)) for zone in clear_of),
+                        default=1.5,
+                    )
+                    score += min(room_to_move, 1.5) * 1.80
+                if beside is None and self.placed:
                     nearest = min(
                         np.linalg.norm(
                             position
@@ -4591,166 +4634,250 @@ class RoomFurnisher:
             )
         return sides[:limit]
 
-    def furnish_salon(self):
-        """Furnish the formal reception room, the way one is actually arranged.
+    def salon_group_templates(self, area, dining=False):
+        """The seating suite, at the sizes one is actually made in.
 
-        A salon is not a living room with the television taken out. It is a
-        different composition, and it was being furnished as the former: the
-        lounge recipe put a sofa on one wall, a media unit on the wall facing
-        it, and the seats around a viewing axis — which is precisely what a
-        salon is not for. A reception room has no television in it at all, and
-        its seating does not point at a focal object on a wall. It points at
-        the people in it.
+        Each entry describes a complete set in its own coordinates, origin at
+        the middle of the open floor and +y the way the principal sofa faces.
+        Nothing here is measured from the room: a suite is a suite, and the room
+        decides which one fits, not how far apart its pieces stand.
 
-        So the arrangement is the one every formal seating room uses: the
-        principal sofa on the head wall facing the door, matching seats down the
-        sides facing each other across the room, the middle of the floor left
-        open on one rug with a low table at its centre, and occasional tables
-        within reach of the seats rather than pushed into corners. The whole
-        thing reads as symmetrical because it is built symmetrically — pairs
-        placed as pairs, on opposite walls, at matched sizes.
+        That is the correction. The previous version placed each seat against a
+        wall of the room, so in a 30 m² salon the principal sofa ended up four
+        metres from the settee opposite it — furniture round the edges of a
+        room rather than a set of furniture. People converse comfortably across
+        about 2.4 m and give up past 3.6 m, so the gap across the middle is
+        fixed here, and it is the room's job to have space for it.
 
-        The open centre is the point of it. In a room used for receiving people,
-        the floor between the seats is circulation and it is also the room's
-        one piece of composition; filling it is how these rooms go wrong.
+        Largest first, stepping down the way a designer drops pieces: the
+        closing chairs go, then the settees shrink, then they become armchairs,
+        and last of all the set is a sofa and a pair of chairs.
+        """
+        suites = []
+        if area >= 30.0:
+            suites.append(dict(sofa=(2.45, 0.95), side=(1.95, 0.90),
+                               centre=2.50, closing=(0.88, 0.84)))
+        if area >= 24.0:
+            suites.append(dict(sofa=(2.30, 0.94), side=(1.80, 0.88),
+                               centre=2.30, closing=(0.86, 0.82)))
+        if area >= 19.0:
+            suites.append(dict(sofa=(2.20, 0.92), side=(1.70, 0.86),
+                               centre=2.15, closing=None))
+        suites.append(dict(sofa=(2.05, 0.90), side=(0.88, 0.84),
+                           centre=1.95, closing=None))
+        suites.append(dict(sofa=(1.85, 0.88), side=None,
+                           centre=1.80, closing=None))
 
-        `hosts_dining` decides whether the formal table joins it — see
-        `furnish`. A plain "Salon" never eats while any everyday seating room
-        could take the table instead; a "Salon + Dining" always does, and the
-        seating is kept to three sides so the table has an end of its own.
+        built = []
+        for suite in suites:
+            sofa_w, sofa_d = suite["sofa"]
+            side = suite["side"]
+            # A room that also dines gives its fourth side to the table.
+            closing = None if dining else suite["closing"]
+
+            width = (
+                max(sofa_w, suite["centre"]) if side is None
+                else suite["centre"] + side[1] * 2
+            )
+            depth = sofa_d + suite["centre"] + (closing[1] if closing else 0.0)
+
+            pieces = []
+            sofa_y = -(depth / 2 - sofa_d / 2)
+            pieces.append(dict(kind="sofa", pos=(0.0, sofa_y),
+                               turn=0.0, size=(sofa_w, sofa_d)))
+            if side is not None:
+                side_w, side_d = side
+                side_y = sofa_y + sofa_d / 2 + suite["centre"] / 2
+                for hand in (-1, 1):
+                    pieces.append(dict(
+                        kind="side",
+                        pos=(hand * (width / 2 - side_d / 2), side_y),
+                        # Turned across the group, so it faces the person
+                        # opposite rather than a wall.
+                        turn=-hand * math.pi / 2,
+                        size=(side_w, side_d),
+                    ))
+            if closing is not None:
+                closing_w, closing_d = closing
+                for hand in (-1, 1):
+                    pieces.append(dict(
+                        kind="chair",
+                        pos=(hand * min(0.62, width / 4),
+                             depth / 2 - closing_d / 2),
+                        turn=math.pi,
+                        size=(closing_w, closing_d),
+                    ))
+            built.append(dict(
+                width=width, depth=depth, pieces=pieces,
+                centre_gap=suite["centre"],
+                # The middle of the open floor, which is not the middle of the
+                # suite once one end is a sofa and the other is open.
+                table_y=sofa_y + sofa_d / 2 + suite["centre"] / 2,
+            ))
+        return built
+
+    def place_salon_group(self, dining=False):
+        """Place one complete seating suite, backed onto the best wall.
+
+        The suite is positioned as a single object: its footprint is tested
+        whole, so it is never half-placed and its spacing is never stretched to
+        reach a wall. Walls are tried head first — see `salon_sides` — because a
+        formal group is anchored rather than floated in the middle of the floor.
+        What it must not be is spread out along them.
         """
         sofa_builder = self.furniture_builder("sofa", build_sofa)
         chair_builder = self.furniture_builder("armchair", build_armchair)
-        table_builder = self.furniture_builder("coffee_table", build_coffee_table)
-
         area = float(self.poly.area)
-        dining = self.hosts_dining
-        # Three sides when the room also dines, so the fourth end stays whole
-        # for the table rather than being closed off by a pair of chairs.
-        sides = self.salon_sides(limit=3 if dining else 4)
+        sides = self.salon_sides(limit=4)
         if not sides:
-            return
+            return None
 
-        head = sides[0]
-        principal_width = min(
-            2.55 if area >= 26.0 else 2.25 if area >= 18.0 else 2.05,
-            max(1.60, head["len"] - 0.24),
-        )
-        principal = self.against_wall(
-            sofa_builder, slots=[head], w=principal_width, d=0.96
-        ) or self.against_wall(sofa_builder, slots=[head], w=1.75, d=0.90)
-        if principal is None:
-            # The head wall could not carry the principal sofa, so there is no
-            # composition to build symmetrically around. Fall back rather than
-            # scatter seats: a lounge is a worse salon than a salon, and a much
-            # better room than half of one.
+        for template in self.salon_group_templates(area, dining=dining):
+            sofa_width = template["pieces"][0]["size"][0]
+            for slot in sides:
+                if slot["len"] + 0.45 < sofa_width:
+                    continue                      # wall too short for the sofa
+                axis_y = np.asarray(slot["n"], dtype=float)
+                axis_x = np.array([-axis_y[1], axis_y[0]], dtype=float)
+                centre = (
+                    np.asarray(slot["mid"], dtype=float)
+                    + axis_y * (WALL_GAP + template["depth"] / 2)
+                )
+                group_yaw = yaw_facing(axis_y)
+                footprint = footprint_poly(
+                    centre, group_yaw, template["width"], template["depth"]
+                )
+                # The suite as one object, against the room and against
+                # everything already standing in it.
+                if not self._ok(footprint, block=True, avoid_doors=True):
+                    continue
+
+                placed = []
+                for piece in template["pieces"]:
+                    position = (
+                        centre
+                        + axis_x * piece["pos"][0]
+                        + axis_y * piece["pos"][1]
+                    )
+                    builder = (
+                        chair_builder if piece["kind"] == "chair"
+                        else sofa_builder
+                    )
+                    width, depth = piece["size"]
+                    self.add(
+                        builder(self.P, w=width, d=depth),
+                        position,
+                        group_yaw + piece["turn"],
+                        # The suite was cleared as a whole a moment ago. Testing
+                        # each piece again only lets one of them fail and leave
+                        # a gap in a set that is meant to be symmetrical.
+                        check=False,
+                        block=False,
+                    )
+                    placed.append(dict(
+                        kind=piece["kind"], pos=position,
+                        yaw=group_yaw + piece["turn"], w=width, d=depth,
+                    ))
+                # One reservation for the whole set, so nothing placed later
+                # lands inside the conversation circle.
+                self.placed.append(footprint.buffer(0.05))
+                # And the set as one shape, for anything that needs to be put
+                # *next to* the seating rather than merely clear of it. A dining
+                # table asking "where is the sofa?" gets whichever seat was
+                # added last, which in a suite is a side settee; the answer it
+                # wants is the whole group.
+                self._livinai_seating_footprint = footprint
+                return dict(
+                    centre=centre, yaw=group_yaw, axis_x=axis_x, axis_y=axis_y,
+                    slot=slot, template=template, pieces=placed,
+                    footprint=footprint,
+                )
+        return None
+
+    def furnish_salon(self):
+        """Furnish the formal reception room, the way one is actually arranged.
+
+        A salon is not a living room with the television taken out, and it is
+        not a room with seats around its edges either. Both were tried. The
+        lounge recipe put a sofa on one wall and a media unit on the wall facing
+        it, which is a viewing axis and precisely what a reception room is not
+        for. The version after it placed each seat against its own wall, which
+        in any room big enough to be worth calling a salon left the sofas so far
+        apart that the set stopped being a set.
+
+        A suite is one piece of furniture in several parts. So it is composed at
+        its own spacing — see `salon_group_templates`, where the gap across the
+        middle is a conversation distance rather than whatever the room happened
+        to leave over — and then placed whole, backed onto the head wall so it
+        faces the door. Anchored, not scattered, and not adrift in the middle of
+        the floor either.
+
+        Around it: one rug under the whole set, a low table at the centre of the
+        open floor, occasional tables within reach at the ends of the principal
+        sofa, and one picture over it. No television — see `wants_media`.
+
+        `hosts_dining` decides whether the formal table joins it. A plain
+        "Salon" never eats while any everyday seating room could take the table
+        instead; a "Salon + Dining" always does, and its suite gives up the
+        closing chairs so the table has an end of the room to itself.
+        """
+        dining = self.hosts_dining
+        group = self.place_salon_group(dining=dining)
+        if group is None:
+            # No suite fits at any size. A lounge is a worse salon than a salon
+            # and a far better room than half of one — and it still has no
+            # television, because that is decided by the room and not the
+            # recipe.
             self.furnish_living()
             return
 
-        seats = [principal]
+        template = group["template"]
+        axis_x, axis_y = group["axis_x"], group["axis_y"]
+        open_centre = group["centre"] + axis_y * template["table_y"]
 
-        # The facing pair. Both walls or neither: a settee down one side of a
-        # reception room with nothing opposite it is the single arrangement that
-        # reads as unfinished, and it is what placing them one at a time gives
-        # you whenever the second one happens not to fit.
-        flanks = [
-            slot for slot in sides[1:]
-            if abs(float(np.dot(slot["n"], head["n"]))) < 0.55
-        ][:2]
-        if len(flanks) == 2:
-            flank_width = min(
-                2.05 if area >= 26.0 else 1.85,
-                *[max(1.35, slot["len"] - 0.24) for slot in flanks],
-            )
-            # Asked before either is placed, because a mesh cannot be taken back
-            # out of the room once it is in it.
-            poses = [
-                self._centered_wall_pose(slot, flank_width, 0.92)
-                for slot in flanks
-            ]
-            if all(
-                self._ok(footprint_poly(pos, yaw, flank_width, 0.92))
-                for pos, yaw in poses
-            ):
-                for slot in flanks:
-                    placed = self.against_wall(
-                        sofa_builder, slots=[slot], w=flank_width, d=0.92
-                    )
-                    if placed:
-                        seats.append(placed)
-
-        # The fourth side closes the group with a pair of chairs rather than a
-        # third sofa — a reception room is a ring of seats, not a box of them,
-        # and the side nearest the door is where you want the lightest pieces.
-        if not dining and len(seats) >= 3:
-            facing = [
-                slot for slot in sides[1:]
-                if float(np.dot(slot["n"], head["n"])) < -0.55
-            ]
-            if facing and area >= 22.0:
-                closing = facing[0]
-                offset = closing["dir"] * min(0.62, closing["len"] / 4)
-                for side in (-1, 1):
-                    position = (
-                        closing["mid"]
-                        + closing["n"] * (WALL_GAP + 0.45)
-                        + offset * side
-                    )
-                    self.add(
-                        chair_builder(self.P, w=0.88, d=0.84),
-                        position,
-                        yaw_facing(closing["n"]),
-                    )
-
-        # The open centre, measured from the seats that were actually placed
-        # rather than assumed from the room's middle — in an L-shaped or
-        # off-centre salon those are different points, and the rug belongs at
-        # the first one.
-        centre = np.mean(
-            [np.asarray(seat["pos"], dtype=float) for seat in seats], axis=0
+        # One rug under the set, sized to sit just inside it rather than to
+        # vanish under the seats.
+        self.place_rug(
+            group["centre"], group["yaw"],
+            template["width"] - 0.30, template["depth"] - 0.30,
         )
-        reach = min(
-            float(np.linalg.norm(np.asarray(seat["pos"], dtype=float) - centre))
-            - float(seat["d"]) / 2
-            for seat in seats
-        ) if len(seats) > 1 else 1.30
-        reach = float(max(0.85, min(2.10, reach)))
-
-        head_yaw = float(principal["yaw"])
-        self.place_rug(centre, head_yaw, reach * 2.0, reach * 1.55)
+        table_builder = self.furniture_builder("coffee_table", build_coffee_table)
         self.add(
             table_builder(
                 self.P,
-                w=min(1.30, reach * 1.15),
-                d=min(0.72, reach * 0.66),
+                w=min(1.30, template["centre_gap"] * 0.62),
+                d=min(0.70, template["centre_gap"] * 0.34),
             ),
-            centre,
-            head_yaw,
+            open_centre,
+            group["yaw"],
+            check=False,
         )
 
         # Occasional tables at the ends of the principal sofa, where a cup
-        # actually goes. These are what make a formal group usable rather than
-        # merely symmetrical, and they are the first thing a room like this has
-        # and a lounge does not.
-        side_axis = np.asarray(principal["s"], dtype=float)
-        for direction in (-1, 1):
+        # actually goes — the thing a formal group has and a lounge does not.
+        principal = group["pieces"][0]
+        for hand in (-1, 1):
             self.add(
                 build_side_table(self.P, diameter=0.44),
                 np.asarray(principal["pos"], dtype=float)
-                + side_axis * direction * (float(principal["w"]) / 2 + 0.34),
-                head_yaw,
+                + axis_x * hand * (float(principal["w"]) / 2 + 0.32),
+                group["yaw"],
+                check=False,
+                block=False,
             )
 
-        # One picture, over the principal sofa, at the head of the room.
-        self.art_on(principal, w=min(1.60, principal_width * 0.72))
+        self.art_on(
+            dict(slot=group["slot"], pos=principal["pos"], yaw=principal["yaw"],
+                 n=axis_y, s=axis_x, w=principal["w"], d=principal["d"]),
+            w=min(1.60, float(principal["w"]) * 0.72),
+        )
 
         if dining:
             self.place_dining_zone() or self.place_dining_zone(compact=True)
 
         if self.wants_plants:
             self.in_corner(build_plant)
-        self.pendant(centre)
-
+        self.pendant(open_centre)
 
     def furnish(self, room_type):
         rt = (room_type or "").lower()

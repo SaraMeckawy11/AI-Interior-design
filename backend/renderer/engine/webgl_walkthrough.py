@@ -537,6 +537,46 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
         if value < default_clearance
     ]
 
+    # What the table wants to be next to, and what it wants to be away from.
+    #
+    # The seating is the anchor: a dining table in a room that also has a sofa
+    # in it belongs beside that sofa, sharing one arrangement, not at the
+    # opposite end with the walking route between them. And the routes are what
+    # it must stand back from — being merely outside the doorway zone still left
+    # the table in the way, because "outside the zone" and "out of the way" are
+    # a centimetre apart.
+    seating = None
+    if open_plan_dining:
+        # The salon reserves its suite as one shape and says so; a living room
+        # has a sofa and that is the anchor. Either way the table is placed
+        # against the seating rather than against the last seat that happened
+        # to be built.
+        seating = getattr(self, "_livinai_seating_footprint", None)
+        if seating is None:
+            sofa = _furniture_with_suffix(self, "sofa")
+            if sofa is not None:
+                seating = original.footprint_poly(
+                    np.asarray(sofa["position"], dtype=float),
+                    float(sofa["yaw"]),
+                    float(sofa["width"]),
+                    float(sofa["depth"]),
+                )
+    walkways = [
+        zone for zone in (
+            list(getattr(self, "entrance_zones", ()))
+            + list(getattr(self, "route_zones", ()))
+            + list(getattr(self, "circulation_zones", ()))
+        )
+        if zone is not None and not zone.is_empty
+    ]
+
+    def standoff(footprint):
+        """How much room this pose leaves around the walking routes."""
+        return min(
+            (float(footprint.distance(zone)) for zone in walkways),
+            default=99.0,
+        )
+
     def find_pose_for(candidate):
         if open_plan_dining and position is not None:
             safe_room = self.poly.buffer(-0.12)
@@ -557,6 +597,13 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                         preferred_footprint.intersects(placed)
                         for placed in self.placed
                     )
+                    # This shortcut takes the room's preferred spot without
+                    # scoring anything, which is right when that spot is good
+                    # and is how the table kept landing in the walkway when it
+                    # was not — the preferred spot is derived from the kitchen
+                    # and the centroid, and neither knows where people walk.
+                    # Below half a metre of standoff, go and look properly.
+                    and standoff(preferred_footprint) >= 0.50
                 ):
                     return {
                         "pos": np.asarray(position, dtype=float),
@@ -568,6 +615,8 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
             candidate["zone_depth"],
             preferred=position,
             yaws=structural_yaws,
+            beside=seating,
+            clear_of=walkways,
         )
 
     selected = None
@@ -663,6 +712,11 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                             shifted_footprint.intersects(placed)
                             for placed in self.placed
                         )
+                        # A nudge toward the serving side is worth having; it is
+                        # not worth moving the table into the walkway to get,
+                        # which is what this pass could do on its own.
+                        and standoff(shifted_footprint)
+                        >= standoff(pose["footprint"]) - 0.05
                     ):
                         pose = {
                             **pose,
@@ -704,6 +758,12 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                 safe_room = self.poly.buffer(-0.12)
                 travel = gap - keep_apart
                 step = 0.20
+                # A step that only stops on a hard veto walks the table right up
+                # to the edge of the walkway, because the walkway is not one.
+                # Anything at or above this is a route somebody can still use;
+                # below it, the step is not taken and the table stops where it
+                # is, a little further from the sofa and out of the way.
+                room_to_walk = max(0.55, standoff(pose["footprint"]) - 0.25)
                 while travel > 0.0:
                     moved = current + toward_sofa * min(travel, step)
                     candidate = original.footprint_poly(
@@ -716,7 +776,7 @@ def _designer_dining_zone(self, position=None, yaw=None, compact=False, guarante
                         candidate.intersects(zone) for zone in self.door_zones
                     ) or any(
                         candidate.intersects(placed) for placed in self.placed
-                    ):
+                    ) or standoff(candidate) < room_to_walk:
                         break
                     current = moved
                     pose = {**pose, "pos": current, "footprint": candidate}
