@@ -216,10 +216,10 @@ _ARCHITECTURE_LOCKS = {
     PHOTO_SOURCE: (
         "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
         "- The shell is fixed: every wall, corner, ceiling and floor edge stays on "
-        "the same pixels, and the room keeps its exact size, shape and proportions.\n"
+        "the same pixels; the room keeps its exact size, shape and proportions.\n"
         "- Openings are fixed: the same number of doors and windows, each at the "
-        "same position, width, height, sill height and shape. Add none, remove "
-        "none, move none, resize none, cover none.\n"
+        "same position, size, sill height and shape. Add none, remove none, move "
+        "none, resize none, cover none.\n"
         "- Camera position, lens, framing and perspective stay identical. Change "
         "finishes and movable contents only.\n"
     ),
@@ -402,8 +402,8 @@ ROOM_BRIEFS = {
     ),
     "living + dining": dict(
         programme=(
-            "one room zoned twice - a conversation group at one end, a correctly "
-            "scaled dining table and chairs at the other, a clear route between"
+            "one room zoned twice - a conversation group at one end, a dining "
+            "table and chairs at the other, a clear route between"
         ),
         hero=(
             "The dining table is the hero piece: one solid timber or stone table "
@@ -476,13 +476,13 @@ ROOM_BRIEFS = {
         ),
         decor="one counter group - a board, a bowl, a ceramic - and clear worktop everywhere else",
         limits=(
-            "one ceiling fixture, or pendants only over an island the room is wide "
-            "enough to hold; no floor lamp; no floor plant"
+            "one ceiling fixture, or pendants only over an island the room can "
+            "hold; no floor lamp; no floor plant"
         ),
         forbid=(
             "no sofa, armchair, lounge seating, coffee table, dining table, bed, "
-            "desk or area rug; the only seating is counter stools at an island or "
-            "peninsula the worktop itself forms"
+            "desk or area rug; the only seating is counter stools at an island the "
+            "worktop itself forms"
         ),
         layouts=(
             "Keep the sink, hob and fridge within one easy triangle and the floor between them clear.",
@@ -830,8 +830,8 @@ def build_gen_klein_interior_prompt(
         else (
             f"- DECORATE: {brief['decor']}. Leave most surfaces bare; nothing on the floor.\n"
             f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on the "
-            "mid-sized surfaces, the deepest color in a few small touches, each echoed "
-            "in two or three separated places. Choose all finishes as one scheme.\n"
+            "mid-sized surfaces, the deepest in a few small touches, each echoed in "
+            "two or three places. All finishes as one scheme.\n"
         )
     )
 
@@ -844,15 +844,15 @@ def build_gen_klein_interior_prompt(
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
         f"{_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
-        f"THIS IS A {room_type.upper()}, not any other room. It must contain "
+        f"THIS IS A {room_type.upper()}, not any other room. It contains "
         f"{brief['forbid']}.\n"
         f"ITEM LIMITS: {brief['limits']}; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
-        f"- Resolve {brief['programme']}. Take the furniture count and scale from the visible space.\n"
+        f"- Resolve {brief['programme']}. Take furniture count and scale from the visible space.\n"
         f"- Designer furniture, clean silhouettes, honest materials. {brief['hero']}.\n"
-        f"- LAYOUT: {layout} Align art and lighting with the furniture below.\n"
+        f"- LAYOUT: {layout} Align art and lighting with the furniture.\n"
         f"{styling}"
-        "- Keep walkways and every door swing clear; no clutter or duplicates.\n"
+        "- Keep walkways and door swings clear; no clutter or duplicates.\n"
         "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
     )
 
