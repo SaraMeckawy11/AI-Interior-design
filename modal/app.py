@@ -1511,7 +1511,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v41-living-room-5f8e267-seed-7",
+        "promptEngine": "gen-klein-per-room-briefs-v42-living-room-3ac768a-seed-7",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1538,7 +1538,7 @@ def health():
         "roomBriefs": "per-room-with-exclusions",
         # The living room is the exception, by request: it is served the brief
         # it had before any of this work, older architecture lock included.
-        "legacyBriefRooms": {"living room": "5f8e267 (12 Aug 12:35), seed 7, unguarded"},
+        "legacyBriefRooms": {"living room": "3ac768a (12 Aug 16:02), seed 7, unguarded"},
         # Candidates are measured against the source's own line and opening
         # structure and re-rolled if they moved it. Off means the request asked
         # for no geometry preservation.
