@@ -20,6 +20,8 @@ import {
   GOOGLE_IOS_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
 } from "../../configs/googleAuth";
+import LoginForm from "./login";
+import SignupForm from "./signup";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
@@ -27,6 +29,12 @@ export default function AuthModal({ setModalVisible }) {
   const [signingInProvider, setSigningInProvider] = useState(null);
   const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [signInError, setSignInError] = useState(null);
+  // `null` while the sheet is offering providers; "login" or "signup" once the
+  // person has chosen to use an email address instead. Apple's reviewers cannot
+  // be handed a Google account, and an account made with Sign in with Apple is
+  // tied to their own Apple ID — an email and password is the only credential
+  // pair that can go in App Store Connect's demo account fields.
+  const [emailMode, setEmailMode] = useState(null);
   const isSigningIn = signingInProvider !== null;
 
   useEffect(() => {
@@ -157,12 +165,59 @@ export default function AuthModal({ setModalVisible }) {
             here pushes the two buttons, the terms and the whole decision
             further down a card that is already the only thing on screen. */}
         <Text style={styles.socialTitle} accessibilityRole="header">
-          Join Livinai
+          {emailMode === "login"
+            ? "Sign in to Livinai"
+            : emailMode === "signup"
+              ? "Create your account"
+              : "Join Livinai"}
         </Text>
         <Text style={styles.socialSubtitle}>
           Save your designs to your account and pick them up on any device.
         </Text>
 
+        {emailMode ? (
+          <View style={styles.emailLoginSection}>
+            {emailMode === "login" ? (
+              <LoginForm setModalVisible={setModalVisible} />
+            ) : (
+              <SignupForm setModalVisible={setModalVisible} />
+            )}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                emailMode === "login"
+                  ? "Create an account with an email address instead"
+                  : "Sign in with an existing email address instead"
+              }
+              hitSlop={6}
+              style={styles.emailBackButton}
+              onPress={() => {
+                setSignInError(null);
+                setEmailMode(emailMode === "login" ? "signup" : "login");
+              }}
+            >
+              <Text style={styles.emailBackText}>
+                {emailMode === "login"
+                  ? "New here? Create an account"
+                  : "Already have an account? Sign in"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to all sign-in options"
+              hitSlop={6}
+              style={styles.emailBackButton}
+              onPress={() => {
+                setSignInError(null);
+                setEmailMode(null);
+              }}
+            >
+              <Text style={styles.emailBackText}>All sign-in options</Text>
+            </Pressable>
+          </View>
+        ) : (
         <View style={styles.providerStack}>
             {appleSignInAvailable &&
               (signingInProvider === "apple" ? (
@@ -206,7 +261,26 @@ export default function AuthModal({ setModalVisible }) {
               </Text>
             </Pressable>
 
+            <Pressable
+              onPress={() => {
+                setSignInError(null);
+                setEmailMode("login");
+              }}
+              disabled={isSigningIn}
+              accessibilityRole="button"
+              accessibilityLabel="Continue with an email address"
+              style={({ pressed }) => [
+                styles.emailButton,
+                pressed && !isSigningIn && styles.providerButtonPressed,
+                isSigningIn && styles.providerButtonDisabled,
+              ]}
+            >
+              <Ionicons name="mail-outline" size={20} color="#334039" />
+              <Text style={styles.emailButtonText}>Continue with email</Text>
+            </Pressable>
+
         </View>
+        )}
 
         {signInError && (
           <View

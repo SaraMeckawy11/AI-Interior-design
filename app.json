@@ -54,9 +54,22 @@
       ],
       "expo-apple-authentication",
       "expo-web-browser",
-      "expo-secure-store",
-      "expo-image-picker",
-      "expo-media-library",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Livinai needs access to your photos so you can choose a picture of a room, building, or floor plan to redesign. For example, pick a photo of your living room and Livinai generates a restyled version of it.",
+          "cameraPermission": "Livinai needs access to your camera so you can photograph a room, building, or floor plan to redesign. For example, take a picture of your bedroom and Livinai generates a restyled version of it.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Livinai needs access to your photo library so you can choose a picture of a room, building, or floor plan to redesign.",
+          "savePhotosPermission": "Livinai needs permission to save to your photo library so you can keep the designs it generates. For example, save a redesigned kitchen to Photos to share it with your contractor.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
       "expo-file-system",
       "expo-localization",
       [
