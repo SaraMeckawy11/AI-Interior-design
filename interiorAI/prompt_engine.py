@@ -426,24 +426,17 @@ ROOM_BRIEFS = {
             "solid walnut with a softened edge",
             "slim blackened steel and glass",
         ),
-        # Curtains, at the end of the list and deliberately small.
-        #
-        # The first attempt put "full-height curtains" at the *front* of this
-        # list, which is the most emphatic position, and the renders stopped
-        # respecting the architecture. That is not a surprise in hindsight: the
-        # lock immediately above forbids hiding a window behind drapery, so a
-        # prominent curtain instruction is a decor item arguing with a lock, and
-        # what came back was drapery where the openings used to be.
-        #
-        # Three things are different now. They are last rather than first, so
-        # they read as a finishing touch instead of a headline. They are slim
-        # panels rather than full-height. And the glass is stated as staying
-        # visible, which is the same thing the lock wants rather than a
-        # competing instruction.
+        # No curtains, and this is the second time they have been taken out.
+        # They were tried at the front of this list as "full-height curtains",
+        # then last, slim, and held clear of the glass. Both cost the render its
+        # architecture. The clause above forbids hiding a window behind drapery,
+        # and it turns out that asking for drapery anywhere in the same brief
+        # argues with that lock at any weight and any position. A room with bare
+        # glass beats a room whose openings were redrawn, so this stays as it is
+        # unless something other than the prompt can hold the window.
         decor=(
             "layered cushions, a folded throw, one large artwork at eye level, one "
-            "tight group per surface - books and a ceramic; slim curtain panels "
-            "clear of the glass"
+            "tight group per surface - books, a tray, a ceramic"
         ),
         limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
         forbid="no bed, no desk, no dining table, no kitchen cabinetry, no sanitaryware",

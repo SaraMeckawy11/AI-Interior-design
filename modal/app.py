@@ -1495,7 +1495,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v35-curtains-as-a-finishing-touch",
+        "promptEngine": "gen-klein-per-room-briefs-v36-no-curtains",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",

@@ -428,22 +428,24 @@ def test_hero_names_one_material_not_a_choice():
             )
 
 
-def test_living_room_has_curtains_that_do_not_cover_the_window():
-    """Softness without giving up the opening.
+def test_the_living_room_does_not_ask_for_curtains():
+    """Curtains were tried twice and taken out twice.
 
-    A room with bare glass reads as unfurnished however good the seating is,
-    but the architecture lock forbids hiding a window behind drapery — and that
-    lock wins. So the curtains have to be asked for beside the glass, not over
-    it, and the two clauses have to keep agreeing.
+    Both attempts cost the render its architecture — first as "full-height
+    curtains" at the head of the decor list, then as slim panels at the tail —
+    because the lock above forbids hiding a window behind drapery and a decor
+    line asking for drapery argues with it at any weight. This fails if they
+    come back, so the third attempt has to be a deliberate decision rather than
+    an accident.
     """
-    decor = pe.room_brief("Living Room")["decor"].lower()
-    assert "curtain" in decor, "the living room lost its curtains again"
-    assert "clear of the glass" in decor, f"curtains are not held clear of the glass: {decor}"
-
-    prompt = interior("Living Room").lower()
-    # The lock that constrains them is still present and still wins.
-    assert "hide one behind drapery" in prompt
-    assert prompt.index("windows are untouchable") < prompt.index("decorate")
+    for room in APP_ROOM_TYPES:
+        brief = pe.room_brief(room)
+        for field in ("programme", "hero", "decor"):
+            assert "curtain" not in brief[field].lower(), (
+                f"{room} asks for curtains in {field}: {brief[field]}"
+            )
+    # The lock that made them unaffordable is still there.
+    assert "hide one behind drapery" in interior("Living Room").lower()
 
 
 def test_seating_rooms_place_their_chairs():
