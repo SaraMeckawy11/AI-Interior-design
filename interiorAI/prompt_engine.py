@@ -419,16 +419,23 @@ ROOM_BRIEFS = {
         ),
         hero=(
             "The coffee table is the hero piece: one sculptural low table in "
-            "{material}, centred on the rug"
+            "{material} on the rug"
         ),
         materials=(
             "honed travertine",
             "solid walnut with a softened edge",
             "slim blackened steel and glass",
         ),
+        # Curtains are back, and they are the reason the older living rooms
+        # looked more finished: a room with bare glass reads as unfurnished
+        # however good the seating is. They are worded to sit *beside* the
+        # window rather than over it, because the architecture lock above
+        # forbids hiding one behind drapery and that lock wins — which is the
+        # whole point, softness without giving up the opening.
         decor=(
-            "layered cushions, a folded throw, one large artwork at eye level, one "
-            "tight group per surface - books, a tray, a ceramic"
+            "full-height curtains drawn back from the glass, layered cushions, a "
+            "folded throw, one large artwork at eye level, one group per surface "
+            "- books and a ceramic"
         ),
         limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
         forbid="no bed, no desk, no dining table, no kitchen cabinetry, no sanitaryware",
@@ -1078,48 +1085,24 @@ def _color_clause(color_tone: str, color_palette, mode: str) -> str:
     """Write a mode-appropriate rule for exactly the selected color count."""
     names = _palette_names(color_palette)
     if mode == "exterior":
-        # A facade is painted body, then trim, then accent — that is the order
-        # the trade works in and the order a viewer reads. The rules below used
-        # to give only ratios: 60/30/10 with nothing about *where* each colour
-        # went, which leaves the model to scatter them across whatever surfaces
-        # it likes and is why the result looked unresolved rather than designed.
-        #
-        # The other half is harmony. A facade is never repainted alone — the
-        # roof, the stone, the paving and the joinery are already there and keep
-        # their own colours, so the palette has to sit with them, and the
-        # selected colours have to share an undertone to read as one scheme.
         selected = _exterior_palette_names(color_tone, color_palette)
         if len(selected) == 1:
             return (
                 f"Exterior color rule: use exactly one user-selected facade color, {selected[0]}, "
-                "across the main wall planes as the only painted color, and let the trim, frames "
-                "and soffits sit as a quieter shade of it rather than a second color. Choose it to "
-                "sit with the roof, stone, timber and paving already there, which keep their "
-                "physically realistic colors and are not palette colors."
+                "as the only painted or pigmented architectural color. Do not invent a secondary "
+                "or accent paint color. Natural stone, timber, metal, glass, sky and planting keep "
+                "their physically realistic material colors and do not count as extra palette colors."
             )
-        # 80/20 and 75/20/5, not the interior's 70/30 and 60/30/10.
-        #
-        # 60/30/10 is an interior rule and it is wrong outdoors. On a facade the
-        # wall field dominates far more than indoors, the trim is slim — frames,
-        # fascia, soffits — and the accent is a front door and almost nothing
-        # else. Asking for 30% trim and 10% accent on a building is asking for
-        # more surface than trim and a door can absorb, so the secondary spills
-        # onto the wall planes and the accent goes hunting for somewhere to
-        # live. That reads as colours that do not agree, even when each one is
-        # placed correctly.
         if len(selected) == 2:
             return (
-                f"Exterior color rule: exactly two user-selected colors and no others - "
-                f"80% {selected[0]} across the main wall planes, 20% {selected[1]} on the trim, "
-                "frames, soffits and entrance door. Both share one undertone so the facade reads "
-                "as one scheme, and both sit with the roof, stone and paving, which keep their "
-                "physically realistic colors."
+                f"Exterior color rule: use exactly two user-selected facade colors and no others: "
+                f"70% {selected[0]} and 30% {selected[1]}. Natural material, glazing and landscape "
+                "colors remain physically realistic."
             )
         return (
-            f"Exterior color 75/20/5 by surface: 75% {selected[0]} across the main wall planes, "
-            f"20% {selected[1]} on trim, frames, fascia and soffits, and only 5% {selected[2]} - "
-            "the entrance door alone, nothing else. All three share one undertone and sit with "
-            "the roof, stone and planting, which keep their real colors."
+            f"Exterior color 60/30/10: use exactly these three selected facade colors and no others: "
+            f"60% {selected[0]}, 30% {selected[1]}, 10% {selected[2]}. Natural material, glazing "
+            "and landscape colors remain physically realistic."
         )
 
     if names and len(names) == 3:
