@@ -28,10 +28,20 @@ APP_ROOM_TYPES = [
     "Meditation Corner",
 ]
 
+#: The living room is served by the pre-change brief on purpose — see
+#: prompt_engine._legacy_living_room_brief. It therefore carries none of the
+#: rules the current brief does: no window lock, no surfaces rule, no spacing
+#: line, no layout or material variation. Every "each room" rule below runs
+#: over CURRENT_BRIEF_ROOMS so that exception stays visible instead of being
+#: quietly weakened into the rules themselves.
+LEGACY_BRIEF_ROOMS = ["Living Room"]
+
 APP_EXTERIOR_TYPES = [
     "Balcony", "Building", "Terrace", "Garden", "Driveway",
     "Swimming Pool Area", "Garage",
 ]
+
+CURRENT_BRIEF_ROOMS = [r for r in APP_ROOM_TYPES if r not in LEGACY_BRIEF_ROOMS]
 
 STYLES = ["Modern", "Japandi", "Industrial", "Classic"]
 
@@ -121,7 +131,7 @@ def test_every_brief_fits_the_token_window():
 
 def test_compact_brief_is_shorter_and_keeps_the_lock():
     """The fallback for an over-long custom room name must still be safe."""
-    for room in APP_ROOM_TYPES:
+    for room in CURRENT_BRIEF_ROOMS:
         full = interior(room)
         compact = pe.build_gen_klein_interior_prompt(
             space_type=room,
@@ -199,7 +209,7 @@ def test_every_room_type_gets_a_distinct_brief():
 
 
 def test_variation_changes_the_layout_asked_for():
-    for room in APP_ROOM_TYPES:
+    for room in CURRENT_BRIEF_ROOMS:
         layouts = {interior(room, variation=index) for index in range(3)}
         assert len(layouts) == 3, f"{room} renders the same layout every time"
 
@@ -242,6 +252,8 @@ def test_seed_differs_per_room_and_per_variation():
 #: belongs in — everywhere else has to rule it out explicitly, because silence
 #: is what let one turn up in a salon.
 _TV_ROOMS = ["Living Room", "Living + Dining", "Basement", "Full Apartment"]
+#: The same list without the living room, which no longer reads ROOM_BRIEFS.
+_TV_ROOMS_CURRENT = [r for r in _TV_ROOMS if r not in LEGACY_BRIEF_ROOMS]
 _NO_TV_ROOMS = [
     "Salon", "Salon + Dining", "Bedroom", "Kitchen", "Bathroom", "Dining Room",
     "Balcony", "Closet", "Office", "Kids Room", "Laundry Room", "Hallway",
@@ -250,7 +262,7 @@ _NO_TV_ROOMS = [
 
 
 def test_rooms_that_should_have_a_tv_ask_for_one_with_a_unit():
-    for room in _TV_ROOMS:
+    for room in _TV_ROOMS_CURRENT:
         programme = pe.room_brief(room)["programme"].lower()
         assert "tv" in programme, f"{room} does not ask for a TV"
         # A TV with nothing under it renders as a floating black rectangle.
@@ -278,6 +290,79 @@ def test_formal_reception_rooms_also_refuse_the_media_unit():
         )
 
 
+#: The living room brief, word for word, as it was before any of this work.
+#: Pinned here so the copy in prompt_engine cannot drift into a third version:
+#: it has already been rewritten, reverted, rewritten and reverted again, and
+#: "as it was" is only meaningful if something checks.
+_ORIGINAL_LIVING_ROOM = (
+    "Redesign this Living Room in a refined Modern style, using the input photo "
+    "as the architectural base.\n"
+    "\n"
+    "ARCHITECTURE - HIGHEST PRIORITY:\n"
+    "- Change finishes and movable contents only. Keep every wall, door, window "
+    "and balcony opening exactly as it appears: same count, size, shape, "
+    "position and sill height. Never add, remove, move, resize, cover or "
+    "reshape an opening.\n"
+    "- Keep the camera position, framing and perspective identical.\n"
+    "\n"
+    "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
+    "potted floor plant; no other lamps or greenery.\n"
+    "\n"
+    "SENIOR DESIGN DIRECTION:\n"
+    "- Design as a senior interior designer: balanced proportions, a mix of "
+    "large, medium and small forms, one focal point.\n"
+    "- Resolve a conversation group with sofa and complementary seating, and a "
+    "TV centred above a media console on a solid wall. Choose the layout, "
+    "furniture count and scale from the visible space.\n"
+    "- Designer furniture, clean silhouettes, honest materials. The coffee table "
+    "is the hero piece: one sculptural, well-proportioned table in stone, solid "
+    "timber or slim metal and glass, low, centred on the rug.\n"
+    "- Group seating around a correctly sized rug; align art and lighting with "
+    "the furniture below.\n"
+    "- Choose all finishes and furnishings as one scheme; force no "
+    "predetermined material or color.\n"
+    "- DECORATE: layered cushions, a folded throw, one large artwork at eye "
+    "level, and one tight group per surface at varied heights - books, a tray, "
+    "a ceramic, a sculptural object. Leave most surfaces bare; nothing on the "
+    "floor.\n"
+    "- COLOR: Neutral as the overall direction, weighted as a designer would: "
+    "lightest or most muted over the large fields, mid-tones on upholstery, "
+    "curtains and rugs, the deepest color in a few small touches.\n"
+    "- Consistent undertones, each color echoed in two or three separated "
+    "places; no flat wash, muddy neutrals or oversaturation.\n"
+    "- Keep walkways clear; no clutter or duplicates.\n"
+    "- Photorealistic editorial interior, natural light, believable scale, "
+    "contact shadows."
+)
+
+
+def test_living_room_brief_is_the_original_word_for_word():
+    built = pe.build_gen_klein_interior_prompt(
+        space_type="Living Room", design_style="Modern", color_tone="Neutral",
+    )
+    assert built == _ORIGINAL_LIVING_ROOM, (
+        "the living room brief has drifted from the pre-change original:\n"
+        + "\n".join(
+            line for line in __import__("difflib").unified_diff(
+                _ORIGINAL_LIVING_ROOM.splitlines(), built.splitlines(),
+                fromfile="original", tofile="built", lineterm="",
+            )
+        )
+    )
+
+
+def test_living_room_ignores_the_variation_axes():
+    """It has no layout or material rotation, which is part of "as it was"."""
+    briefs = {
+        pe.build_gen_klein_interior_prompt(
+            space_type="Living Room", design_style="Modern",
+            color_tone="Neutral", variation_index=index,
+        )
+        for index in range(9)
+    }
+    assert len(briefs) == 1, "the legacy brief should not vary"
+
+
 def test_salon_and_living_room_are_opposites_about_the_tv():
     """The reported case, pinned directly."""
     salon = pe.room_brief("Salon")
@@ -289,7 +374,7 @@ def test_salon_and_living_room_are_opposites_about_the_tv():
 
 def test_window_lock_is_explicit_and_unmissable():
     """A window must survive at its exact size, shape and position."""
-    prompt = interior("Living Room", source="photo")
+    prompt = interior("Bedroom", source="photo")
     lowered = prompt.lower()
     assert "windows are untouchable" in lowered
     for rule in ("same count", "position", "outline", "width", "height", "sill"):
@@ -302,13 +387,10 @@ def test_window_lock_is_explicit_and_unmissable():
 
 
 def test_walkthrough_lock_also_holds_window_shape():
-    prompt = interior("Living Room", source="walkthrough").lower()
+    prompt = interior("Bedroom", source="walkthrough").lower()
     assert "window" in prompt
     assert "outline and proportions" in prompt
 
-
-#: The four rooms a television belongs in.
-_TV_ROOMS = ["Living Room", "Living + Dining", "Basement", "Full Apartment"]
 
 #: Materials that were surviving from the source photo onto the redesigned
 #: walls. An earlier attempt listed these *in the brief* in order to forbid
@@ -324,7 +406,7 @@ def test_tv_rooms_count_the_sofa_positively():
     The fix is the count, stated as a positive. Writing "no second sofa" would
     put the word 'sofa' into an exclusion the encoder mostly reads as 'sofa'.
     """
-    for room in _TV_ROOMS:
+    for room in _TV_ROOMS_CURRENT:
         programme = pe.room_brief(room)["programme"].lower()
         assert "one sofa" in programme, f"{room} does not count the sofa"
         forbid = pe.room_brief(room)["forbid"].lower()
@@ -349,7 +431,7 @@ def test_living_room_seats_the_sofa_by_the_television():
 
 
 def test_walls_are_repainted_without_naming_what_to_avoid():
-    prompt = interior("Living Room")
+    prompt = interior("Bedroom")
     lowered = prompt.lower()
     # Positive instruction, in the architecture block and again where colour is
     # actually assigned.
@@ -385,7 +467,7 @@ def test_quality_rules_survive_in_every_brief():
         "leave most surfaces bare",
         "align art and lighting with the furniture",
     ]
-    for room in APP_ROOM_TYPES:
+    for room in CURRENT_BRIEF_ROOMS:
         lowered = interior(room).lower()
         for rule in required:
             assert rule in lowered, f"{room} brief lost the quality rule '{rule}'"
@@ -398,7 +480,7 @@ def test_variation_moves_layout_and_material_independently():
     large part of why the designs read as the same design. Layout and material
     rotate on different divisors so their combinations multiply.
     """
-    for room in APP_ROOM_TYPES:
+    for room in CURRENT_BRIEF_ROOMS:
         briefs = {interior(room, variation=index) for index in range(9)}
         expected = 3 * len(pe.room_brief(room).get("materials") or (None,))
         assert len(briefs) == expected, (
@@ -408,7 +490,7 @@ def test_variation_moves_layout_and_material_independently():
 
 def test_hero_names_one_material_not_a_choice():
     """A prompt that lists alternatives gets the model's favourite every time."""
-    for room in APP_ROOM_TYPES:
+    for room in CURRENT_BRIEF_ROOMS:
         brief = pe.room_brief(room)
         materials = brief.get("materials")
         if not materials:
@@ -445,7 +527,7 @@ def test_the_living_room_does_not_ask_for_curtains():
                 f"{room} asks for curtains in {field}: {brief[field]}"
             )
     # The lock that made them unaffordable is still there.
-    assert "hide one behind drapery" in interior("Living Room").lower()
+    assert "hide one behind drapery" in interior("Bedroom").lower()
 
 
 def test_seating_rooms_place_their_chairs():
@@ -459,14 +541,14 @@ def test_seating_rooms_place_their_chairs():
 
 
 def test_every_brief_asks_for_breathing_room():
-    for room in APP_ROOM_TYPES:
+    for room in CURRENT_BRIEF_ROOMS:
         assert "space every piece clear of its neighbours" in interior(room).lower(), (
             f"{room} brief has no spacing rule"
         )
 
 
 def test_photo_lock_fixes_both_the_shell_and_the_openings():
-    prompt = interior("Living Room", source="photo")
+    prompt = interior("Bedroom", source="photo")
     lowered = prompt.lower()
     assert "the shell is fixed" in lowered
     assert "doors and other openings: same rule" in lowered
