@@ -46,13 +46,13 @@ PALETTE = {
 #: live. So this is measured with the model's real tokenizer when it can be
 #: reached, and only estimated when it cannot.
 #:
-#: The estimate was 1.45 tokens/word, chosen pessimistically before anything
-#: had been measured. Against the real tokenizer these briefs run 1.34–1.38,
-#: so 1.45 was rejecting briefs that fit — 1.42 keeps a margin over the
-#: observed worst case without inventing 5% of phantom length.
-#: The chat wrapper the engine adds around the brief, measured rather than
-#: guessed. Rendering the model's own chat_template.jinja for one empty user
-#: message gives exactly:
+#: The word estimate was 1.45 tokens/word, chosen pessimistically before
+#: anything had been measured. Against the real tokenizer these briefs run
+#: 1.34–1.38, so 1.45 was rejecting briefs that fit; 1.42 keeps a margin over
+#: the observed worst case without inventing 5% of phantom length.
+#:
+#: The chat wrapper is measured rather than guessed too. Rendering the model's
+#: own chat_template.jinja for one empty user message gives exactly:
 #:
 #:     '<|im_start|>user\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 #:
@@ -350,7 +350,7 @@ def test_walls_are_repainted_without_naming_what_to_avoid():
     lowered = prompt.lower()
     # Positive instruction, in the architecture block and again where colour is
     # actually assigned.
-    assert "every surface is refinished" in lowered
+    assert "every surface refinished evenly, corner to corner" in lowered
     assert "across every wall, ceiling and floor" in lowered
     # And the brief must not recite the materials it is trying to get rid of.
     for material in _UNWANTED_WALL_MATERIALS:

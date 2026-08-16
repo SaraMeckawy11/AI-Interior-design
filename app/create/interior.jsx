@@ -295,12 +295,20 @@ export default function Interior() {
         lighting: "Natural daylight",
         preserveGeometry: true,
         creativity: 42,
-        // The engine's seed is hashed from the brief, which is what stops a
-        // kitchen and a bedroom coming back as the same arrangement. It also
-        // means an identical request reproduces its render exactly — so a fresh
-        // number per attempt is what makes pressing generate again give a
-        // genuinely different design rather than the same one.
-        variation: Date.now() % 1000000,
+        // No `variation` is sent, which is what makes the same photo and the
+        // same choices come back as the same design every time.
+        //
+        // This used to send `Date.now()`, on the reasoning that pressing
+        // generate again should give something new. That was wrong twice over.
+        // There is no regenerate button — a second attempt means changing the
+        // style and generating again, which already changes the brief and so
+        // the seed — and turning every render into a re-roll meant a design
+        // could never be reproduced or compared against another build.
+        //
+        // The seed is hashed from the brief itself, so two different rooms
+        // still cannot land on the same arrangement. The field stays supported
+        // end to end for a "try another" control, which would pass an
+        // incrementing number here.
       };
 
       if (imageDataUrl) {

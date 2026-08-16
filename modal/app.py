@@ -1510,7 +1510,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v27-two-variation-axes",
+        "promptEngine": "gen-klein-per-room-briefs-v28-refinish-evenly",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1546,6 +1546,11 @@ def health():
         # Seeds are hashed from the brief instead of pinned, so two different
         # rooms cannot start from the same noise.
         "seeding": "hashed-from-brief-plus-variation",
+        # The app sends no `variation`, so the same photo and the same choices
+        # reproduce the same render. It used to send a timestamp, which turned
+        # every generation into a re-roll and made two builds impossible to
+        # compare. The field is still read here for a future "try another".
+        "reproducible": True,
         # Layout rotates every variation, hero material every third, so a
         # room has nine distinguishable briefs per style rather than three.
         # The hero used to offer the model a list of materials to pick from,

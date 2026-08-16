@@ -264,9 +264,8 @@ export default function Exterior() {
         // Buildings use the model's most conservative setting because their
         // facade grid and massing must remain identical to the source photo.
         creativity: roomType === "Building" ? 10 : 42,
-        // See the matching note in interior.jsx: the seed is hashed from the
-        // brief, so a fresh number per attempt is what makes a re-roll differ.
-        variation: Date.now() % 1000000,
+        // No `variation` — see the matching note in interior.jsx. The same
+        // facade and the same choices reproduce the same render.
       };
 
       if (imageDataUrl) {
