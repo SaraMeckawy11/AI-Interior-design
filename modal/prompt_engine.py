@@ -862,71 +862,78 @@ def room_brief(space_type: str) -> dict:
     return ROOM_BRIEFS.get(key, _GENERIC_ROOM_BRIEF)
 
 
-#: The living room brief exactly as it stood before any of this work, kept
-#: verbatim because it was asked for verbatim.
+#: The living room brief as it stood at 898665e — early on the day all of this
+#: began, before the television, window and seating work — kept verbatim
+#: because it was asked for verbatim.
 #:
-#: Every other room uses the current brief — the stronger opening lock, the
-#: surfaces rule, the layout and material variation. The living room does not,
-#: by explicit request: the older wording produced better-designed rooms, and
-#: the trade being accepted is that it carries the older, shorter architecture
-#: lock with it. That lock is the one that was in place when rooms were first
-#: reported as not respecting the input structure, so if living rooms start
-#: drifting again, this block is the first place to look.
+#: Every other room uses the current brief. The living room does not, by
+#: explicit request: this wording produced better-designed rooms. What it gives
+#: up is stated plainly so the trade is not forgotten — there is no WINDOWS ARE
+#: UNTOUCHABLE clause here, no surfaces-refinished rule and no spacing line. The
+#: shell and openings are held by the shorter pair of sentences below, so if
+#: living rooms start drifting again, this block is the first place to look.
 #:
-#: It is reproduced rather than reconstructed, and a test renders the
-#: pre-change module and compares against it, so a stray edit here fails
-#: instead of quietly becoming a third version of the brief.
+#: It is reproduced rather than reconstructed, and the test suite pins the exact
+#: text, because "as it was" only means something if something checks: this
+#: brief has been rewritten and reverted several times over.
 _LEGACY_ARCHITECTURE_LOCKS = {
     PHOTO_SOURCE: (
-        "ARCHITECTURE - HIGHEST PRIORITY:\n"
-        "- Change finishes and movable contents only. Keep every wall, door, "
-        "window and balcony opening exactly as it appears: same count, size, "
-        "shape, position and sill height. Never add, remove, move, resize, cover "
-        "or reshape an opening.\n"
-        "- Keep the camera position, framing and perspective identical.\n"
+        "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
+        "- The shell is fixed: every wall, corner, ceiling and floor edge stays "
+        "on the same pixels; the room keeps its exact size, shape and proportions.\n"
+        "- Openings are fixed: the same number of doors and windows, each at the "
+        "same position, size, sill height and shape. Add none, remove none, move "
+        "none, resize none, cover none.\n"
+        "- Camera position, lens, framing and perspective stay identical. Change "
+        "finishes and movable contents only.\n"
     ),
     WALKTHROUGH_SOURCE: (
         "ARCHITECTURE:\n"
         "- Change finishes and movable contents only. Preserve all walls, doors, "
-        "windows, balcony openings and camera framing.\n"
+        "windows, balcony openings and camera framing, at the same count and in "
+        "the same places. Add no opening that is not already there.\n"
     ),
 }
 
-#: Room keys served by the pre-change brief above rather than by ROOM_BRIEFS.
+#: The three arrangements it rotated through, in their original order.
+_LEGACY_LIVING_ROOM_LAYOUTS = (
+    "Set the sofa square to the longest solid wall, with the rug under the front legs of every seat.",
+    "Float the seating off the walls around the rug, with a console table behind the sofa.",
+    "Run an L-shaped sofa into the corner furthest from the door, with the lounge chairs facing it.",
+)
+
+#: Room keys served by the brief above rather than by ROOM_BRIEFS.
 LEGACY_BRIEF_ROOMS = {"living room"}
 
 
-def _legacy_living_room_brief(room_type, style, color_rule, source):
-    """The living room brief as it was before any change, word for word."""
+def _legacy_living_room_brief(room_type, style, color_rule, source, variation_index=0):
+    """The living room brief as it was at 898665e, word for word."""
+    layout = _LEGACY_LIVING_ROOM_LAYOUTS[
+        variation_index % len(_LEGACY_LIVING_ROOM_LAYOUTS)
+    ]
     return (
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
         f"{_LEGACY_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
-        "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
+        f"THIS IS A {room_type.upper()}, not any other room. It contains no bed, "
+        "no desk, no dining table, no kitchen cabinetry, no sanitaryware.\n"
+        "ITEM LIMITS: one ceiling fixture, one floor lamp beside the seating, one "
         "potted floor plant; no other lamps or greenery.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
-        "- Design as a senior interior designer: balanced proportions, a mix of "
-        "large, medium and small forms, one focal point.\n"
         "- Resolve a conversation group with sofa and complementary seating, and "
-        "a TV centred above a media console on a solid wall. Choose the layout, "
-        "furniture count and scale from the visible space.\n"
+        "a TV centred above a media console on a solid wall. Take furniture count "
+        "and scale from the visible space.\n"
         "- Designer furniture, clean silhouettes, honest materials. The coffee "
-        "table is the hero piece: one sculptural, well-proportioned table in "
-        "stone, solid timber or slim metal and glass, low, centred on the rug.\n"
-        "- Group seating around a correctly sized rug; align art and lighting with "
-        "the furniture below.\n"
-        "- Choose all finishes and furnishings as one scheme; force no "
-        "predetermined material or color.\n"
+        "table is the hero piece: one sculptural low table in stone, solid timber "
+        "or slim metal and glass, centred on the rug.\n"
+        f"- LAYOUT: {layout} Align art and lighting with the furniture.\n"
         "- DECORATE: layered cushions, a folded throw, one large artwork at eye "
-        "level, and one tight group per surface at varied heights - books, a "
-        "tray, a ceramic, a sculptural object. Leave most surfaces bare; nothing "
-        "on the floor.\n"
-        f"- COLOR: {color_rule}, weighted as a designer would: lightest or most "
-        "muted over the large fields, mid-tones on upholstery, curtains and rugs, "
-        "the deepest color in a few small touches.\n"
-        "- Consistent undertones, each color echoed in two or three separated "
-        "places; no flat wash, muddy neutrals or oversaturation.\n"
-        "- Keep walkways clear; no clutter or duplicates.\n"
+        "level, one tight group per surface - books, a tray, a ceramic. Leave "
+        "most surfaces bare; nothing on the floor.\n"
+        f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on the "
+        "mid-sized surfaces, the deepest in a few small touches, each echoed in "
+        "two or three places. All finishes as one scheme.\n"
+        "- Keep walkways and door swings clear; no clutter or duplicates.\n"
         "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
     )
 
@@ -980,11 +987,13 @@ def build_gen_klein_interior_prompt(
     if is_floor_plan(room_type):
         return build_floor_plan_prompt(design_style=style, color_rule=color_rule)
 
-    # The living room keeps its pre-change brief, lock and all. See
+    # The living room keeps its earlier brief, lock and all. See
     # _legacy_living_room_brief for what is being traded for what.
     key = str(room_type).strip().lower()
     if ROOM_BRIEF_ALIASES.get(key, key) in LEGACY_BRIEF_ROOMS:
-        return _legacy_living_room_brief(room_type, style, color_rule, source)
+        return _legacy_living_room_brief(
+            room_type, style, color_rule, source, variation_index,
+        )
 
     brief = room_brief(room_type)
     # Two independent axes, so the combinations multiply instead of moving in

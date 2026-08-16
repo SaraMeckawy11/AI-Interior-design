@@ -290,69 +290,73 @@ def test_formal_reception_rooms_also_refuse_the_media_unit():
         )
 
 
-#: The living room brief, word for word, as it was before any of this work.
-#: Pinned here so the copy in prompt_engine cannot drift into a third version:
-#: it has already been rewritten, reverted, rewritten and reverted again, and
-#: "as it was" is only meaningful if something checks.
-_ORIGINAL_LIVING_ROOM = (
+#: The living room brief, word for word, as it stood at 898665e — early on the
+#: day this work began, before the television, window and seating changes.
+#:
+#: Pinned here because "as it was" is only meaningful if something checks. This
+#: brief has been rewritten and reverted several times over, and twice the thing
+#: restored was not the thing wanted; a literal copy in the test suite is what
+#: makes the next answer to "put it back" verifiable rather than remembered.
+_LEGACY_LIVING_ROOM = (
     "Redesign this Living Room in a refined Modern style, using the input photo "
     "as the architectural base.\n"
     "\n"
-    "ARCHITECTURE - HIGHEST PRIORITY:\n"
-    "- Change finishes and movable contents only. Keep every wall, door, window "
-    "and balcony opening exactly as it appears: same count, size, shape, "
-    "position and sill height. Never add, remove, move, resize, cover or "
-    "reshape an opening.\n"
-    "- Keep the camera position, framing and perspective identical.\n"
+    "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
+    "- The shell is fixed: every wall, corner, ceiling and floor edge stays on "
+    "the same pixels; the room keeps its exact size, shape and proportions.\n"
+    "- Openings are fixed: the same number of doors and windows, each at the "
+    "same position, size, sill height and shape. Add none, remove none, move "
+    "none, resize none, cover none.\n"
+    "- Camera position, lens, framing and perspective stay identical. Change "
+    "finishes and movable contents only.\n"
     "\n"
-    "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
+    "THIS IS A LIVING ROOM, not any other room. It contains no bed, no desk, no "
+    "dining table, no kitchen cabinetry, no sanitaryware.\n"
+    "ITEM LIMITS: one ceiling fixture, one floor lamp beside the seating, one "
     "potted floor plant; no other lamps or greenery.\n"
     "\n"
     "SENIOR DESIGN DIRECTION:\n"
-    "- Design as a senior interior designer: balanced proportions, a mix of "
-    "large, medium and small forms, one focal point.\n"
     "- Resolve a conversation group with sofa and complementary seating, and a "
-    "TV centred above a media console on a solid wall. Choose the layout, "
-    "furniture count and scale from the visible space.\n"
+    "TV centred above a media console on a solid wall. Take furniture count and "
+    "scale from the visible space.\n"
     "- Designer furniture, clean silhouettes, honest materials. The coffee table "
-    "is the hero piece: one sculptural, well-proportioned table in stone, solid "
-    "timber or slim metal and glass, low, centred on the rug.\n"
-    "- Group seating around a correctly sized rug; align art and lighting with "
-    "the furniture below.\n"
-    "- Choose all finishes and furnishings as one scheme; force no "
-    "predetermined material or color.\n"
+    "is the hero piece: one sculptural low table in stone, solid timber or slim "
+    "metal and glass, centred on the rug.\n"
+    "- LAYOUT: Set the sofa square to the longest solid wall, with the rug under "
+    "the front legs of every seat. Align art and lighting with the furniture.\n"
     "- DECORATE: layered cushions, a folded throw, one large artwork at eye "
-    "level, and one tight group per surface at varied heights - books, a tray, "
-    "a ceramic, a sculptural object. Leave most surfaces bare; nothing on the "
-    "floor.\n"
-    "- COLOR: Neutral as the overall direction, weighted as a designer would: "
-    "lightest or most muted over the large fields, mid-tones on upholstery, "
-    "curtains and rugs, the deepest color in a few small touches.\n"
-    "- Consistent undertones, each color echoed in two or three separated "
-    "places; no flat wash, muddy neutrals or oversaturation.\n"
-    "- Keep walkways clear; no clutter or duplicates.\n"
+    "level, one tight group per surface - books, a tray, a ceramic. Leave most "
+    "surfaces bare; nothing on the floor.\n"
+    "- COLOR: Neutral as the overall direction: lightest over the large fields, "
+    "mid-tones on the mid-sized surfaces, the deepest in a few small touches, "
+    "each echoed in two or three places. All finishes as one scheme.\n"
+    "- Keep walkways and door swings clear; no clutter or duplicates.\n"
     "- Photorealistic editorial interior, natural light, believable scale, "
     "contact shadows."
 )
 
 
-def test_living_room_brief_is_the_original_word_for_word():
+def test_living_room_brief_is_the_earlier_one_word_for_word():
     built = pe.build_gen_klein_interior_prompt(
         space_type="Living Room", design_style="Modern", color_tone="Neutral",
     )
-    assert built == _ORIGINAL_LIVING_ROOM, (
-        "the living room brief has drifted from the pre-change original:\n"
+    assert built == _LEGACY_LIVING_ROOM, (
+        "the living room brief has drifted from the 898665e original:\n"
         + "\n".join(
             line for line in __import__("difflib").unified_diff(
-                _ORIGINAL_LIVING_ROOM.splitlines(), built.splitlines(),
-                fromfile="original", tofile="built", lineterm="",
+                _LEGACY_LIVING_ROOM.splitlines(), built.splitlines(),
+                fromfile="898665e", tofile="built", lineterm="",
             )
         )
     )
 
 
-def test_living_room_ignores_the_variation_axes():
-    """It has no layout or material rotation, which is part of "as it was"."""
+def test_living_room_keeps_its_three_original_layouts():
+    """It rotated through three arrangements and still does — but no materials.
+
+    The material axis came later, so the legacy brief has three variants rather
+    than the nine a current room produces.
+    """
     briefs = {
         pe.build_gen_klein_interior_prompt(
             space_type="Living Room", design_style="Modern",
@@ -360,7 +364,9 @@ def test_living_room_ignores_the_variation_axes():
         )
         for index in range(9)
     }
-    assert len(briefs) == 1, "the legacy brief should not vary"
+    assert len(briefs) == 3, f"expected the three original layouts, got {len(briefs)}"
+    for layout in pe._LEGACY_LIVING_ROOM_LAYOUTS:
+        assert any(layout in brief for brief in briefs), f"lost layout: {layout}"
 
 
 def test_salon_and_living_room_are_opposites_about_the_tv():
