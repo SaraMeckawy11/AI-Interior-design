@@ -106,12 +106,21 @@ async function findActiveSubscription(appUserId, { productId, transactionId } = 
   // the dashboard product has not been attached correctly.
   if (!entitlement) return null;
 
+  // `unsubscribe_detected_at` is the store telling us auto-renew was switched
+  // off. The subscription is still active until it expires — that is why this
+  // is reported alongside a live entitlement rather than instead of one — but
+  // it will not renew, and it is the only durable record of that choice. A copy
+  // kept solely on our own Order row does not survive the row being deleted.
+  const unsubscribeDetectedAt = subscription.unsubscribe_detected_at || null;
+
   return {
     productId: verifiedProductId,
     transactionId: subscription.store_transaction_id || transactionId,
     purchaseDate: subscription.purchase_date,
     expiresDate: subscription.expires_date,
     entitlementId: entitlement[0],
+    unsubscribeDetectedAt,
+    autoRenew: !unsubscribeDetectedAt,
   };
 }
 

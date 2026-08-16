@@ -57,7 +57,17 @@ async function saveVerifiedSubscription(userId, verified, price = 0) {
   order.endDate = new Date(verified.expiresDate);
   order.transactionId = verified.transactionId;
   order.entitlementId = verified.entitlementId;
-  order.autoRenew = true;
+  // Taken from the store, never assumed. This was `true` unconditionally, which
+  // meant every re-verification undid a cancellation: restoring, reinstalling,
+  // or signing in again turned auto-renew back on in our copy while the store
+  // still had it off. It also came back on after the account was deleted and
+  // remade, because the flag lived only on the Order row that went with it —
+  // the entitlement transfers to the new account from the store, and so must
+  // the fact that it is not renewing.
+  order.autoRenew = verified.autoRenew !== false;
+  order.canceledAt = verified.unsubscribeDetectedAt
+    ? new Date(verified.unsubscribeDetectedAt)
+    : null;
   order.isActive = true;
 
   await order.save();
