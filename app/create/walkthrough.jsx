@@ -3,6 +3,7 @@ import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import * as MediaLibrary from "expo-media-library";
+import { ensurePhotoLibraryAccess, ensureSaveToLibraryAccess } from "../../lib/permissions";
 import { useFocusEffect, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1421,6 +1422,10 @@ export default function WalkthroughScreen() {
   }, [planOwnerId, projectId, refreshLibrary, token]);
 
   const uploadPlan = useCallback(async (targetProjectId = projectId) => {
+    // Asked before the picker opens rather than left to the throw below, so a
+    // person who has declined once is offered Settings instead of an error.
+    if (!(await ensurePhotoLibraryAccess())) return false;
+
     let result;
     try {
       result = await ImagePicker.launchImageLibraryAsync({
@@ -1841,8 +1846,9 @@ export default function WalkthroughScreen() {
   const saveToGallery = async () => {
     if (!snapshot) return;
     try {
-      const permission = await MediaLibrary.requestPermissionsAsync();
-      if (!permission.granted) return setNotice("Photo permission is needed to save this view.");
+      // Add-only access, with a route to Settings once the prompt has been
+      // spent. See lib/permissions.js.
+      if (!(await ensureSaveToLibraryAccess())) return;
       await MediaLibrary.saveToLibraryAsync(await writeTemp(snapshot));
       setNotice("Saved to your gallery.");
     } catch {

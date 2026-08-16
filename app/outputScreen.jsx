@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
+import { ensureSaveToLibraryAccess } from '../lib/permissions';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
@@ -112,12 +113,10 @@ export default function OutputScreen() {
   const handleDownload = async () => {
     if (!generatedImage) return;
     try {
-      const permission = await MediaLibrary.requestPermissionsAsync();
-      if (!permission.granted) {
-        setModalMessage("Cannot save image without permission.");
-        setModalVisible(true);
-        return;
-      }
+      // Asks for add-only access, and offers a route to Settings when the
+      // prompt can no longer appear. See lib/permissions.js.
+      if (!(await ensureSaveToLibraryAccess())) return;
+
       const fileUri = FileSystem.documentDirectory + 'generated-image.jpg';
       const downloadRes = await FileSystem.downloadAsync(generatedImage, fileUri);
       await MediaLibrary.saveToLibraryAsync(downloadRes.uri);

@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import COLORS from '../../constants/colors';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
+import { ensureCameraAccess, ensurePhotoLibraryAccess } from '../../lib/permissions';
 import { useAuthStore } from '../../authStore';
 import { LinearGradient } from 'expo-linear-gradient';
 import RoomTypeSelector from '../../components/create/RoomTypeSelector';
@@ -153,17 +154,7 @@ export default function Interior() {
   // Pick image
   const pickImage = async () => {
     try {
-      if (Platform.OS !== 'web') {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          setModalData({
-            title: 'Access Needed',
-            message: 'We need permission to access your photos or camera. Please enable access in your device settings.',
-          });
-          setModalVisible(true);
-          return;
-        }
-      }
+      if (!(await ensurePhotoLibraryAccess())) return;
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -199,17 +190,8 @@ export default function Interior() {
   // Take photo
   const takePhoto = async () => {
     try {
-      if (Platform.OS !== 'web') {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          setModalData({
-            title: 'Access Needed',
-            message: 'We need permission to access your camera. Please enable access in your device settings.',
-          });
-          setModalVisible(true);
-          return;
-        }
-      }
+      if (!(await ensureCameraAccess())) return;
+
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 1,
