@@ -9,12 +9,13 @@ import { grantCoins, purchaseReference, refundReference } from "../services/coin
 import {
   getActiveSubscription,
   getAnyActiveSubscription,
+  revenueCatApiKey,
 } from "../services/revenuecat.js";
 
 const router = express.Router();
 
-// RevenueCat API configuration
-const REVENUECAT_API_KEY = process.env.REVENUECAT_API_KEY;
+// RevenueCat API configuration. Read through the service so this copy is
+// trimmed the same way, and so it follows a value changed after startup.
 const REVENUECAT_URL = "https://api.revenuecat.com/v1/subscribers";
 
 const billingCycleForProduct = (productId) => {
@@ -264,7 +265,7 @@ router.post("/cancel-latest", isAuthenticated, async (req, res) => {
           },
           {
             headers: {
-              Authorization: `Bearer ${REVENUECAT_API_KEY}`,
+              Authorization: `Bearer ${revenueCatApiKey()}`,
               "Content-Type": "application/json",
             },
           }

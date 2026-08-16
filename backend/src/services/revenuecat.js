@@ -10,11 +10,36 @@ export function sameStoreProduct(left, right) {
   return a === b || a.split(':')[0] === b.split(':')[0];
 }
 
+/**
+ * The configured secret key, with the whitespace a dashboard paste adds.
+ *
+ * A key pasted into a hosting dashboard arrives with a trailing newline often
+ * enough that it is worth handling here. Node refuses to put a newline in a
+ * header value and throws ERR_INVALID_CHAR from inside axios, so the request
+ * never left the server — and the failure surfaced as a bare "Server error"
+ * after the customer had already been charged, because it is neither a missing
+ * key nor an HTTP status this code knew how to read.
+ */
+export function revenueCatApiKey() {
+  return String(process.env.REVENUECAT_API_KEY || '').trim();
+}
+
 /** Fetch RevenueCat's server-side view of one customer. */
 export async function getRevenueCatCustomer(appUserId) {
-  const apiKey = process.env.REVENUECAT_API_KEY;
+  const apiKey = revenueCatApiKey();
   if (!apiKey) {
     const error = new Error('REVENUECAT_API_KEY is not configured.');
+    error.code = 'REVENUECAT_NOT_CONFIGURED';
+    throw error;
+  }
+
+  // Anything still unprintable after trimming would throw from deep inside the
+  // HTTP client. Caught here instead, where the message can name the cause.
+  if (!/^[\x21-\x7e]+$/.test(apiKey)) {
+    const error = new Error(
+      'REVENUECAT_API_KEY contains characters that cannot be sent in a header. '
+      + 'Re-copy the secret key and check for stray spaces or line breaks.',
+    );
     error.code = 'REVENUECAT_NOT_CONFIGURED';
     throw error;
   }
