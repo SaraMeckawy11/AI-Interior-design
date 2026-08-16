@@ -22,16 +22,37 @@ export default function SignupForm({ setModalVisible }) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Matched to the server's own rule so the two cannot disagree; the server
+  // still enforces it, this only saves a round trip to be told so.
+  const MIN_PASSWORD_LENGTH = 6;
+
   const handleManualSignup = async () => {
-    if (!username || !email || !password) {
-      Alert.alert("All fields are required!");
+    const name = username.trim();
+    // Lower-cased here as well as on the server, so the address shown back to
+    // the person is the one their account will actually be keyed on.
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!name || !normalizedEmail || !password) {
+      Alert.alert("All fields are required", "Enter a name, an email address, and a password.");
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      Alert.alert("Check your email address", "That does not look like an email address.");
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      Alert.alert(
+        "Password is too short",
+        `Choose a password of at least ${MIN_PASSWORD_LENGTH} characters.`,
+      );
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const result = await register(username, email, password);
+      const result = await register(name, normalizedEmail, password);
       if (!result.success) {
-        Alert.alert("Error", result.error);
+        Alert.alert("Could not create your account", result.error);
       } else {
         setModalVisible(false);
         // `replace` so back from Create leaves the app rather than returning to
@@ -55,7 +76,10 @@ export default function SignupForm({ setModalVisible }) {
           value={username}
           onChangeText={setUsername}
           style={styles.input}
-          autoCapitalize="none"
+          autoCapitalize="words"
+          autoCorrect={false}
+          autoComplete="name"
+          textContentType="name"
         />
       </View>
 
@@ -69,6 +93,9 @@ export default function SignupForm({ setModalVisible }) {
           style={styles.input}
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          textContentType="emailAddress"
         />
       </View>
 
@@ -81,6 +108,12 @@ export default function SignupForm({ setModalVisible }) {
           onChangeText={setPassword}
           style={styles.input}
           secureTextEntry={!showPassword}
+          autoCapitalize="none"
+          autoCorrect={false}
+          // `newPassword`, not `password`: this is what makes iOS offer to
+          // generate and save a strong one rather than autofilling an old one.
+          autoComplete="new-password"
+          textContentType="newPassword"
         />
         <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
           <Ionicons
@@ -94,13 +127,18 @@ export default function SignupForm({ setModalVisible }) {
       {/* Signup Button */}
       <TouchableOpacity
         onPress={handleManualSignup}
-        style={styles.signupButton}
-        disabled={isLoading}
+        accessibilityRole="button"
+        accessibilityLabel="Create account"
+        style={[
+          styles.signupButton,
+          (isLoading || !username.trim() || !email.trim() || !password) && { opacity: 0.6 },
+        ]}
+        disabled={isLoading || !username.trim() || !email.trim() || !password}
       >
         {isLoading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.signupButtonText}>Sign Up</Text>
+          <Text style={styles.signupButtonText}>Create account</Text>
         )}
       </TouchableOpacity>
     </View>

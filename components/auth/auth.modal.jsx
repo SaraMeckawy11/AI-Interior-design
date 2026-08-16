@@ -29,13 +29,25 @@ export default function AuthModal({ setModalVisible }) {
   const [signingInProvider, setSigningInProvider] = useState(null);
   const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [signInError, setSignInError] = useState(null);
-  // `null` while the sheet is offering providers; "login" or "signup" once the
-  // person has chosen to use an email address instead. Apple's reviewers cannot
-  // be handed a Google account, and an account made with Sign in with Apple is
-  // tied to their own Apple ID — an email and password is the only credential
-  // pair that can go in App Store Connect's demo account fields.
-  const [emailMode, setEmailMode] = useState(null);
+  // Which of the two things this sheet is for. Google and Apple find-or-create
+  // either way, so the mode does not change what they do — but it does change
+  // what every label promises, and a sheet whose buttons all read "Sign in"
+  // offers a new person no way to understand that pressing one will register
+  // them. It also decides which email form is shown.
+  const [authMode, setAuthMode] = useState("signin");
+  // Whether the email form has been opened, in whichever mode is current.
+  // Apple's reviewers cannot be handed a Google account, and an account made
+  // with Sign in with Apple is tied to their own Apple ID — an email and
+  // password is the only credential pair that can go in App Store Connect's
+  // demo account fields.
+  const [emailOpen, setEmailOpen] = useState(false);
   const isSigningIn = signingInProvider !== null;
+  const registering = authMode === "signup";
+
+  const switchMode = (mode) => {
+    setSignInError(null);
+    setAuthMode(mode);
+  };
 
   useEffect(() => {
     // `webClientId` unconditionally. It used to be spread in only when it
@@ -165,44 +177,54 @@ export default function AuthModal({ setModalVisible }) {
             here pushes the two buttons, the terms and the whole decision
             further down a card that is already the only thing on screen. */}
         <Text style={styles.socialTitle} accessibilityRole="header">
-          {emailMode === "login"
-            ? "Sign in to Livinai"
-            : emailMode === "signup"
-              ? "Create your account"
-              : "Join Livinai"}
+          {registering ? "Create your account" : "Sign in to Livinai"}
         </Text>
         <Text style={styles.socialSubtitle}>
-          Save your designs to your account and pick them up on any device.
+          {registering
+            ? "Two free designs to start with, and everything you make is saved to your account."
+            : "Welcome back. Your designs and saved plans are waiting."}
         </Text>
 
-        {emailMode ? (
-          <View style={styles.emailLoginSection}>
-            {emailMode === "login" ? (
-              <LoginForm setModalVisible={setModalVisible} />
-            ) : (
-              <SignupForm setModalVisible={setModalVisible} />
-            )}
+        <View style={styles.authModeToggle} accessibilityRole="tablist">
+          <Pressable
+            accessibilityRole="tab"
+            accessibilityState={{ selected: !registering }}
+            disabled={isSigningIn}
+            onPress={() => switchMode("signin")}
+            style={({ pressed }) => [
+              styles.authModeItem,
+              !registering && styles.authModeItemActive,
+              pressed && styles.pressedSurface,
+            ]}
+          >
+            <Text style={[styles.authModeText, !registering && styles.authModeTextActive]}>
+              Sign in
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="tab"
+            accessibilityState={{ selected: registering }}
+            disabled={isSigningIn}
+            onPress={() => switchMode("signup")}
+            style={({ pressed }) => [
+              styles.authModeItem,
+              registering && styles.authModeItemActive,
+              pressed && styles.pressedSurface,
+            ]}
+          >
+            <Text style={[styles.authModeText, registering && styles.authModeTextActive]}>
+              Create account
+            </Text>
+          </Pressable>
+        </View>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                emailMode === "login"
-                  ? "Create an account with an email address instead"
-                  : "Sign in with an existing email address instead"
-              }
-              hitSlop={6}
-              style={styles.emailBackButton}
-              onPress={() => {
-                setSignInError(null);
-                setEmailMode(emailMode === "login" ? "signup" : "login");
-              }}
-            >
-              <Text style={styles.emailBackText}>
-                {emailMode === "login"
-                  ? "New here? Create an account"
-                  : "Already have an account? Sign in"}
-              </Text>
-            </Pressable>
+        {emailOpen ? (
+          <View style={styles.emailLoginSection}>
+            {registering ? (
+              <SignupForm setModalVisible={setModalVisible} />
+            ) : (
+              <LoginForm setModalVisible={setModalVisible} />
+            )}
 
             <Pressable
               accessibilityRole="button"
@@ -211,7 +233,7 @@ export default function AuthModal({ setModalVisible }) {
               style={styles.emailBackButton}
               onPress={() => {
                 setSignInError(null);
-                setEmailMode(null);
+                setEmailOpen(false);
               }}
             >
               <Text style={styles.emailBackText}>All sign-in options</Text>
@@ -227,7 +249,11 @@ export default function AuthModal({ setModalVisible }) {
                 </View>
               ) : (
                 <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonType={
+                    registering
+                      ? AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP
+                      : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                  }
                   buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
                   cornerRadius={14}
                   style={[styles.appleButton, isSigningIn && styles.providerButtonDisabled]}
@@ -239,7 +265,7 @@ export default function AuthModal({ setModalVisible }) {
               onPress={handleGoogleSignIn}
               disabled={isSigningIn}
               accessibilityRole="button"
-              accessibilityLabel="Sign in with Google"
+              accessibilityLabel={registering ? "Sign up with Google" : "Sign in with Google"}
               style={({ pressed }) => [
                 styles.googleButton,
                 pressed && !isSigningIn && styles.providerButtonPressed,
@@ -257,18 +283,24 @@ export default function AuthModal({ setModalVisible }) {
               <Text style={styles.googleText}>
                 {signingInProvider === "google"
                   ? "Signing in with Google…"
-                  : "Sign in with Google"}
+                  : registering
+                    ? "Sign up with Google"
+                    : "Sign in with Google"}
               </Text>
             </Pressable>
 
             <Pressable
               onPress={() => {
                 setSignInError(null);
-                setEmailMode("login");
+                setEmailOpen(true);
               }}
               disabled={isSigningIn}
               accessibilityRole="button"
-              accessibilityLabel="Continue with an email address"
+              accessibilityLabel={
+                registering
+                  ? "Create an account with an email address"
+                  : "Sign in with an email address"
+              }
               style={({ pressed }) => [
                 styles.emailButton,
                 pressed && !isSigningIn && styles.providerButtonPressed,
@@ -276,7 +308,9 @@ export default function AuthModal({ setModalVisible }) {
               ]}
             >
               <Ionicons name="mail-outline" size={20} color="#334039" />
-              <Text style={styles.emailButtonText}>Continue with email</Text>
+              <Text style={styles.emailButtonText}>
+                {registering ? "Sign up with email" : "Sign in with email"}
+              </Text>
             </Pressable>
 
         </View>

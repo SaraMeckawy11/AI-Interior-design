@@ -8,6 +8,10 @@ import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { sendToken } from "../../utils/sendToken.js";
 
 const router = express.Router();
+
+/** Kept in step with `minlength` on the User model's password field. */
+const MIN_PASSWORD_LENGTH = 6;
+
 const googleClient = new OAuth2Client();
 const appleJwks = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"));
 
@@ -102,6 +106,18 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
+    // Stated here rather than left to the schema. `minlength` on the model
+    // raises a ValidationError, which the catch at the bottom turned into a 500
+    // — so someone who chose a five-character password was told the server had
+    // broken, with nothing to suggest that shortening the one thing they could
+    // change would fix it.
+    if (String(password).length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Your password needs at least ${MIN_PASSWORD_LENGTH} characters.`,
+      });
+    }
+
     // Case-insensitive, so "Sara@Gmail.com" cannot become a second account
     // beside the "sara@gmail.com" this person already signed in with.
     const existingUser = await User.findByEmail(email);
@@ -128,6 +144,15 @@ router.post("/signup", async (req, res) => {
 
     return sendToken(user, res);
   } catch (error) {
+    // Anything the schema rejects is something the person typed, so it is a 400
+    // carrying the field's own message rather than a blanket 500.
+    if (error?.name === "ValidationError") {
+      const [first] = Object.values(error.errors || {});
+      return res.status(400).json({
+        success: false,
+        message: first?.message || "Those details could not be used to create an account.",
+      });
+    }
     console.error("Signup error:", error);
     return res.status(500).json({ success: false, message: "Internal server error" });
   }

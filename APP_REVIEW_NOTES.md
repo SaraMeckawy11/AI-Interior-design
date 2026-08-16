@@ -157,13 +157,13 @@ devices you did not test on, and do not list the Simulator as if it were hardwar
 
 ### 1. Create the demo account
 
-The sign-in sheet now offers **Continue with email** alongside Apple and Google, so
-you can hand Apple a real credential pair. Create one on a device:
+The sign-in sheet now has a **Sign in / Create account** switch at the top, and an
+email option alongside Apple and Google, so you can hand Apple a real credential
+pair. Create one on a device:
 
-1. Open the app → sign-in sheet → **Continue with email** → *New here? Create an
-   account*.
-2. Use something like `appreview@livinai.app` with a password you are willing to put
-   in App Store Connect.
+1. Open the app → sign-in sheet → **Create account** → **Sign up with email**.
+2. Use something like `appreview@livinai.app` with a password of at least six
+   characters that you are willing to put in App Store Connect.
 3. Generate one design on it so the Collection tab is not empty when the reviewer
    opens it.
 4. Enter those credentials in **App Store Connect → App Review Information → Sign-in
@@ -195,7 +195,18 @@ There is no user-generated *public* content in Livinai — designs are private t
 account — so no reporting or blocking mechanism is needed or shown. Say this
 explicitly to the reviewer if they ask.
 
-### 3. Check these in App Store Connect
+### 3. Rename the Google OAuth consent screen
+
+During Google sign-in the consent screen currently reads **"to continue to Roomify"**
+and "Review Roomify's privacy policy". A reviewer sees a different brand halfway
+through logging in to Livinai, which reads as a mismatch between the app and its
+backend. This is not in the code — it is the *App name* on the OAuth consent screen:
+
+**Google Cloud Console → APIs & Services → OAuth consent screen → Branding → App
+name** → change `Roomify` to `Livinai`, and check the app logo, support email, and
+the privacy policy / terms URLs on the same screen while you are there.
+
+### 4. Check these in App Store Connect
 
 - **Screenshots** must show the app in use — the Create screen mid-flow, a generated
   result, the Collection, the 3D walkthrough. Not the splash screen, not the login
