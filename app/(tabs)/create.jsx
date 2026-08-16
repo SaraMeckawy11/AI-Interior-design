@@ -72,7 +72,6 @@ const CARDS = [
     route: "/create/walkthrough",
     tint: COLORS.infoSoft,
     iconColor: COLORS.info,
-    badge: "New",
   },
 ];
 

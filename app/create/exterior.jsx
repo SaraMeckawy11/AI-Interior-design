@@ -21,6 +21,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import styles from '../../assets/styles/create/create.styles';
 import { useAuthStore } from '../../authStore';
 import ColorToneSelector from '../../components/create/ColorToneSelector';
+import GeneratingOverlay from '../../components/create/GeneratingOverlay';
 import DesignStyleSelector from '../../components/create/DesignStyleSelector';
 import ExtTypeSelector from '../../components/create/extTypeSelector';
 import COLORS from '../../constants/colors';
@@ -562,16 +563,10 @@ export default function Exterior() {
         </View>
       </Modal>
 
-      {/* Fullscreen Loading Modal */}
-      <Modal transparent animationType="fade" visible={loading}>
-        <View style={styles.loadingOverlay}>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.primaryDark} />
-            <Text style={styles.loadingText}>Designing your dream space...</Text>
-            <Text style={styles.loadingSubtext}>This may take up to 30 seconds</Text>
-          </View>
-        </View>
-      </Modal>
+      {/* The wait. See components/create/GeneratingOverlay.jsx — a spinner
+          over "up to 30 seconds" said nothing and promised a time this path
+          regularly overruns. */}
+      <GeneratingOverlay visible={loading} mode="exterior" title="Designing your exterior" />
 
       {/* Info / Error Modal */}
       <Modal
