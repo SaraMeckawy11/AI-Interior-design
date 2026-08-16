@@ -143,19 +143,41 @@ attach the licence documents here if you have them. -->
 
 ### 2. Devices and operating systems tested
 
-<!-- [YOU] Replace this block with the real list. Apple wants physical devices and the
-latest OS. Example of the shape they expect:
+- iPhone 17 — iOS 26 (physical device), via TestFlight
 
-- iPhone 15 Pro — iOS 18.5 (physical device)
-- iPhone 12 — iOS 18.4 (physical device)
-- iPad (10th generation) — iPadOS 18.5 (physical device)
+<!-- [YOU] Correct the iOS version to the exact one on the phone (Settings → General →
+About → Software Version), and add any other physical device you actually tested on.
+Do not list a device you did not test on, and do not list the Simulator as hardware. -->
 
-If you have only tested on one physical iPhone, list only that one. Do not list
-devices you did not test on, and do not list the Simulator as if it were hardware. -->
+The app is iPhone-only; `supportsTablet` is false, so it is not submitted for iPad.
 
 ### 1. Screen recording
 
-<!-- [YOU] Attach the recording. See the shot list in APP_REVIEW_NOTES.md. -->
+The attached recording was captured on the physical iPhone listed above and shows,
+in order:
+
+- **Sign-in** with Google (including iOS's own "Livinai Wants to Use
+  accounts.google.com to Sign In" prompt and the Google account chooser) and with
+  Sign in with Apple.
+- **Permissions.** The app's entry in iOS Settings, showing Photos, Camera and Allow
+  Tracking, and the Photo Library Access choice between None, Limited Access and Full
+  Access. Livinai works with Limited Access; it never requires the full library.
+- **Interior design**, end to end: choosing Take Photo or Choose from Gallery, picking
+  a photo, selecting room type, design style and colour tone, generating, and the
+  before/after comparison with Download and Share.
+- **Exterior design**, the same flow for a building exterior.
+- **3D Walkthrough**: drawing a floor plan on the grid, naming and sizing each room,
+  walking through the rendered scene, the top-down view, and the AI render.
+- **Subscriptions.** The Livinai Pro screen with both billing cycles, their titles,
+  lengths and prices, the auto-renew line, Terms of Use and Privacy Policy links, and
+  Restore purchases. A subscription is purchased and the account becomes Premium.
+- **Manage Subscription**: active plan, renewal date, auto-renewal state, change
+  plan, Payment History with the transaction, and Cancel subscription.
+- **Coin packs**, the one-time purchase alternative, and the balance they credit.
+- **Account deletion**: Profile → Delete Account → the confirmation explaining what is
+  removed → Delete Forever → signed out to the welcome screen.
+- **Account registration**: signing back in afterwards with Sign in with Apple, which
+  creates a new account in one tap and opens on an empty Collection.
 
 ---
 
@@ -177,44 +199,27 @@ If App Store Connect refuses to accept placeholder text, untick *Sign-in require
 and rely on the Notes — but say plainly in the Notes that an account is required and
 that Sign in with Apple creates it in one tap.
 
-### 2. Record the screen capture
+### 2. ~~Record the screen capture~~ — done
 
-Apple asks for one continuous recording, on a **physical device**, on the **latest
-iOS**, starting from launching the app. Cover, in this order:
+The recording covers every flow Apple listed: registration, login, account deletion,
+the subscription screen with its prices and legal links, a completed purchase, and
+the permission settings including tracking.
 
-1. Launch from the home screen (do not start mid-session).
-2. The App Tracking Transparency prompt at first launch.
-3. **Account registration** — sign in with an Apple ID that has never opened Livinai,
-   so the recording shows the account being created, landing on an empty Collection.
-4. Sign out from **Profile → Log out**, then **log in** again — show the Google
-   account picker appearing so it is clear the user chooses the account.
-5. **Create** tab → Interior → the photo-library permission prompt → pick a photo →
-   choose room type, style, colour → Generate → the result.
-6. Show the **camera** permission prompt too (Interior → take a photo).
-7. Save a design to Photos — shows the save-to-library permission prompt.
-8. **Collection** tab — show a saved design and deleting one.
-9. **3D Walkthrough** — draw a small plan, assign a room, render, walk through it.
-10. **Profile → Upgrade** — show both tabs, the subscription titles/lengths/prices,
-    the auto-renew line, the Terms of Use and Privacy Policy links, and
-    **Restore purchases**. Start a purchase and show the App Store sheet.
-11. The **rewarded ad** flow — Earn button → ad → coin added.
-12. **Profile → Manage Subscription** → show Cancel.
-13. **Account deletion** — Profile → Delete Account → confirm → show it signs out.
+The only thing not on camera is the *first-run* permission popups themselves, because
+the app was already installed when it was recorded and iOS shows each of those once
+per install. The recording answers the same question a different way, by opening the
+app's page in iOS Settings and showing Photos, Camera and Allow Tracking there. If a
+reviewer asks specifically to see the prompts, delete the app, reinstall from
+TestFlight and record a short second clip — the tracking prompt fires on first launch,
+the camera prompt on Take Photo, and the photo prompt on Choose from Gallery.
 
 There is no user-generated *public* content in Livinai — designs are private to the
-account — so no reporting or blocking mechanism is needed or shown. Say this
-explicitly to the reviewer if they ask.
+account and are never shown to another user — so there is no reporting or blocking
+mechanism to demonstrate. This is stated in the reviewer notes above.
 
-### 3. Rename the Google OAuth consent screen
+### 3. ~~Rename the Google OAuth consent screen~~ — done
 
-During Google sign-in the consent screen currently reads **"to continue to Roomify"**
-and "Review Roomify's privacy policy". A reviewer sees a different brand halfway
-through logging in to Livinai, which reads as a mismatch between the app and its
-backend. This is not in the code — it is the *App name* on the OAuth consent screen:
-
-**Google Cloud Console → APIs & Services → OAuth consent screen → Branding → App
-name** → change `Roomify` to `Livinai`, and check the app logo, support email, and
-the privacy policy / terms URLs on the same screen while you are there.
+The consent screen now reads "to continue to Livinai". Verified on device.
 
 ### 4. Check these in App Store Connect
 
