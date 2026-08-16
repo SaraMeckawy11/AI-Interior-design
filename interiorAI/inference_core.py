@@ -357,49 +357,22 @@ class ExteriorGenKleinEngine(_Engine):
             color_palette=color_palette,
         )
 
-        # Was `7 + creativity * 97`; creativity is a constant for every exterior
-        # space but Building, so two seeds served every exterior render. See
-        # prompt_engine.design_seed.
-        base_seed = design_seed(
-            space_type=room_type,
-            design_style=design_style,
-            color_tone=color_tone,
-            color_palette=color_palette,
-            mode=resolved_mode,
-            variation=variation,
-        )
-
-        def render(seed):
-            return self.pipe(
-                prompt=prompt,
-                image=[source],
-                width=width,
-                height=height,
-                num_inference_steps=4,
-                guidance_scale=1.0,
-                generator=self.torch.Generator(device=self.device).manual_seed(seed),
-            ).images[0].convert("RGB")
-
-        if preserve_geometry:
-            guard = StructureGuard(source, (width, height))
-            result, report = guard.best_of(
-                render, base_seed=base_seed, candidates=guard_candidates()
-            )
-            if not report["accepted"]:
-                print(
-                    f"[exterior] shipping best-effort render for '{room_type}': "
-                    f"score={report['score']} veto={report['veto'] or 'none'}"
-                )
-        else:
-            result = render(base_seed)
-            report = {
-                "score": None,
-                "accepted": None,
-                "veto": "",
-                "seed": base_seed,
-                "candidates": 1,
-                "attempts": [],
-            }
+        # Back to the exact ad7a9ba renderer, seed included. Hashing the seed
+        # and searching a ladder with the structure guard made this worse at
+        # holding the architecture: a facade is full of bright and dark
+        # rectangles, which is what the guard's opening proxy keys on, so it
+        # rejected good renders and shipped a different-seeded one. See the
+        # matching note in modal/app.py.
+        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
+        result = self.pipe(
+            prompt=prompt,
+            image=[source],
+            width=width,
+            height=height,
+            num_inference_steps=4,
+            guidance_scale=1.0,
+            generator=self.torch.Generator(device=self.device).manual_seed(seed),
+        ).images[0].convert("RGB")
 
         result = ImageEnhance.Contrast(result).enhance(1.025)
         result = ImageEnhance.Sharpness(result).enhance(1.08)
@@ -410,11 +383,7 @@ class ExteriorGenKleinEngine(_Engine):
             "message": "Image generated successfully",
             "generatedImage": base64.b64encode(buf.getvalue()).decode(),
             "prompt": prompt,
-            "structure_score": report["score"],
-            "structure": report,
-            "structure_guarded": bool(preserve_geometry),
-            "seed": report["seed"],
-            "candidates": report["candidates"],
+            "seed": seed,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,

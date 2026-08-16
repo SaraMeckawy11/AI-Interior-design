@@ -1001,59 +1001,6 @@ EXTERIOR_PROGRAMS = {
 #: client sends. Balcony appears in both maps, so mode wins for that one.
 EXTERIOR_SPACES = set(EXTERIOR_PROGRAMS) - {"balcony"}
 
-#: The architecture an exterior render is standing in front of, and must not
-#: edit, stated per space type.
-#:
-#: Every one of these used to get the generic geometry clause, because the hard
-#: lock in `build_prompt` was gated on ``space_type == "building"``. A garden or
-#: a driveway brief therefore said "preserve every opening" once, in a sentence
-#: mostly about walls and columns, and the model read the house behind the
-#: planting as background it was free to redraw — which is exactly how a render
-#: came back with a window or a door the house does not have.
-#:
-#: The point of naming it per type is that the wall behind a driveway is not the
-#: subject of the render, and a lock has to say so explicitly to be read.
-EXTERIOR_OPENING_LOCKS = {
-    "building": (
-        "the facade's openings: reproduce every window, door, vent and balcony at "
-        "the same count, size, shape and position, sills and heads included"
-    ),
-    "balcony": (
-        "the wall and railing behind: the same doors, windows and balustrade, at "
-        "the same count and size. Do not glaze in, open up or wall off anything"
-    ),
-    "terrace": (
-        "the building the terrace belongs to: the same doors and windows onto it, "
-        "at the same count and size, and the same parapet"
-    ),
-    "garden": (
-        "every building, wall, fence and gate in shot: the same doors and windows "
-        "in the same places. Plant in front of nothing that changes their count"
-    ),
-    "driveway": (
-        "the house and the garage: the same doors, windows and garage openings, at "
-        "the same count, width and position"
-    ),
-    "swimming pool area": (
-        "the pool's own outline and every building around it: the same doors and "
-        "windows, and the same pool shape, size and edge"
-    ),
-    "garage": (
-        "the garage shell: the same door opening, windows and roof line, at the "
-        "same count and size"
-    ),
-}
-
-
-def exterior_opening_lock(space_type: str) -> str:
-    """The 'do not invent an opening' clause for an exterior space type."""
-    key = str(space_type or "").strip().lower()
-    return EXTERIOR_OPENING_LOCKS.get(
-        key,
-        "every building, wall and boundary in shot: the same doors and windows, at "
-        "the same count, size and position",
-    )
-
 NEGATIVE_PROMPT = (
     "blurry, lowres, distorted, warped geometry, deformed architecture, wrong perspective, "
     "merged rooms, missing walls, floating furniture, duplicated furniture, repeated objects, "
@@ -1184,23 +1131,6 @@ def build_prompt(
     creativity = max(10, min(80, int(creativity or 42)))
 
     is_building = mode == "exterior" and (space_type or "").strip().lower() == "building"
-    # Every exterior render stands in front of architecture, not just the
-    # Building one — see EXTERIOR_OPENING_LOCKS. The named lock is appended to
-    # whichever geometry clause applies so a garden, a driveway or a pool brief
-    # can no longer treat the house behind it as redrawable background.
-    #
-    # Building is excluded because its own clause already enumerates openings
-    # down to sill and head heights, and because that brief is the longest one
-    # this engine produces: 45 more words would push its closing quality rules
-    # past the text encoder's 512-token window, trading a lock it already has
-    # for the rules it needs.
-    openings = (
-        f" THE OPENINGS ARE NOT YOURS TO CHANGE: keep {exterior_opening_lock(space_type)}. "
-        "Adding a window, door, gate or opening that is not in the photo, or "
-        "removing one that is, is a failed render."
-        if mode == "exterior" and preserve_geometry and not is_building
-        else ""
-    )
     geometry = (
         "THE INPUT BUILDING IS AN IMMUTABLE STRUCTURAL TEMPLATE. Preserve 100% of its visible "
         "architecture and pixel layout: identical footprint, silhouette, massing, story count, "
@@ -1220,7 +1150,7 @@ def build_prompt(
         if preserve_geometry
         else "Keep the same camera and recognisable structure. Small plausible finish-level "
         "architectural refinements are allowed, but do not invent impossible structure."
-    ) + openings
+    )
     freedom = (
         "highly restrained and spatially conservative"
         if creativity < 30

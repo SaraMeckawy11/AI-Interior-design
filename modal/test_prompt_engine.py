@@ -455,28 +455,43 @@ def test_photo_lock_fixes_both_the_shell_and_the_openings():
     assert lowered.index("the shell is fixed") < lowered.index("senior design direction")
 
 
-def test_every_exterior_type_locks_its_openings():
-    """The bug where a garden or a driveway render grew a window or a door."""
+def test_every_exterior_type_still_protects_its_openings():
+    """Every exterior brief forbids adding or removing an opening.
+
+    A per-type clause naming what each space stands in front of was added on
+    top of this and then taken off again: it made the renders worse at holding
+    the architecture, which is the one thing it was meant to help. What is
+    asserted here is the protection the exterior path has always had — the
+    Building clause enumerating every opening, or the general one for the rest.
+    """
     for space in APP_EXTERIOR_TYPES:
         prompt = pe.build_prompt(
             mode="exterior", space_type=space, design_style="Modern",
             color_tone="Warm White", material="Natural stone",
         ).lower()
         assert "window" in prompt and "door" in prompt
-        # Either the per-type lock or Building's own enumerating clause.
         assert (
-            "the openings are not yours to change" in prompt
-            or "keep the exact count, shape, size and position of every window, door" in prompt
-        ), f"{space} exterior brief has no opening lock"
-        assert "add" in prompt and "remove" in prompt
+            "keep the exact count, shape, size and position of every window, door" in prompt
+            or "never add, remove, move, resize, cover or convert an architectural opening" in prompt
+        ), f"{space} exterior brief has no opening protection"
 
 
-def test_exterior_lock_names_what_each_space_stands_in_front_of():
+def test_exterior_brief_matches_the_pinned_renderer():
+    """The exterior path is a historical implementation kept deliberately fixed.
+
+    `ExteriorGenKlein` is documented as the ad7a9ba renderer and is not a place
+    to try things: changes to its prompt and its seed both made the output
+    worse and were reverted. This fails if a per-type opening clause is
+    reintroduced into the brief.
+    """
+    assert not hasattr(pe, "exterior_opening_lock")
+    assert not hasattr(pe, "EXTERIOR_OPENING_LOCKS")
     for space in APP_EXTERIOR_TYPES:
-        lock = pe.exterior_opening_lock(space)
-        assert lock and "same" in lock.lower()
-    # An unknown exterior type still gets a usable lock rather than nothing.
-    assert pe.exterior_opening_lock("Roof Deck")
+        prompt = pe.build_prompt(
+            mode="exterior", space_type=space, design_style="Modern",
+            color_tone="Warm White", material="Natural stone",
+        ).lower()
+        assert "the openings are not yours to change" not in prompt
 
 
 def test_exterior_briefs_stay_inside_the_token_window():

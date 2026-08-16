@@ -418,11 +418,11 @@ class ExteriorGenKlein:
         preserve_geometry: bool = True,
         creativity: int = 42,
         color_palette: dict | None = None,
+        # Accepted and ignored: this renderer is pinned, so its seed comes from
+        # creativity alone. The parameter stays because the router passes it.
         variation: int = 0,
     ):
         from PIL import Image, ImageEnhance, ImageOps
-
-        from structure_guard import StructureGuard, guard_candidates
 
         source = ImageOps.exif_transpose(
             Image.open(io.BytesIO(_decode_base64_image_bytes(image)))
@@ -445,55 +445,30 @@ class ExteriorGenKlein:
             color_palette=color_palette,
         )
 
-        # This was `7 + creativity * 97`, and creativity is a constant 42 for
-        # every exterior space the app offers except Building (10). Two seeds
-        # served every exterior render in the product, which is why one garden
-        # looked like the next. Hashing the brief gives each space type, style
-        # and palette its own starting noise.
-        base_seed = design_seed(
-            space_type=room_type,
-            design_style=design_style,
-            color_tone=color_tone,
-            color_palette=color_palette,
-            mode=resolved_mode,
-            variation=variation,
-        )
-
-        def render(seed):
-            return self.pipe(
-                prompt=prompt,
-                image=[source],
-                width=width,
-                height=height,
-                num_inference_steps=4,
-                guidance_scale=1.0,
-                generator=self.torch.Generator(device="cuda").manual_seed(seed),
-            ).images[0].convert("RGB")
-
-        # An exterior that invents a window or a door is the failure users
-        # report on this path, and it is exactly what the guard's opening test
-        # measures — so the exterior gets the same treatment as the interior.
-        if preserve_geometry:
-            guard = StructureGuard(source, (width, height))
-            result, report = guard.best_of(
-                render, base_seed=base_seed, candidates=guard_candidates()
-            )
-            if not report["accepted"]:
-                print(
-                    f"[exterior] shipping best-effort render for '{room_type}': "
-                    f"score={report['score']} veto={report['veto'] or 'none'} "
-                    f"after {report['candidates']} candidate(s)"
-                )
-        else:
-            result = render(base_seed)
-            report = {
-                "score": None,
-                "accepted": None,
-                "veto": "",
-                "seed": base_seed,
-                "candidates": 1,
-                "attempts": [],
-            }
+        # Back to the exact ad7a9ba renderer, seed included.
+        #
+        # This briefly hashed the seed from the brief and then searched a ladder
+        # of seeds with the structure guard, on the reasoning that two seeds
+        # served every exterior in the product and that an invented window is
+        # what the guard measures. Both were true and the result was still
+        # worse: facades are full of bright and dark rectangles, which is
+        # exactly what the guard's opening proxy keys on, so it rejected good
+        # renders and shipped whichever different-seeded candidate scored better
+        # on a crude metric. A wrong seed loses the whole composition.
+        #
+        # This class exists to be the historical exterior path, unchanged. The
+        # guard stays on the interior, where it was calibrated and where it
+        # helps.
+        seed = 7 + max(10, min(80, int(creativity or 42))) * 97
+        result = self.pipe(
+            prompt=prompt,
+            image=[source],
+            width=width,
+            height=height,
+            num_inference_steps=4,
+            guidance_scale=1.0,
+            generator=self.torch.Generator(device="cuda").manual_seed(seed),
+        ).images[0].convert("RGB")
 
         result = ImageEnhance.Contrast(result).enhance(1.025)
         result = ImageEnhance.Sharpness(result).enhance(1.08)
@@ -504,11 +479,7 @@ class ExteriorGenKlein:
             "message": "Image generated successfully",
             "generatedImage": base64.b64encode(buf.getvalue()).decode(),
             "prompt": prompt,
-            "structure_score": report["score"],
-            "structure": report,
-            "structure_guarded": bool(preserve_geometry),
-            "seed": report["seed"],
-            "candidates": report["candidates"],
+            "seed": seed,
             "negative_prompt": "",
             "engine": "gen-klein",
             "model": FLUX_MODEL_ID,
@@ -1524,7 +1495,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v28-refinish-evenly",
+        "promptEngine": "gen-klein-per-room-briefs-v31-exterior-restored",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1555,7 +1526,13 @@ def health():
         "structureGuard": {
             "metrics": ["line_recall", "edge_recall", "opening_kept", "opening_added"],
             "vetoes": ["invented_opening", "lost_opening", "structure_moved"],
-            "appliesTo": ["interior", "exterior"],
+            # Interior only. It was put on the exterior too and made that
+            # path worse at holding the architecture: a facade is mostly
+            # bright and dark rectangles, which is what the opening proxy
+            # keys on, so it rejected good renders and shipped a
+            # different-seeded candidate that scored better on a crude
+            # metric. The exterior is back to its pinned renderer.
+            "appliesTo": ["interior"],
         },
         # Seeds are hashed from the brief instead of pinned, so two different
         # rooms cannot start from the same noise.
@@ -1577,6 +1554,9 @@ def health():
         "floorPlanBrief": "copy-the-model-reskin-surfaces",
         "exteriorPrompt": "ad7a9ba2c5b396c78dbf390aa6136a3262dd0cec",
         "exteriorEngine": "ad7a9ba-exact-full-path",
+        # Fixed seed, one render, no candidate search — as it was before
+        # the guard and the hashed seed were tried on this path.
+        "exteriorSeeding": "creativity-derived-pinned",
         "exteriorBuildingSeed": 977,
     }
 
