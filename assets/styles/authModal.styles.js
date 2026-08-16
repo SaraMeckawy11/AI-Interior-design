@@ -258,45 +258,6 @@ export default StyleSheet.create({
     // is what separates the two rather than a rule across the card.
     marginTop: verticalScale(26),
   },
-  // Sign in / Create account, as one segmented control rather than a link
-  // buried under the buttons. Both destinations are visible before anything is
-  // pressed, which is the only way a first-time visitor can tell that this sheet
-  // will register them — the provider buttons cannot say so on their own,
-  // because Google and Apple use one button for both.
-  authModeToggle: {
-    flexDirection: "row",
-    width: "100%",
-    marginTop: verticalScale(18),
-    padding: scale(4),
-    borderRadius: 14,
-    backgroundColor: COLORS.surfaceSunken,
-  },
-  authModeItem: {
-    flex: 1,
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 11,
-  },
-  authModeItemActive: {
-    backgroundColor: COLORS.surface,
-    shadowColor: COLORS.black,
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  authModeText: {
-    color: COLORS.textSecondary,
-    fontFamily: "Poppins_500Medium",
-    fontSize: scale(13),
-  },
-  authModeTextActive: {
-    color: COLORS.textPrimary,
-  },
-  pressedSurface: {
-    opacity: 0.72,
-  },
   emailButton: {
     width: "100%",
     height: 50,

@@ -20,8 +20,6 @@ import {
   GOOGLE_IOS_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
 } from "../../configs/googleAuth";
-import LoginForm from "./login";
-import SignupForm from "./signup";
 
 export default function AuthModal({ setModalVisible }) {
   const router = useRouter();
@@ -29,25 +27,7 @@ export default function AuthModal({ setModalVisible }) {
   const [signingInProvider, setSigningInProvider] = useState(null);
   const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [signInError, setSignInError] = useState(null);
-  // Which of the two things this sheet is for. Google and Apple find-or-create
-  // either way, so the mode does not change what they do — but it does change
-  // what every label promises, and a sheet whose buttons all read "Sign in"
-  // offers a new person no way to understand that pressing one will register
-  // them. It also decides which email form is shown.
-  const [authMode, setAuthMode] = useState("signin");
-  // Whether the email form has been opened, in whichever mode is current.
-  // Apple's reviewers cannot be handed a Google account, and an account made
-  // with Sign in with Apple is tied to their own Apple ID — an email and
-  // password is the only credential pair that can go in App Store Connect's
-  // demo account fields.
-  const [emailOpen, setEmailOpen] = useState(false);
   const isSigningIn = signingInProvider !== null;
-  const registering = authMode === "signup";
-
-  const switchMode = (mode) => {
-    setSignInError(null);
-    setAuthMode(mode);
-  };
 
   useEffect(() => {
     // `webClientId` unconditionally. It used to be spread in only when it
@@ -102,6 +82,17 @@ export default function AuthModal({ setModalVisible }) {
 
     try {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      // Clear the SDK's cached session first, so `signIn` has nothing to resume
+      // and has to ask which account to use. Without this, the second and every
+      // later sign-in silently reuses whichever account was picked the first
+      // time — which is wrong for anyone with a personal and a work address, and
+      // leaves someone signed into an account they cannot see a way to change.
+      // This signs out of Google inside this app only; the device's own Google
+      // accounts are untouched. It throws if there was no session, which is the
+      // ordinary first-run case and not a failure.
+      await GoogleSignin.signOut().catch(() => undefined);
+
       const result = await GoogleSignin.signIn();
       if (result.type !== "success") return;
 
@@ -177,69 +168,12 @@ export default function AuthModal({ setModalVisible }) {
             here pushes the two buttons, the terms and the whole decision
             further down a card that is already the only thing on screen. */}
         <Text style={styles.socialTitle} accessibilityRole="header">
-          {registering ? "Create your account" : "Sign in to Livinai"}
+          Join Livinai
         </Text>
         <Text style={styles.socialSubtitle}>
-          {registering
-            ? "Two free designs to start with, and everything you make is saved to your account."
-            : "Welcome back. Your designs and saved plans are waiting."}
+          Save your designs to your account and pick them up on any device.
         </Text>
 
-        <View style={styles.authModeToggle} accessibilityRole="tablist">
-          <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: !registering }}
-            disabled={isSigningIn}
-            onPress={() => switchMode("signin")}
-            style={({ pressed }) => [
-              styles.authModeItem,
-              !registering && styles.authModeItemActive,
-              pressed && styles.pressedSurface,
-            ]}
-          >
-            <Text style={[styles.authModeText, !registering && styles.authModeTextActive]}>
-              Sign in
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: registering }}
-            disabled={isSigningIn}
-            onPress={() => switchMode("signup")}
-            style={({ pressed }) => [
-              styles.authModeItem,
-              registering && styles.authModeItemActive,
-              pressed && styles.pressedSurface,
-            ]}
-          >
-            <Text style={[styles.authModeText, registering && styles.authModeTextActive]}>
-              Create account
-            </Text>
-          </Pressable>
-        </View>
-
-        {emailOpen ? (
-          <View style={styles.emailLoginSection}>
-            {registering ? (
-              <SignupForm setModalVisible={setModalVisible} />
-            ) : (
-              <LoginForm setModalVisible={setModalVisible} />
-            )}
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to all sign-in options"
-              hitSlop={6}
-              style={styles.emailBackButton}
-              onPress={() => {
-                setSignInError(null);
-                setEmailOpen(false);
-              }}
-            >
-              <Text style={styles.emailBackText}>All sign-in options</Text>
-            </Pressable>
-          </View>
-        ) : (
         <View style={styles.providerStack}>
             {appleSignInAvailable &&
               (signingInProvider === "apple" ? (
@@ -249,11 +183,7 @@ export default function AuthModal({ setModalVisible }) {
                 </View>
               ) : (
                 <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={
-                    registering
-                      ? AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP
-                      : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
-                  }
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
                   buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
                   cornerRadius={14}
                   style={[styles.appleButton, isSigningIn && styles.providerButtonDisabled]}
@@ -265,7 +195,7 @@ export default function AuthModal({ setModalVisible }) {
               onPress={handleGoogleSignIn}
               disabled={isSigningIn}
               accessibilityRole="button"
-              accessibilityLabel={registering ? "Sign up with Google" : "Sign in with Google"}
+              accessibilityLabel="Continue with Google"
               style={({ pressed }) => [
                 styles.googleButton,
                 pressed && !isSigningIn && styles.providerButtonPressed,
@@ -283,38 +213,11 @@ export default function AuthModal({ setModalVisible }) {
               <Text style={styles.googleText}>
                 {signingInProvider === "google"
                   ? "Signing in with Google…"
-                  : registering
-                    ? "Sign up with Google"
-                    : "Sign in with Google"}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => {
-                setSignInError(null);
-                setEmailOpen(true);
-              }}
-              disabled={isSigningIn}
-              accessibilityRole="button"
-              accessibilityLabel={
-                registering
-                  ? "Create an account with an email address"
-                  : "Sign in with an email address"
-              }
-              style={({ pressed }) => [
-                styles.emailButton,
-                pressed && !isSigningIn && styles.providerButtonPressed,
-                isSigningIn && styles.providerButtonDisabled,
-              ]}
-            >
-              <Ionicons name="mail-outline" size={20} color="#334039" />
-              <Text style={styles.emailButtonText}>
-                {registering ? "Sign up with email" : "Sign in with email"}
+                  : "Continue with Google"}
               </Text>
             </Pressable>
 
         </View>
-        )}
 
         {signInError && (
           <View

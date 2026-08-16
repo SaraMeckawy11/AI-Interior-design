@@ -36,11 +36,17 @@ client. General audience, rated 4+. No user-to-user contact and no social feed.
 
 ### 4. Setting up and reaching the main features
 
-The app requires an account, because designs are saved to it and sync across
-devices. Sign in with **email and password using the demo credentials supplied in
-the demo account fields** — Sign in with Apple and Sign in with Google are also
-offered on the sign-in sheet, but the email option is the one that works with the
-credentials above.
+The app requires an account, because designs are saved to it and sync across devices.
+Livinai does not operate its own username-and-password system: the only two ways in
+are **Sign in with Apple** and **Continue with Google**, both shown on the first
+screen.
+
+**There are therefore no demo credentials to supply, and none are needed.** Please
+tap **Sign in with Apple** and use your own Apple ID — you may choose "Hide My Email".
+That single tap both creates the account and signs in, and gives you a brand-new free
+account with the 2 free designs, so the full first-run experience is visible. To see
+registration specifically, use an Apple ID that has not opened Livinai before, or
+delete the account from **Profile → Delete Account** and sign in again.
 
 No sample files are needed: any photo of a room works, and the 3D Walkthrough is
 drawn inside the app with no input file at all. If you would like a test image, any
@@ -59,9 +65,9 @@ photo from the device's photo library is fine.
 | Restore purchases | **Profile** → *Upgrade* → **Restore purchases** |
 | Delete account | **Profile** tab → *Delete Account* (bottom of the screen) |
 
-The demo account is a normal free account, so you can see the free tier, the paywall,
-and the rewarded-ad flow. Tell us if you would prefer it pre-set to an active Pro
-subscription instead and we will flip it.
+An account created this way is a normal free account, so the free tier, the paywall,
+and the rewarded-ad flow are all reachable. Tell us if you would prefer an account
+pre-set to an active Pro subscription and we will provision one.
 
 ### 8. What can be bought, and where
 
@@ -155,19 +161,21 @@ devices you did not test on, and do not list the Simulator as if it were hardwar
 
 ## [YOU] Checklist before you resubmit
 
-### 1. Create the demo account
+### 1. Set the demo account fields correctly
 
-The sign-in sheet now has a **Sign in / Create account** switch at the top, and an
-email option alongside Apple and Google, so you can hand Apple a real credential
-pair. Create one on a device:
+Livinai has no password of its own, so there is nothing to type into the User name
+and Password boxes. Do **not** leave the fields blank with "Sign-in required" ticked
+— that reads as a missing credential and is itself a 2.1 rejection.
 
-1. Open the app → sign-in sheet → **Create account** → **Sign up with email**.
-2. Use something like `appreview@livinai.app` with a password of at least six
-   characters that you are willing to put in App Store Connect.
-3. Generate one design on it so the Collection tab is not empty when the reviewer
-   opens it.
-4. Enter those credentials in **App Store Connect → App Review Information → Sign-in
-   required → User name / Password**.
+In **App Store Connect → App Review Information**, keep *Sign-in required* **ticked**,
+and put a placeholder such as `Sign in with Apple` in both the User name and Password
+fields, then explain in the Notes (the reviewer notes above already do this) that the
+app authenticates only through Sign in with Apple and Google and that the reviewer
+should use their own Apple ID.
+
+If App Store Connect refuses to accept placeholder text, untick *Sign-in required*
+and rely on the Notes — but say plainly in the Notes that an account is required and
+that Sign in with Apple creates it in one tap.
 
 ### 2. Record the screen capture
 
@@ -176,8 +184,10 @@ iOS**, starting from launching the app. Cover, in this order:
 
 1. Launch from the home screen (do not start mid-session).
 2. The App Tracking Transparency prompt at first launch.
-3. **Account registration** with email — show creating a fresh account.
-4. Sign out, then **log in** again with the demo credentials.
+3. **Account registration** — sign in with an Apple ID that has never opened Livinai,
+   so the recording shows the account being created, landing on an empty Collection.
+4. Sign out from **Profile → Log out**, then **log in** again — show the Google
+   account picker appearing so it is clear the user chooses the account.
 5. **Create** tab → Interior → the photo-library permission prompt → pick a photo →
    choose room type, style, colour → Generate → the result.
 6. Show the **camera** permission prompt too (Interior → take a photo).
