@@ -862,27 +862,31 @@ def room_brief(space_type: str) -> dict:
     return ROOM_BRIEFS.get(key, _GENERIC_ROOM_BRIEF)
 
 
-#: The living room brief as it stood at 159c094 — 12 August, 14:48 — kept
+#: The living room brief as it stood at 5f8e267 — 12 August, 12:35 — kept
 #: verbatim because it was asked for verbatim.
 #:
-#: Why this commit and not the last one of that day: the last 12 August commit
-#: produces a living room brief byte-identical to the one at the end of 14
-#: August, and that text was tried and rejected. 159c094 is the only other
-#: version that existed on the 12th, and it is the one that reads "flooring,
-#: rugs, curtains, furniture, lighting, art, materials and finishes together as
-#: one coordinated scheme" — the curtains that were remembered as being in the
-#: living room brief are in this version and in no later one.
+#: Four versions existed across the 11th and 12th, and the other three are ruled
+#: out by evidence rather than by preference: the last two commits of the 12th
+#: produce a brief byte-identical to the end of the 14th, which was deployed and
+#: rejected, and the 14:48 version was deployed and rejected too. This is the
+#: one that was in place for most of the 12th.
 #:
-#: Every other room uses the current brief. This one has none of what came
-#: after: no WINDOWS ARE UNTOUCHABLE clause, no surfaces rule, no layout or
-#: material rotation, no per-room exclusion list. Its openings are held by the
-#: single ARCHITECTURE line below, which is the weakest lock in the history of
-#: this file — so if living rooms drift, this is why, and LEGACY_BRIEF_ROOMS is
-#: the switch.
+#: It is also the most design-led brief in the file's history. It asks for
+#: layered ambient, task and accent lighting, for furniture arranged as related
+#: groups rather than isolated objects, for a clear focal hierarchy aligned to
+#: the architecture, and for colours, forms and finishes repeated across
+#: separated elements "so the room feels intentionally composed, not assembled
+#: from unrelated pieces". It carries curtains inside its coordinated-scheme
+#: line. It imposes no item limits at all — no single ceiling fixture, no one
+#: plant — which is very likely why its rooms read as designed rather than
+#: rationed.
 #:
-#: It also predates the walkthrough having its own lock, so a captured 3D frame
-#: gets the same text a photograph does. That is faithful to the version, not an
-#: oversight.
+#: What it gives up is every architecture guarantee added since: its lock is a
+#: single sentence, and unlike later versions it does not enumerate openings,
+#: pin sill heights, name windows separately or say anything about surfaces. It
+#: predates the walkthrough having its own lock too, so a captured 3D frame gets
+#: the same text a photograph does. Every other room keeps the current brief;
+#: LEGACY_BRIEF_ROOMS is the switch if living rooms start drifting.
 LEGACY_BRIEF_ROOMS = {"living room"}
 
 
@@ -900,46 +904,46 @@ def _legacy_color_rule(color_tone, color_palette):
 
 
 def _legacy_living_room_brief(room_type, style, color_rule):
-    """The living room brief as it was at 159c094, word for word."""
+    """The living room brief as it was at 5f8e267, word for word."""
     return (
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
         "ARCHITECTURE:\n"
-        "- Change finishes and movable contents only. Preserve all walls, doors, "
-        "windows, balcony openings and camera framing.\n\n"
-        "VISIBLE ITEM LIMITS - HIGH PRIORITY:\n"
-        "- Show exactly one ceiling fixture and one floor lamp beside seating; no "
-        "other lamps.\n"
-        "- Show exactly one potted floor plant; no other greenery, flowers or "
-        "branches.\n\n"
+        "- Edit finishes, furniture and decor only. Retain the existing walls, "
+        "doors, windows, balcony openings and camera framing as they appear; do "
+        "not redesign the architecture.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
         "- Create one cohesive, professionally resolved room with balanced "
-        "proportions, clear circulation, visual rhythm and a focal point.\n"
+        "proportions, clear circulation, visual rhythm, a focal point and "
+        "layered lighting.\n"
         "- Resolve a complete conversation group with sofa, complementary "
         "seating, coffee table, correctly sized anchoring rug, and a TV centred "
         "above a media console on an available solid wall. Choose the layout, "
         "furniture count and scale from the visible space.\n"
-        "- Group furniture around a correctly sized rug; maintain realistic "
-        "clearances and align art, lighting and casework with nearby furniture.\n"
+        "- Arrange furniture as related groups, not isolated objects. Anchor the "
+        "main group with a correctly sized rug and maintain realistic "
+        "clearances.\n"
+        "- Establish a clear focal hierarchy; align art, lighting and casework "
+        "with nearby furniture and architectural lines. Use ambient, task and "
+        "accent lighting.\n"
         "- Select flooring, rugs, curtains, furniture, lighting, art, materials "
         "and finishes together as one coordinated scheme. Do not force a "
         "predetermined material or object color.\n"
-        "- DECORATE: use layered cushions and curated non-botanical table "
-        "styling: a small book stack, tray, ceramics and one sculptural object, "
-        "grouped at varied heights across tables and console. Leave most surface "
-        "area empty; no decor on the floor.\n"
-        f"- COLOR: {color_rule}. Distribute it naturally across the whole room as "
-        "anchors, not rigid paint matches: light or muted variants on large "
+        "- Repeat key colors, forms and finishes across separated elements so "
+        "the room feels intentionally composed, not assembled from unrelated "
+        "pieces.\n"
+        f"- COLOR: {color_rule}. Distribute it naturally across the whole room "
+        "as anchors, not rigid paint matches: light or muted variants on large "
         "fields, mid-tones for depth, and the strongest or darkest color "
         "sparingly.\n"
         "- Keep undertones consistent and repeat key colors in two or three "
         "separated details. Preserve realistic wood, stone and metal with "
         "balanced contrast; avoid a flat wash, muddy neutrals, oversaturation or "
         "equal color weight.\n"
-        "- Keep openings and walkways clear. Avoid clutter, mismatched pieces and "
-        "duplicates.\n"
-        "- Photorealistic editorial interior, natural light, believable scale and "
-        "contact shadows."
+        "- Keep every opening and walkway visible and usable. Avoid clutter, "
+        "mismatched pieces and repeated objects.\n"
+        "- Photorealistic editorial interior, natural light, believable scale "
+        "and contact shadows."
     )
 
 
