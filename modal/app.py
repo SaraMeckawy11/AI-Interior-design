@@ -1302,14 +1302,28 @@ def _dispatch(body: dict):
     # walkthrough. Only the interior brief reads it, and only to pick a geometry
     # lock; absent — every client before this field — means photograph.
     render_source = (body.get("render_source") or "").strip()
-    # Which re-roll of this brief the user is on. The seed is hashed from the
-    # brief, so without this a second attempt at the same room in the same style
-    # would reproduce the first exactly — correct for a cache, useless for
-    # somebody pressing generate again wanting a different design.
-    try:
-        variation = int(body.get("variation") or 0)
-    except (TypeError, ValueError):
-        variation = 0
+    # Which re-roll of this brief the user is on — and it is ignored here on
+    # purpose, so that the same photo and the same choices always come back as
+    # the same design.
+    #
+    # Taking the client's word for this was the bug. The app was sending
+    # `variation: Date.now()`, which made every generation re-roll its own seed;
+    # a design could never be reproduced, and two deployments could not be told
+    # apart by looking at their output. The app no longer sends it, but an app
+    # is installed on a phone and updates when the user updates it, so a fix
+    # that only lives in the client leaves every existing build still shuffling.
+    # The service is the only place that can make this true for everyone at
+    # once, so the value is dropped here rather than trusted.
+    #
+    # Set LIVINAI_ALLOW_VARIATION=1 to honour it again, which is what a real
+    # "try another" control would need — it would send 1, 2, 3 rather than the
+    # clock, and the render would still be reproducible from the number.
+    variation = 0
+    if os.environ.get("LIVINAI_ALLOW_VARIATION") == "1":
+        try:
+            variation = int(body.get("variation") or 0)
+        except (TypeError, ValueError):
+            variation = 0
 
     # Interior and exterior take one engine and only one: Gen-Klein, on the L40S.
     #
@@ -1546,11 +1560,12 @@ def health():
         # Seeds are hashed from the brief instead of pinned, so two different
         # rooms cannot start from the same noise.
         "seeding": "hashed-from-brief-plus-variation",
-        # The app sends no `variation`, so the same photo and the same choices
-        # reproduce the same render. It used to send a timestamp, which turned
-        # every generation into a re-roll and made two builds impossible to
-        # compare. The field is still read here for a future "try another".
+        # The same photo and the same choices reproduce the same render, and
+        # this is enforced here rather than trusted to the client: an installed
+        # app updates when its user updates it, so a fix that only lives in the
+        # phone leaves every existing build still shuffling its seed.
         "reproducible": True,
+        "variationPolicy": "ignored-server-side (LIVINAI_ALLOW_VARIATION=1 to honour)",
         # Layout rotates every variation, hero material every third, so a
         # room has nine distinguishable briefs per style rather than three.
         # The hero used to offer the model a list of materials to pick from,

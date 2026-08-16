@@ -432,7 +432,16 @@ router.post("/", isAuthenticated, async (req, res) => {
       preserve_geometry: preserveGeometry !== false,
       creativity: Number.isFinite(Number(creativity)) ? Number(creativity) : 42,
       render_source: typeof renderSource === "string" ? renderSource : "",
-      variation: Number.isFinite(Number(variation)) ? Number(variation) : 0,
+      // Always 0, so the same photo and the same choices reproduce the same
+      // design. Older app builds still send a timestamp here, which made every
+      // render a re-roll of its own seed and meant a design could never be
+      // reproduced. The inference hosts drop it too — this is the same rule
+      // stated at the layer that can be fixed without an app release.
+      // ALLOW_DESIGN_VARIATION=1 restores it for a real "try another" control.
+      variation:
+        process.env.ALLOW_DESIGN_VARIATION === "1" && Number.isFinite(Number(variation))
+          ? Number(variation)
+          : 0,
     };
 
     // Modal first, RunPod second. Whatever was held above is given back on every

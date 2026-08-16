@@ -179,10 +179,14 @@ def handler(event):
             preserve_geometry=body.get("preserve_geometry", True),
             creativity=int(body.get("creativity") or 42),
             color_palette=color_palette,
-            # Which re-roll of this brief the user is on. Both engines hash their
-            # seed from the brief, so without this a second attempt at the same
-            # room would reproduce the first exactly.
-            variation=_int_or_zero(body.get("variation")),
+            # Ignored unless explicitly enabled, matching the Modal router:
+            # clients in the field still send a timestamp here, which made every
+            # render a re-roll of its own seed. See the note in modal/app.py.
+            variation=(
+                _int_or_zero(body.get("variation"))
+                if os.environ.get("LIVINAI_ALLOW_VARIATION") == "1"
+                else 0
+            ),
             **source_kwargs,
         )
 
