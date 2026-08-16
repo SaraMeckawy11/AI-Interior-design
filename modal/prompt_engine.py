@@ -889,6 +889,24 @@ def room_brief(space_type: str) -> dict:
 #: LEGACY_BRIEF_ROOMS is the switch if living rooms start drifting.
 LEGACY_BRIEF_ROOMS = {"living room"}
 
+#: The seed every interior render used on 12 August, before seeds were hashed
+#: from the brief.
+#:
+#: Restoring the words was not enough to restore the pictures, and the reason is
+#: that a brief is only half the input. At four steps the noise field decides
+#: most of the composition, so the same sentences over a different seed produce
+#: a different room. On 12 August every interior started from 7; today they
+#: start from a hash of the brief, which is what stopped a kitchen and a bedroom
+#: arriving as the same arrangement — worth keeping everywhere except here,
+#: where the point is to reproduce what that day actually produced.
+LEGACY_BRIEF_SEED = 7
+
+
+def uses_legacy_brief(space_type) -> bool:
+    """Whether this room is served the pre-change brief, seed and pipeline."""
+    key = str(space_type or "").strip().lower()
+    return ROOM_BRIEF_ALIASES.get(key, key) in LEGACY_BRIEF_ROOMS
+
 
 def _legacy_color_rule(color_tone, color_palette):
     """That version's own colour sentence, which was worded differently."""
@@ -998,8 +1016,7 @@ def build_gen_klein_interior_prompt(
 
     # The living room keeps its earlier brief, lock and all. See
     # _legacy_living_room_brief for what is being traded for what.
-    key = str(room_type).strip().lower()
-    if ROOM_BRIEF_ALIASES.get(key, key) in LEGACY_BRIEF_ROOMS:
+    if uses_legacy_brief(room_type):
         return _legacy_living_room_brief(
             room_type, style, _legacy_color_rule(tone, color_palette),
         )

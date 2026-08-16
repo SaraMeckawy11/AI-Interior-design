@@ -41,6 +41,7 @@ import gc
 import io
 
 from prompt_engine import (
+    LEGACY_BRIEF_SEED,
     NEGATIVE_PROMPT,
     build_gen_klein_interior_prompt,
     build_prompt,
@@ -48,6 +49,7 @@ from prompt_engine import (
     design_seed,
     resolve_mode,
     resolve_render_source,
+    uses_legacy_brief,
 )
 from structure_guard import StructureGuard, guard_candidates
 
@@ -503,6 +505,11 @@ class GenKleinEngine(_Engine):
             mode=resolved_mode,
             variation=variation,
         )
+        # A room on an older brief needs that brief's pipeline too. See the
+        # matching note in modal/app.py.
+        legacy = resolved_mode == "interior" and uses_legacy_brief(room_type)
+        if legacy:
+            base_seed = LEGACY_BRIEF_SEED
         if resolved_mode == "interior" and room_type.strip().lower() != "prompt only":
             prompt = build_gen_klein_interior_prompt(
                 space_type=room_type or "Living Room",
@@ -582,7 +589,13 @@ class GenKleinEngine(_Engine):
         # The old edge-recall number was measured and then ignored, so a render
         # that moved a window shipped like one that did not. It now decides —
         # except where preserving the input is not what was asked for.
-        guarded = bool(preserve_geometry) and room_type.strip().lower() != "prompt only"
+        # Unguarded on the legacy path: that version made one render and
+        # shipped it, and a re-roll would undo the seed restoration.
+        guarded = (
+            bool(preserve_geometry)
+            and room_type.strip().lower() != "prompt only"
+            and not legacy
+        )
         if guarded:
             guard = StructureGuard(source, (width, height))
             result, report = guard.best_of(

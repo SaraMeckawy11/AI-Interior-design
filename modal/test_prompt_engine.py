@@ -348,6 +348,23 @@ def test_living_room_is_the_one_brief_that_mentions_curtains():
         assert "curtain" not in interior(room).lower(), f"{room} asks for curtains"
 
 
+def test_the_legacy_room_is_identified_for_the_engine_too():
+    """Restoring the words was not enough; the engine has to know as well.
+
+    A brief is half the input. At four steps the noise field decides most of
+    the composition, so the same sentences over a different seed give a
+    different room — which is why the restored text still did not reproduce
+    what that day produced. The engine branches on this helper to use the seed
+    that version ran on, and to skip the candidate search that did not exist.
+    """
+    assert pe.uses_legacy_brief("Living Room")
+    assert pe.uses_legacy_brief("living room")
+    assert pe.uses_legacy_brief("Lounge")          # alias resolves to it
+    assert pe.LEGACY_BRIEF_SEED == 7               # what every interior used then
+    for room in CURRENT_BRIEF_ROOMS:
+        assert not pe.uses_legacy_brief(room), f"{room} should use the current pipeline"
+
+
 def test_living_room_has_no_item_limits():
     """Part of why its rooms read as designed rather than rationed."""
     built = interior("Living Room").lower()

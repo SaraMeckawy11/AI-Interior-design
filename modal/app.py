@@ -57,6 +57,7 @@ except ImportError:  # pragma: no cover
     HTTPException = None
 
 from prompt_engine import (
+    LEGACY_BRIEF_SEED,
     NEGATIVE_PROMPT,
     build_gen_klein_interior_prompt,
     build_prompt,
@@ -65,6 +66,7 @@ from prompt_engine import (
     is_floor_plan,
     resolve_mode,
     resolve_render_source,
+    uses_legacy_brief,
 )
 
 # ---------------------------------------------------------------------------
@@ -645,6 +647,13 @@ class GenKlein:
             mode=resolved_mode,
             variation=variation,
         )
+        # A room restored to an older brief needs the pipeline that brief ran
+        # on, not just its words. Restoring the text alone did not reproduce the
+        # pictures, because at four steps the seed decides most of the
+        # composition — see prompt_engine.LEGACY_BRIEF_SEED.
+        legacy = resolved_mode == "interior" and uses_legacy_brief(room_type)
+        if legacy:
+            base_seed = LEGACY_BRIEF_SEED
         if resolved_mode == "interior" and room_type.strip().lower() != "prompt only":
             prompt = build_gen_klein_interior_prompt(
                 space_type=room_type or "Living Room",
@@ -740,7 +749,14 @@ class GenKlein:
         # The guard is skipped where preserving the input is not what was asked
         # for — a custom prompt-only brief may legitimately rebuild the scene —
         # and where the client explicitly turned geometry preservation off.
-        guarded = bool(preserve_geometry) and room_type.strip().lower() != "prompt only"
+        # The legacy path is deliberately unguarded: on 12 August there was no
+        # candidate search, one render was made and shipped, and a guard that
+        # re-rolls to a different seed would undo the seed restoration above.
+        guarded = (
+            bool(preserve_geometry)
+            and room_type.strip().lower() != "prompt only"
+            and not legacy
+        )
         if guarded:
             guard = StructureGuard(source, (width, height))
             result, report = guard.best_of(
@@ -1495,7 +1511,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v40-living-room-5f8e267",
+        "promptEngine": "gen-klein-per-room-briefs-v41-living-room-5f8e267-seed-7",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1522,7 +1538,7 @@ def health():
         "roomBriefs": "per-room-with-exclusions",
         # The living room is the exception, by request: it is served the brief
         # it had before any of this work, older architecture lock included.
-        "legacyBriefRooms": {"living room": "5f8e267 (12 Aug 12:35)"},
+        "legacyBriefRooms": {"living room": "5f8e267 (12 Aug 12:35), seed 7, unguarded"},
         # Candidates are measured against the source's own line and opening
         # structure and re-rolled if they moved it. Off means the request asked
         # for no geometry preservation.
