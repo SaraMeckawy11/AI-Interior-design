@@ -862,79 +862,84 @@ def room_brief(space_type: str) -> dict:
     return ROOM_BRIEFS.get(key, _GENERIC_ROOM_BRIEF)
 
 
-#: The living room brief as it stood at 898665e — early on the day all of this
-#: began, before the television, window and seating work — kept verbatim
-#: because it was asked for verbatim.
+#: The living room brief as it stood at 159c094 — 12 August, 14:48 — kept
+#: verbatim because it was asked for verbatim.
 #:
-#: Every other room uses the current brief. The living room does not, by
-#: explicit request: this wording produced better-designed rooms. What it gives
-#: up is stated plainly so the trade is not forgotten — there is no WINDOWS ARE
-#: UNTOUCHABLE clause here, no surfaces-refinished rule and no spacing line. The
-#: shell and openings are held by the shorter pair of sentences below, so if
-#: living rooms start drifting again, this block is the first place to look.
+#: Why this commit and not the last one of that day: the last 12 August commit
+#: produces a living room brief byte-identical to the one at the end of 14
+#: August, and that text was tried and rejected. 159c094 is the only other
+#: version that existed on the 12th, and it is the one that reads "flooring,
+#: rugs, curtains, furniture, lighting, art, materials and finishes together as
+#: one coordinated scheme" — the curtains that were remembered as being in the
+#: living room brief are in this version and in no later one.
 #:
-#: It is reproduced rather than reconstructed, and the test suite pins the exact
-#: text, because "as it was" only means something if something checks: this
-#: brief has been rewritten and reverted several times over.
-_LEGACY_ARCHITECTURE_LOCKS = {
-    PHOTO_SOURCE: (
-        "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
-        "- The shell is fixed: every wall, corner, ceiling and floor edge stays "
-        "on the same pixels; the room keeps its exact size, shape and proportions.\n"
-        "- Openings are fixed: the same number of doors and windows, each at the "
-        "same position, size, sill height and shape. Add none, remove none, move "
-        "none, resize none, cover none.\n"
-        "- Camera position, lens, framing and perspective stay identical. Change "
-        "finishes and movable contents only.\n"
-    ),
-    WALKTHROUGH_SOURCE: (
-        "ARCHITECTURE:\n"
-        "- Change finishes and movable contents only. Preserve all walls, doors, "
-        "windows, balcony openings and camera framing, at the same count and in "
-        "the same places. Add no opening that is not already there.\n"
-    ),
-}
-
-#: The three arrangements it rotated through, in their original order.
-_LEGACY_LIVING_ROOM_LAYOUTS = (
-    "Set the sofa square to the longest solid wall, with the rug under the front legs of every seat.",
-    "Float the seating off the walls around the rug, with a console table behind the sofa.",
-    "Run an L-shaped sofa into the corner furthest from the door, with the lounge chairs facing it.",
-)
-
-#: Room keys served by the brief above rather than by ROOM_BRIEFS.
+#: Every other room uses the current brief. This one has none of what came
+#: after: no WINDOWS ARE UNTOUCHABLE clause, no surfaces rule, no layout or
+#: material rotation, no per-room exclusion list. Its openings are held by the
+#: single ARCHITECTURE line below, which is the weakest lock in the history of
+#: this file — so if living rooms drift, this is why, and LEGACY_BRIEF_ROOMS is
+#: the switch.
+#:
+#: It also predates the walkthrough having its own lock, so a captured 3D frame
+#: gets the same text a photograph does. That is faithful to the version, not an
+#: oversight.
 LEGACY_BRIEF_ROOMS = {"living room"}
 
 
-def _legacy_living_room_brief(room_type, style, color_rule, source, variation_index=0):
-    """The living room brief as it was at 898665e, word for word."""
-    layout = _LEGACY_LIVING_ROOM_LAYOUTS[
-        variation_index % len(_LEGACY_LIVING_ROOM_LAYOUTS)
-    ]
+def _legacy_color_rule(color_tone, color_palette):
+    """That version's own colour sentence, which was worded differently."""
+    tone = color_tone or "Neutral"
+    selected = color_palette.get("colors") if isinstance(color_palette, dict) else None
+    if isinstance(selected, list) and len(selected) >= 3:
+        names = ", ".join(
+            str((entry.get("name") if isinstance(entry, dict) else entry) or tone).strip()
+            for entry in selected[:3]
+        )
+        return f"Use the selected palette ({names}) as an overall direction"
+    return f"Use {tone} as the overall color direction"
+
+
+def _legacy_living_room_brief(room_type, style, color_rule):
+    """The living room brief as it was at 159c094, word for word."""
     return (
         f"Redesign this {room_type} in a refined {style} style, using the input "
         "photo as the architectural base.\n\n"
-        f"{_LEGACY_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
-        f"THIS IS A {room_type.upper()}, not any other room. It contains no bed, "
-        "no desk, no dining table, no kitchen cabinetry, no sanitaryware.\n"
-        "ITEM LIMITS: one ceiling fixture, one floor lamp beside the seating, one "
-        "potted floor plant; no other lamps or greenery.\n\n"
+        "ARCHITECTURE:\n"
+        "- Change finishes and movable contents only. Preserve all walls, doors, "
+        "windows, balcony openings and camera framing.\n\n"
+        "VISIBLE ITEM LIMITS - HIGH PRIORITY:\n"
+        "- Show exactly one ceiling fixture and one floor lamp beside seating; no "
+        "other lamps.\n"
+        "- Show exactly one potted floor plant; no other greenery, flowers or "
+        "branches.\n\n"
         "SENIOR DESIGN DIRECTION:\n"
-        "- Resolve a conversation group with sofa and complementary seating, and "
-        "a TV centred above a media console on a solid wall. Take furniture count "
-        "and scale from the visible space.\n"
-        "- Designer furniture, clean silhouettes, honest materials. The coffee "
-        "table is the hero piece: one sculptural low table in stone, solid timber "
-        "or slim metal and glass, centred on the rug.\n"
-        f"- LAYOUT: {layout} Align art and lighting with the furniture.\n"
-        "- DECORATE: layered cushions, a folded throw, one large artwork at eye "
-        "level, one tight group per surface - books, a tray, a ceramic. Leave "
-        "most surfaces bare; nothing on the floor.\n"
-        f"- COLOR: {color_rule}: lightest over the large fields, mid-tones on the "
-        "mid-sized surfaces, the deepest in a few small touches, each echoed in "
-        "two or three places. All finishes as one scheme.\n"
-        "- Keep walkways and door swings clear; no clutter or duplicates.\n"
-        "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
+        "- Create one cohesive, professionally resolved room with balanced "
+        "proportions, clear circulation, visual rhythm and a focal point.\n"
+        "- Resolve a complete conversation group with sofa, complementary "
+        "seating, coffee table, correctly sized anchoring rug, and a TV centred "
+        "above a media console on an available solid wall. Choose the layout, "
+        "furniture count and scale from the visible space.\n"
+        "- Group furniture around a correctly sized rug; maintain realistic "
+        "clearances and align art, lighting and casework with nearby furniture.\n"
+        "- Select flooring, rugs, curtains, furniture, lighting, art, materials "
+        "and finishes together as one coordinated scheme. Do not force a "
+        "predetermined material or object color.\n"
+        "- DECORATE: use layered cushions and curated non-botanical table "
+        "styling: a small book stack, tray, ceramics and one sculptural object, "
+        "grouped at varied heights across tables and console. Leave most surface "
+        "area empty; no decor on the floor.\n"
+        f"- COLOR: {color_rule}. Distribute it naturally across the whole room as "
+        "anchors, not rigid paint matches: light or muted variants on large "
+        "fields, mid-tones for depth, and the strongest or darkest color "
+        "sparingly.\n"
+        "- Keep undertones consistent and repeat key colors in two or three "
+        "separated details. Preserve realistic wood, stone and metal with "
+        "balanced contrast; avoid a flat wash, muddy neutrals, oversaturation or "
+        "equal color weight.\n"
+        "- Keep openings and walkways clear. Avoid clutter, mismatched pieces and "
+        "duplicates.\n"
+        "- Photorealistic editorial interior, natural light, believable scale and "
+        "contact shadows."
     )
 
 
@@ -992,7 +997,7 @@ def build_gen_klein_interior_prompt(
     key = str(room_type).strip().lower()
     if ROOM_BRIEF_ALIASES.get(key, key) in LEGACY_BRIEF_ROOMS:
         return _legacy_living_room_brief(
-            room_type, style, color_rule, source, variation_index,
+            room_type, style, _legacy_color_rule(tone, color_palette),
         )
 
     brief = room_brief(room_type)

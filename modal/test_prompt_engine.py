@@ -290,83 +290,96 @@ def test_formal_reception_rooms_also_refuse_the_media_unit():
         )
 
 
-#: The living room brief, word for word, as it stood at 898665e — early on the
-#: day this work began, before the television, window and seating changes.
+#: The living room brief, word for word, as it stood at 159c094 — 12 August,
+#: 14:48.
 #:
-#: Pinned here because "as it was" is only meaningful if something checks. This
-#: brief has been rewritten and reverted several times over, and twice the thing
-#: restored was not the thing wanted; a literal copy in the test suite is what
-#: makes the next answer to "put it back" verifiable rather than remembered.
+#: Pinned because "put it back" has now been answered wrongly twice, and both
+#: times from memory. The last commit of 12 August produces a brief identical
+#: to the end of 14 August, which was tried and rejected; this is the only other
+#: version that day, and the only one anywhere in the history whose text
+#: mentions curtains.
 _LEGACY_LIVING_ROOM = (
     "Redesign this Living Room in a refined Modern style, using the input photo "
     "as the architectural base.\n"
     "\n"
-    "ARCHITECTURE - HIGHEST PRIORITY, OVERRIDES EVERYTHING BELOW:\n"
-    "- The shell is fixed: every wall, corner, ceiling and floor edge stays on "
-    "the same pixels; the room keeps its exact size, shape and proportions.\n"
-    "- Openings are fixed: the same number of doors and windows, each at the "
-    "same position, size, sill height and shape. Add none, remove none, move "
-    "none, resize none, cover none.\n"
-    "- Camera position, lens, framing and perspective stay identical. Change "
-    "finishes and movable contents only.\n"
+    "ARCHITECTURE:\n"
+    "- Change finishes and movable contents only. Preserve all walls, doors, "
+    "windows, balcony openings and camera framing.\n"
     "\n"
-    "THIS IS A LIVING ROOM, not any other room. It contains no bed, no desk, no "
-    "dining table, no kitchen cabinetry, no sanitaryware.\n"
-    "ITEM LIMITS: one ceiling fixture, one floor lamp beside the seating, one "
-    "potted floor plant; no other lamps or greenery.\n"
+    "VISIBLE ITEM LIMITS - HIGH PRIORITY:\n"
+    "- Show exactly one ceiling fixture and one floor lamp beside seating; no "
+    "other lamps.\n"
+    "- Show exactly one potted floor plant; no other greenery, flowers or "
+    "branches.\n"
     "\n"
     "SENIOR DESIGN DIRECTION:\n"
-    "- Resolve a conversation group with sofa and complementary seating, and a "
-    "TV centred above a media console on a solid wall. Take furniture count and "
+    "- Create one cohesive, professionally resolved room with balanced "
+    "proportions, clear circulation, visual rhythm and a focal point.\n"
+    "- Resolve a complete conversation group with sofa, complementary seating, "
+    "coffee table, correctly sized anchoring rug, and a TV centred above a media "
+    "console on an available solid wall. Choose the layout, furniture count and "
     "scale from the visible space.\n"
-    "- Designer furniture, clean silhouettes, honest materials. The coffee table "
-    "is the hero piece: one sculptural low table in stone, solid timber or slim "
-    "metal and glass, centred on the rug.\n"
-    "- LAYOUT: Set the sofa square to the longest solid wall, with the rug under "
-    "the front legs of every seat. Align art and lighting with the furniture.\n"
-    "- DECORATE: layered cushions, a folded throw, one large artwork at eye "
-    "level, one tight group per surface - books, a tray, a ceramic. Leave most "
-    "surfaces bare; nothing on the floor.\n"
-    "- COLOR: Neutral as the overall direction: lightest over the large fields, "
-    "mid-tones on the mid-sized surfaces, the deepest in a few small touches, "
-    "each echoed in two or three places. All finishes as one scheme.\n"
-    "- Keep walkways and door swings clear; no clutter or duplicates.\n"
-    "- Photorealistic editorial interior, natural light, believable scale, "
+    "- Group furniture around a correctly sized rug; maintain realistic "
+    "clearances and align art, lighting and casework with nearby furniture.\n"
+    "- Select flooring, rugs, curtains, furniture, lighting, art, materials and "
+    "finishes together as one coordinated scheme. Do not force a predetermined "
+    "material or object color.\n"
+    "- DECORATE: use layered cushions and curated non-botanical table styling: a "
+    "small book stack, tray, ceramics and one sculptural object, grouped at "
+    "varied heights across tables and console. Leave most surface area empty; no "
+    "decor on the floor.\n"
+    "- COLOR: Use Neutral as the overall color direction. Distribute it "
+    "naturally across the whole room as anchors, not rigid paint matches: light "
+    "or muted variants on large fields, mid-tones for depth, and the strongest "
+    "or darkest color sparingly.\n"
+    "- Keep undertones consistent and repeat key colors in two or three "
+    "separated details. Preserve realistic wood, stone and metal with balanced "
+    "contrast; avoid a flat wash, muddy neutrals, oversaturation or equal color "
+    "weight.\n"
+    "- Keep openings and walkways clear. Avoid clutter, mismatched pieces and "
+    "duplicates.\n"
+    "- Photorealistic editorial interior, natural light, believable scale and "
     "contact shadows."
 )
 
 
-def test_living_room_brief_is_the_earlier_one_word_for_word():
+def test_living_room_brief_is_the_12_august_one_word_for_word():
     built = pe.build_gen_klein_interior_prompt(
         space_type="Living Room", design_style="Modern", color_tone="Neutral",
     )
     assert built == _LEGACY_LIVING_ROOM, (
-        "the living room brief has drifted from the 898665e original:\n"
+        "the living room brief has drifted from the 159c094 original:\n"
         + "\n".join(
             line for line in __import__("difflib").unified_diff(
                 _LEGACY_LIVING_ROOM.splitlines(), built.splitlines(),
-                fromfile="898665e", tofile="built", lineterm="",
+                fromfile="159c094", tofile="built", lineterm="",
             )
         )
     )
 
 
-def test_living_room_keeps_its_three_original_layouts():
-    """It rotated through three arrangements and still does — but no materials.
-
-    The material axis came later, so the legacy brief has three variants rather
-    than the nine a current room produces.
-    """
+def test_living_room_brief_is_the_same_whatever_the_render_source():
+    """That version predated the walkthrough having its own lock."""
     briefs = {
         pe.build_gen_klein_interior_prompt(
             space_type="Living Room", design_style="Modern",
-            color_tone="Neutral", variation_index=index,
+            color_tone="Neutral", source=source, variation_index=index,
         )
+        for source in ("photo", "walkthrough")
         for index in range(9)
     }
-    assert len(briefs) == 3, f"expected the three original layouts, got {len(briefs)}"
-    for layout in pe._LEGACY_LIVING_ROOM_LAYOUTS:
-        assert any(layout in brief for brief in briefs), f"lost layout: {layout}"
+    assert len(briefs) == 1, "the legacy brief should not vary at all"
+
+
+def test_living_room_is_the_one_brief_that_mentions_curtains():
+    """Curtains could never be added to the current brief without costing the
+    architecture — twice tried, twice reverted. This version has them already,
+    inside a coordinated-scheme line rather than as a decor instruction, which
+    is very likely why it worked there and not when bolted on."""
+    built = interior("Living Room").lower()
+    assert "curtains" in built
+    for room in CURRENT_BRIEF_ROOMS:
+        assert "curtain" not in interior(room).lower(), f"{room} asks for curtains"
 
 
 def test_salon_and_living_room_are_opposites_about_the_tv():
