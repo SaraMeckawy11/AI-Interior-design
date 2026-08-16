@@ -1078,24 +1078,38 @@ def _color_clause(color_tone: str, color_palette, mode: str) -> str:
     """Write a mode-appropriate rule for exactly the selected color count."""
     names = _palette_names(color_palette)
     if mode == "exterior":
+        # A facade is painted body, then trim, then accent — that is the order
+        # the trade works in and the order a viewer reads. The rules below used
+        # to give only ratios: 60/30/10 with nothing about *where* each colour
+        # went, which leaves the model to scatter them across whatever surfaces
+        # it likes and is why the result looked unresolved rather than designed.
+        #
+        # The other half is harmony. A facade is never repainted alone — the
+        # roof, the stone, the paving and the joinery are already there and keep
+        # their own colours, so the palette has to sit with them, and the
+        # selected colours have to share an undertone to read as one scheme.
         selected = _exterior_palette_names(color_tone, color_palette)
         if len(selected) == 1:
             return (
                 f"Exterior color rule: use exactly one user-selected facade color, {selected[0]}, "
-                "as the only painted or pigmented architectural color. Do not invent a secondary "
-                "or accent paint color. Natural stone, timber, metal, glass, sky and planting keep "
-                "their physically realistic material colors and do not count as extra palette colors."
+                "across the main wall planes as the only painted color, and let the trim, frames "
+                "and soffits sit as a quieter shade of it rather than a second color. Choose it to "
+                "sit with the roof, stone, timber and paving already there, which keep their "
+                "physically realistic colors and are not palette colors."
             )
         if len(selected) == 2:
             return (
-                f"Exterior color rule: use exactly two user-selected facade colors and no others: "
-                f"70% {selected[0]} and 30% {selected[1]}. Natural material, glazing and landscape "
-                "colors remain physically realistic."
+                f"Exterior color rule: exactly two user-selected colors and no others - "
+                f"70% {selected[0]} across the main wall planes, 30% {selected[1]} on the trim, "
+                "frames, soffits and entrance door. Both share one undertone so the facade reads "
+                "as one scheme, and both sit with the roof, stone and paving, which keep their "
+                "physically realistic colors."
             )
         return (
-            f"Exterior color 60/30/10: use exactly these three selected facade colors and no others: "
-            f"60% {selected[0]}, 30% {selected[1]}, 10% {selected[2]}. Natural material, glazing "
-            "and landscape colors remain physically realistic."
+            f"Exterior color 60/30/10 by surface: 60% {selected[0]} on the main wall planes, "
+            f"30% {selected[1]} on secondary volumes, base and soffits, 10% {selected[2]} on the "
+            "door, frames and railings. All three share one undertone and sit with the roof, "
+            "stone and planting, which keep their real colors."
         )
 
     if names and len(names) == 3:

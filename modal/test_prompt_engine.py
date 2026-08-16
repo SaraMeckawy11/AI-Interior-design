@@ -494,6 +494,39 @@ def test_exterior_brief_matches_the_pinned_renderer():
         assert "the openings are not yours to change" not in prompt
 
 
+def test_exterior_colours_are_placed_by_surface_and_share_an_undertone():
+    """Ratios alone left the colours scattered rather than resolved.
+
+    A facade is painted body, then trim, then accent, and it is never painted
+    alone — the roof, stone and paving are already there and keep their own
+    colours. Both halves are asserted here: where each selected colour goes,
+    and that the scheme is told to hold together.
+    """
+    one = {"colors": [{"name": "Warm White"}], "colorCount": 1}
+    two = {"colors": [{"name": "Warm White"}, {"name": "Sorrell Brown"}], "colorCount": 2}
+    three = {"colors": [{"name": "Warm White"}, {"name": "Sorrell Brown"}, {"name": "Chambray"}]}
+
+    for palette in (one, two, three):
+        clause = pe._color_clause("Warm White", palette, "exterior").lower()
+        # Placement: the body is named, and so is the trim it is read against.
+        assert "main wall planes" in clause, f"no body surface named: {clause}"
+        assert any(word in clause for word in ("trim", "frames")), f"no trim named: {clause}"
+        # Harmony: with the fixed materials the facade already has.
+        assert "roof" in clause and "stone" in clause, f"nothing to sit with: {clause}"
+
+    # A multi-colour scheme has to be told to hold together.
+    for palette in (two, three):
+        assert "undertone" in pe._color_clause("Warm White", palette, "exterior").lower()
+
+    # The accent is the smallest surfaces, not a wall.
+    three_clause = pe._color_clause("Warm White", three, "exterior").lower()
+    assert "10% chambray on the door, frames and railings" in three_clause
+
+    # Interiors keep their own rule — this is an exterior-only change.
+    interior_clause = pe._color_clause("Warm White", three, "interior").lower()
+    assert "main wall planes" not in interior_clause
+
+
 def test_exterior_briefs_stay_inside_the_token_window():
     for space in APP_EXTERIOR_TYPES:
         for style in STYLES:
