@@ -674,7 +674,12 @@ export default function Interior() {
       {/* The wait. See components/create/GeneratingOverlay.jsx — a spinner
           over "up to 30 seconds" said nothing and promised a time this path
           regularly overruns. */}
-      <GeneratingOverlay visible={loading} mode="interior" title="Designing your space" />
+      <GeneratingOverlay
+        visible={loading}
+        mode="interior"
+        title="Designing your space"
+        previewUri={image}
+      />
 
       {/* Info / Error Modal */}
       <Modal

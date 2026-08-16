@@ -566,7 +566,12 @@ export default function Exterior() {
       {/* The wait. See components/create/GeneratingOverlay.jsx — a spinner
           over "up to 30 seconds" said nothing and promised a time this path
           regularly overruns. */}
-      <GeneratingOverlay visible={loading} mode="exterior" title="Designing your exterior" />
+      <GeneratingOverlay
+        visible={loading}
+        mode="exterior"
+        title="Designing your exterior"
+        previewUri={image}
+      />
 
       {/* Info / Error Modal */}
       <Modal
