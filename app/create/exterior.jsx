@@ -463,6 +463,10 @@ export default function Exterior() {
             <ColorToneSelector
               colorTone={colorTone}
               setColorTone={setColorTone}
+              // A facade is not split like a room: 75/20/5, not 60/30/10, and
+              // the shares shown here have to be the ones the engine is asked
+              // for. See schemeShares and prompt_engine._color_clause.
+              mode="exterior"
             />
             
             {/* Custom Prompt (Optional) */}

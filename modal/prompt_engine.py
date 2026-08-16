@@ -1097,19 +1097,29 @@ def _color_clause(color_tone: str, color_palette, mode: str) -> str:
                 "sit with the roof, stone, timber and paving already there, which keep their "
                 "physically realistic colors and are not palette colors."
             )
+        # 80/20 and 75/20/5, not the interior's 70/30 and 60/30/10.
+        #
+        # 60/30/10 is an interior rule and it is wrong outdoors. On a facade the
+        # wall field dominates far more than indoors, the trim is slim — frames,
+        # fascia, soffits — and the accent is a front door and almost nothing
+        # else. Asking for 30% trim and 10% accent on a building is asking for
+        # more surface than trim and a door can absorb, so the secondary spills
+        # onto the wall planes and the accent goes hunting for somewhere to
+        # live. That reads as colours that do not agree, even when each one is
+        # placed correctly.
         if len(selected) == 2:
             return (
                 f"Exterior color rule: exactly two user-selected colors and no others - "
-                f"70% {selected[0]} across the main wall planes, 30% {selected[1]} on the trim, "
+                f"80% {selected[0]} across the main wall planes, 20% {selected[1]} on the trim, "
                 "frames, soffits and entrance door. Both share one undertone so the facade reads "
                 "as one scheme, and both sit with the roof, stone and paving, which keep their "
                 "physically realistic colors."
             )
         return (
-            f"Exterior color 60/30/10 by surface: 60% {selected[0]} on the main wall planes, "
-            f"30% {selected[1]} on secondary volumes, base and soffits, 10% {selected[2]} on the "
-            "door, frames and railings. All three share one undertone and sit with the roof, "
-            "stone and planting, which keep their real colors."
+            f"Exterior color 75/20/5 by surface: 75% {selected[0]} across the main wall planes, "
+            f"20% {selected[1]} on trim, frames, fascia and soffits, and only 5% {selected[2]} - "
+            "the entrance door alone, nothing else. All three share one undertone and sit with "
+            "the roof, stone and planting, which keep their real colors."
         )
 
     if names and len(names) == 3:

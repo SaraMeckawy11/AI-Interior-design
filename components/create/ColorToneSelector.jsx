@@ -53,8 +53,26 @@ const baseColorTones = [
 
 const topTones = ['Neutral', 'Taupe', 'Sage', 'Sky'];
 
-const schemeShares = (colorCount) => (
-  colorCount === 1 ? [100] : colorCount === 2 ? [70, 30] : [60, 30, 10]
+/**
+ * How the selected colors are split, and it differs indoors and out.
+ *
+ * 60/30/10 is an interior rule — wall field, upholstery and textiles, then a
+ * controlled accent — and it does not describe a facade. Outdoors the wall
+ * plane dominates far more, the trim is slim (frames, fascia, soffits) and the
+ * accent is a front door and almost nothing else. Asking a facade for 30% trim
+ * and 10% accent is asking for more surface than those parts can absorb, so the
+ * secondary spills onto the walls and the accent goes looking for somewhere to
+ * live, which reads as colors that do not agree.
+ *
+ * These numbers are shown to the user, so they have to match what the prompt
+ * engine actually asks the model for — see `_color_clause` in prompt_engine.py.
+ */
+const INTERIOR_SHARES = { 1: [100], 2: [70, 30], 3: [60, 30, 10] };
+const EXTERIOR_SHARES = { 1: [100], 2: [80, 20], 3: [75, 20, 5] };
+
+const schemeShares = (colorCount, mode = 'interior') => (
+  (mode === 'exterior' ? EXTERIOR_SHARES : INTERIOR_SHARES)[colorCount]
+  || INTERIOR_SHARES[3]
 );
 
 const schemeEntries = (palette, colorCount) => (
@@ -80,7 +98,15 @@ function PaletteTrio({ palette, selected, colorCount }) {
   );
 }
 
-export default function ColorToneSelector({ colorTone, setColorTone, colorCount = 3, onPaletteChange }) {
+export default function ColorToneSelector({
+  colorTone,
+  setColorTone,
+  colorCount = 3,
+  onPaletteChange,
+  // Which split to show. Exteriors are 75/20/5, interiors 60/30/10 — see
+  // schemeShares. Defaults to interior so existing callers are unchanged.
+  mode = 'interior',
+}) {
   const normalizedColorCount = Math.max(1, Math.min(3, Number(colorCount) || 3));
   const [showAll, setShowAll] = useState(false);
   const [customTones, setCustomTones] = useState([]);
@@ -169,7 +195,7 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
           const isSelected = colorTone === tone.name;
           const palette = palettes[tone.name] || buildPalette(tone.color);
           const previewEntries = schemeEntries(palette, normalizedColorCount);
-          const previewShares = schemeShares(normalizedColorCount);
+          const previewShares = schemeShares(normalizedColorCount, mode);
           return (
             <TouchableOpacity
               key={tone.name}
@@ -230,7 +256,7 @@ export default function ColorToneSelector({ colorTone, setColorTone, colorCount 
             <View key={entry.role} style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: entry.hex }]} />
               <Text style={styles.legendText} numberOfLines={1}>
-                <Text style={styles.legendShare}>{schemeShares(normalizedColorCount)[index]}% </Text>
+                <Text style={styles.legendShare}>{schemeShares(normalizedColorCount, mode)[index]}% </Text>
                 {entry.name}
               </Text>
             </View>

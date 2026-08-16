@@ -1495,7 +1495,7 @@ def health():
         # reading a build log.
         # Two interior briefs now: the photo lock and the walkthrough lock. The
         # tag names both so a deployment can be told apart by which pair it has.
-        "promptEngine": "gen-klein-per-room-briefs-v32-exterior-colour-by-surface",
+        "promptEngine": "gen-klein-per-room-briefs-v33-facade-75-20-5",
         "interiorLocks": {
             "photo": "shell-windows-and-openings-fixed",
             "walkthrough": "concise-window-shape",
@@ -1552,7 +1552,7 @@ def health():
         # here so a deployment that still gives it the room brief is visible
         # from the health check instead of only from the picture.
         "floorPlanBrief": "copy-the-model-reskin-surfaces",
-        "exteriorPrompt": "ad7a9ba-geometry-with-colour-placed-by-surface",
+        "exteriorPrompt": "ad7a9ba-geometry-with-facade-75-20-5-colour",
         "exteriorEngine": "ad7a9ba-exact-full-path",
         # Fixed seed, one render, no candidate search — as it was before
         # the guard and the hashed seed were tried on this path.

@@ -518,9 +518,9 @@ def test_exterior_colours_are_placed_by_surface_and_share_an_undertone():
     for palette in (two, three):
         assert "undertone" in pe._color_clause("Warm White", palette, "exterior").lower()
 
-    # The accent is the smallest surfaces, not a wall.
+    # The accent is one small surface, not a wall — and it is really small.
     three_clause = pe._color_clause("Warm White", three, "exterior").lower()
-    assert "10% chambray on the door, frames and railings" in three_clause
+    assert "5% chambray - the entrance door alone" in three_clause
 
     # Interiors keep their own rule — this is an exterior-only change.
     interior_clause = pe._color_clause("Warm White", three, "interior").lower()
