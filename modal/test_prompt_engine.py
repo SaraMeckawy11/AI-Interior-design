@@ -437,8 +437,8 @@ def test_living_room_has_curtains_that_do_not_cover_the_window():
     it, and the two clauses have to keep agreeing.
     """
     decor = pe.room_brief("Living Room")["decor"].lower()
-    assert "curtains" in decor, "the living room lost its curtains again"
-    assert "drawn back" in decor, f"curtains are not held clear of the glass: {decor}"
+    assert "curtain" in decor, "the living room lost its curtains again"
+    assert "clear of the glass" in decor, f"curtains are not held clear of the glass: {decor}"
 
     prompt = interior("Living Room").lower()
     # The lock that constrains them is still present and still wins.

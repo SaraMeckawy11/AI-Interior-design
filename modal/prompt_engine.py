@@ -419,23 +419,31 @@ ROOM_BRIEFS = {
         ),
         hero=(
             "The coffee table is the hero piece: one sculptural low table in "
-            "{material} on the rug"
+            "{material}, centred on the rug"
         ),
         materials=(
             "honed travertine",
             "solid walnut with a softened edge",
             "slim blackened steel and glass",
         ),
-        # Curtains are back, and they are the reason the older living rooms
-        # looked more finished: a room with bare glass reads as unfurnished
-        # however good the seating is. They are worded to sit *beside* the
-        # window rather than over it, because the architecture lock above
-        # forbids hiding one behind drapery and that lock wins — which is the
-        # whole point, softness without giving up the opening.
+        # Curtains, at the end of the list and deliberately small.
+        #
+        # The first attempt put "full-height curtains" at the *front* of this
+        # list, which is the most emphatic position, and the renders stopped
+        # respecting the architecture. That is not a surprise in hindsight: the
+        # lock immediately above forbids hiding a window behind drapery, so a
+        # prominent curtain instruction is a decor item arguing with a lock, and
+        # what came back was drapery where the openings used to be.
+        #
+        # Three things are different now. They are last rather than first, so
+        # they read as a finishing touch instead of a headline. They are slim
+        # panels rather than full-height. And the glass is stated as staying
+        # visible, which is the same thing the lock wants rather than a
+        # competing instruction.
         decor=(
-            "full-height curtains drawn back from the glass, layered cushions, a "
-            "folded throw, one large artwork at eye level, one group per surface "
-            "- books and a ceramic"
+            "layered cushions, a folded throw, one large artwork at eye level, one "
+            "tight group per surface - books and a ceramic; slim curtain panels "
+            "clear of the glass"
         ),
         limits="one ceiling fixture, one floor lamp beside the seating, one potted floor plant",
         forbid="no bed, no desk, no dining table, no kitchen cabinetry, no sanitaryware",
