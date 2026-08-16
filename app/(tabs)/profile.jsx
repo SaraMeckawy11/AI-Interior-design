@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, View } from 'react-native';
+import { Alert, Platform, ScrollView, Text, View } from 'react-native';
 import Purchases from 'react-native-purchases';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from '../../assets/styles/profile.styles';
@@ -178,7 +178,16 @@ export default function Profile() {
       <ConfirmDialog
         visible={confirmingDelete}
         title="Permanently Delete Account?"
-        message="This deletes your profile, designs, saved plans, coin balance, and purchase history. It does not cancel an active App Store or Google Play subscription, so cancel that first in Manage Subscription. This cannot be undone."
+        // Names the one store this device actually buys from. Reading about
+        // Google Play on an iPhone is confusing to a person and, on the screen
+        // an App Review tester is asked to walk through, is a mention of another
+        // platform's payments in an iOS build.
+        message={
+          'This deletes your profile, designs, saved plans, coin balance, and purchase '
+          + 'history. It does not cancel an active '
+          + (Platform.OS === 'ios' ? 'App Store' : 'Google Play')
+          + ' subscription, so cancel that first in Manage Subscription. This cannot be undone.'
+        }
         confirmLabel="Delete Forever"
         cancelLabel="Keep Account"
         onCancel={() => setConfirmingDelete(false)}
