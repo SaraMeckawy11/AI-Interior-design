@@ -862,92 +862,6 @@ def room_brief(space_type: str) -> dict:
     return ROOM_BRIEFS.get(key, _GENERIC_ROOM_BRIEF)
 
 
-#: The living room brief as it stood at 3ac768a — 12 August, 16:02, the last
-#: commit of that day — kept verbatim because it was asked for verbatim.
-#:
-#: This text was deployed once before and rejected, and the reason it is back is
-#: worth recording: at the time it was being judged on the wrong engine. Seeds
-#: were hashed from the brief and the structure guard was re-rolling candidates,
-#: so the render it produced was not the render this brief produced on the 12th.
-#: With LEGACY_BRIEF_SEED and the guard skipped, the words and the pipeline are
-#: finally the same pair they were that day.
-#:
-#: Every other room keeps the current brief. This one has none of what came
-#: after: no WINDOWS ARE UNTOUCHABLE clause, no surfaces rule, no spacing line,
-#: no per-room exclusions, no layout or material rotation. Its openings are held
-#: by the two sentences below. If living rooms drift, that is the trade, and
-#: uses_legacy_brief is the switch.
-_LEGACY_ARCHITECTURE_LOCKS = {
-    PHOTO_SOURCE: (
-        "ARCHITECTURE - HIGHEST PRIORITY:\n"
-        "- Change finishes and movable contents only. Keep every wall, door, "
-        "window and balcony opening exactly as it appears: same count, size, "
-        "shape, position and sill height. Never add, remove, move, resize, cover "
-        "or reshape an opening.\n"
-        "- Keep the camera position, framing and perspective identical.\n"
-    ),
-    WALKTHROUGH_SOURCE: (
-        "ARCHITECTURE:\n"
-        "- Change finishes and movable contents only. Preserve all walls, doors, "
-        "windows, balcony openings and camera framing.\n"
-    ),
-}
-
-LEGACY_BRIEF_ROOMS = {"living room"}
-
-#: The seed every interior render used on 12 August, before seeds were hashed
-#: from the brief.
-#:
-#: Restoring the words was not enough to restore the pictures. At four steps the
-#: noise field decides most of the composition, so the same sentences over a
-#: different seed produce a different room — which is why byte-perfect
-#: restorations of this text still did not look like that day. Hashed seeds stay
-#: everywhere else, because they are what stopped a kitchen and a bedroom
-#: arriving as the same arrangement.
-LEGACY_BRIEF_SEED = 7
-
-
-def uses_legacy_brief(space_type) -> bool:
-    """Whether this room is served the pre-change brief, seed and pipeline."""
-    key = str(space_type or "").strip().lower()
-    return ROOM_BRIEF_ALIASES.get(key, key) in LEGACY_BRIEF_ROOMS
-
-
-def _legacy_living_room_brief(room_type, style, color_rule, source):
-    """The living room brief as it was at 3ac768a, word for word."""
-    return (
-        f"Redesign this {room_type} in a refined {style} style, using the input "
-        "photo as the architectural base.\n\n"
-        f"{_LEGACY_ARCHITECTURE_LOCKS[resolve_render_source(source)]}\n"
-        "ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one "
-        "potted floor plant; no other lamps or greenery.\n\n"
-        "SENIOR DESIGN DIRECTION:\n"
-        "- Design as a senior interior designer: balanced proportions, a mix of "
-        "large, medium and small forms, one focal point.\n"
-        "- Resolve a conversation group with sofa and complementary seating, and "
-        "a TV centred above a media console on a solid wall. Choose the layout, "
-        "furniture count and scale from the visible space.\n"
-        "- Designer furniture, clean silhouettes, honest materials. The coffee "
-        "table is the hero piece: one sculptural, well-proportioned table in "
-        "stone, solid timber or slim metal and glass, low, centred on the rug.\n"
-        "- Group seating around a correctly sized rug; align art and lighting "
-        "with the furniture below.\n"
-        "- Choose all finishes and furnishings as one scheme; force no "
-        "predetermined material or color.\n"
-        "- DECORATE: layered cushions, a folded throw, one large artwork at eye "
-        "level, and one tight group per surface at varied heights - books, a "
-        "tray, a ceramic, a sculptural object. Leave most surfaces bare; nothing "
-        "on the floor.\n"
-        f"- COLOR: {color_rule}, weighted as a designer would: lightest or most "
-        "muted over the large fields, mid-tones on upholstery, curtains and "
-        "rugs, the deepest color in a few small touches.\n"
-        "- Consistent undertones, each color echoed in two or three separated "
-        "places; no flat wash, muddy neutrals or oversaturation.\n"
-        "- Keep walkways clear; no clutter or duplicates.\n"
-        "- Photorealistic editorial interior, natural light, believable scale, contact shadows."
-    )
-
-
 def build_gen_klein_interior_prompt(
     *,
     space_type: str,
@@ -997,10 +911,6 @@ def build_gen_klein_interior_prompt(
     if is_floor_plan(room_type):
         return build_floor_plan_prompt(design_style=style, color_rule=color_rule)
 
-    # The living room keeps its earlier brief, lock and all. See
-    # _legacy_living_room_brief for what is being traded for what.
-    if uses_legacy_brief(room_type):
-        return _legacy_living_room_brief(room_type, style, color_rule, source)
 
     brief = room_brief(room_type)
     # Two independent axes, so the combinations multiply instead of moving in

@@ -28,20 +28,14 @@ APP_ROOM_TYPES = [
     "Meditation Corner",
 ]
 
-#: The living room is served by the pre-change brief on purpose — see
-#: prompt_engine._legacy_living_room_brief. It therefore carries none of the
-#: rules the current brief does: no window lock, no surfaces rule, no spacing
-#: line, no layout or material variation. Every "each room" rule below runs
-#: over CURRENT_BRIEF_ROOMS so that exception stays visible instead of being
-#: quietly weakened into the rules themselves.
-LEGACY_BRIEF_ROOMS = ["Living Room"]
-
 APP_EXTERIOR_TYPES = [
     "Balcony", "Building", "Terrace", "Garden", "Driveway",
     "Swimming Pool Area", "Garage",
 ]
 
-CURRENT_BRIEF_ROOMS = [r for r in APP_ROOM_TYPES if r not in LEGACY_BRIEF_ROOMS]
+#: Kept as a name because many rules below read better with it, but the
+#: living room is no longer an exception — every room uses the same brief.
+CURRENT_BRIEF_ROOMS = list(APP_ROOM_TYPES)
 
 STYLES = ["Modern", "Japandi", "Industrial", "Classic"]
 
@@ -252,8 +246,7 @@ def test_seed_differs_per_room_and_per_variation():
 #: belongs in — everywhere else has to rule it out explicitly, because silence
 #: is what let one turn up in a salon.
 _TV_ROOMS = ["Living Room", "Living + Dining", "Basement", "Full Apartment"]
-#: The same list without the living room, which no longer reads ROOM_BRIEFS.
-_TV_ROOMS_CURRENT = [r for r in _TV_ROOMS if r not in LEGACY_BRIEF_ROOMS]
+_TV_ROOMS_CURRENT = list(_TV_ROOMS)
 _NO_TV_ROOMS = [
     "Salon", "Salon + Dining", "Bedroom", "Kitchen", "Bathroom", "Dining Room",
     "Balcony", "Closet", "Office", "Kids Room", "Laundry Room", "Hallway",
@@ -288,105 +281,6 @@ def test_formal_reception_rooms_also_refuse_the_media_unit():
         assert "media unit" in pe.room_brief(room)["forbid"].lower(), (
             f"{room} rules out the TV but not the unit it sits on"
         )
-
-
-#: The living room brief, word for word, as it stood at 3ac768a — 12 August,
-#: 16:02, the last commit of that day.
-#:
-#: This text was deployed once and rejected, then brought back, and the reason
-#: is worth keeping next to it: the first time it was judged on the wrong
-#: engine. Seeds were hashed from the brief and the guard was re-rolling
-#: candidates, so what it rendered was not what this brief rendered on the
-#: 12th. Pinned so the words stay fixed while that is settled.
-_LEGACY_LIVING_ROOM = "\n".join((
-    'Redesign this Living Room in a refined Modern style, using the input photo as the architectural base.',
-    '',
-    'ARCHITECTURE - HIGHEST PRIORITY:',
-    '- Change finishes and movable contents only. Keep every wall, door, window and balcony opening exactly as it appears: same count, size, shape, position and sill height. Never add, remove, move, resize, cover or reshape an opening.',
-    '- Keep the camera position, framing and perspective identical.',
-    '',
-    'ITEM LIMITS: one ceiling fixture, one floor lamp beside seating, one potted floor plant; no other lamps or greenery.',
-    '',
-    'SENIOR DESIGN DIRECTION:',
-    '- Design as a senior interior designer: balanced proportions, a mix of large, medium and small forms, one focal point.',
-    '- Resolve a conversation group with sofa and complementary seating, and a TV centred above a media console on a solid wall. Choose the layout, furniture count and scale from the visible space.',
-    '- Designer furniture, clean silhouettes, honest materials. The coffee table is the hero piece: one sculptural, well-proportioned table in stone, solid timber or slim metal and glass, low, centred on the rug.',
-    '- Group seating around a correctly sized rug; align art and lighting with the furniture below.',
-    '- Choose all finishes and furnishings as one scheme; force no predetermined material or color.',
-    '- DECORATE: layered cushions, a folded throw, one large artwork at eye level, and one tight group per surface at varied heights - books, a tray, a ceramic, a sculptural object. Leave most surfaces bare; nothing on the floor.',
-    '- COLOR: Neutral as the overall direction, weighted as a designer would: lightest or most muted over the large fields, mid-tones on upholstery, curtains and rugs, the deepest color in a few small touches.',
-    '- Consistent undertones, each color echoed in two or three separated places; no flat wash, muddy neutrals or oversaturation.',
-    '- Keep walkways clear; no clutter or duplicates.',
-    '- Photorealistic editorial interior, natural light, believable scale, contact shadows.',
-))
-
-
-def test_living_room_brief_is_the_12_august_one_word_for_word():
-    built = pe.build_gen_klein_interior_prompt(
-        space_type="Living Room", design_style="Modern", color_tone="Neutral",
-    )
-    assert built == _LEGACY_LIVING_ROOM, (
-        "the living room brief has drifted from the 5f8e267 original:\n"
-        + "\n".join(
-            line for line in __import__("difflib").unified_diff(
-                _LEGACY_LIVING_ROOM.splitlines(), built.splitlines(),
-                fromfile="5f8e267", tofile="built", lineterm="",
-            )
-        )
-    )
-
-
-def test_living_room_brief_varies_only_by_render_source():
-    """No layout or material rotation — that came later — but it does have its
-    own walkthrough lock, which was added in this very commit."""
-    per_source = {}
-    for source in ("photo", "walkthrough"):
-        per_source[source] = {
-            pe.build_gen_klein_interior_prompt(
-                space_type="Living Room", design_style="Modern",
-                color_tone="Neutral", source=source, variation_index=index,
-            )
-            for index in range(9)
-        }
-        assert len(per_source[source]) == 1, f"{source} brief should not rotate"
-    assert per_source["photo"] != per_source["walkthrough"], (
-        "a captured 3D frame should get the shorter lock this version added"
-    )
-
-
-def test_living_room_is_the_one_brief_that_mentions_curtains():
-    """Curtains could not be added to the current brief without costing the
-    architecture — twice tried, twice reverted. This version carries them
-    already, inside a coordinated-scheme line rather than as a decor
-    instruction, which is very likely why they work here and nowhere else."""
-    assert "curtains" in interior("Living Room").lower()
-    for room in CURRENT_BRIEF_ROOMS:
-        assert "curtain" not in interior(room).lower(), f"{room} asks for curtains"
-
-
-def test_the_legacy_room_is_identified_for_the_engine_too():
-    """Restoring the words was not enough; the engine has to know as well.
-
-    A brief is half the input. At four steps the noise field decides most of
-    the composition, so the same sentences over a different seed give a
-    different room — which is why the restored text still did not reproduce
-    what that day produced. The engine branches on this helper to use the seed
-    that version ran on, and to skip the candidate search that did not exist.
-    """
-    assert pe.uses_legacy_brief("Living Room")
-    assert pe.uses_legacy_brief("living room")
-    assert pe.uses_legacy_brief("Lounge")          # alias resolves to it
-    assert pe.LEGACY_BRIEF_SEED == 7               # what every interior used then
-    for room in CURRENT_BRIEF_ROOMS:
-        assert not pe.uses_legacy_brief(room), f"{room} should use the current pipeline"
-
-
-def test_living_room_keeps_this_versions_item_limits():
-    """This version does cap the lamps and greenery, unlike the earlier one of
-    the same day — which is one of the things that separates them."""
-    built = interior("Living Room").lower()
-    assert "item limits: one ceiling fixture, one floor lamp beside seating" in built
-    assert "one potted floor plant; no other lamps or greenery" in built
 
 
 def test_salon_and_living_room_are_opposites_about_the_tv():
