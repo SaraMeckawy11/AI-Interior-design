@@ -438,15 +438,10 @@ ROOM_BRIEFS = {
         # The second offered "a console table behind the sofa", which merges
         # with the media console. All three now seat the sofa by where the TV
         # is, which is how the arrangement is actually decided.
-        # Where the chairs sit in *depth* matters as much as where they sit in
-        # plan. A pair of chairs standing together in the near foreground fills
-        # the bottom of the frame and reads as furniture pushed at the camera,
-        # so wherever they are paired they belong at the far end of the room.
-        # "Far corners" was not enough on its own — a corner can be the near one.
         layouts=(
-            "Set the sofa on the wall facing the TV, both chairs angled in from the corners furthest from the camera, rug under every front leg.",
-            "Float the sofa off the wall facing the TV, the chairs together at the room's far end, away from the camera.",
-            "Run an L-shaped sofa into the corner that faces the TV, the chairs beyond it at the far end from the camera.",
+            "Set the sofa on the wall facing the TV, both chairs angled in from the far corners, rug under every front leg.",
+            "Float the sofa off the wall facing the TV, the chairs turned in at right angles across the rug.",
+            "Run an L-shaped sofa into the corner that faces the TV, one chair angled across from it to close the group.",
         ),
     ),
     "living + dining": dict(
