@@ -41,9 +41,6 @@ const RoomTypeSelector = ({
       [
         'Full Apartment',
         'Living Room',
-        // The living room that eats, named so nobody has to guess whether a
-        // dining table is coming.
-        'Living + Dining',
         'Bedroom',
         'Kitchen',
         'Bathroom',
@@ -90,6 +87,9 @@ const RoomTypeSelector = ({
       case 'full apartment': return 'home-outline';
       case 'whole apartment': return 'home-outline';
       case 'living room': return 'tv-outline';
+      // Living + Dining, Salon and Salon + Dining are no longer offered in the
+      // list above, but they keep their icons: a design saved while they were
+      // on it, or a room name typed by hand, still shows the right one.
       case 'living + dining': return 'restaurant-outline';
       case 'salon': return 'cafe-outline';
       case 'salon + dining': return 'restaurant-outline';

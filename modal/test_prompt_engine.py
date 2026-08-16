@@ -17,7 +17,10 @@ import sys
 
 import prompt_engine as pe
 
-#: Every room the app's selector offers, plus a custom name a user could type.
+#: Every room the engine has to handle, which is more than the selector offers.
+#: Living + Dining, Salon and Salon + Dining have been taken off the picker, but
+#: a design saved while they were on it — or a room name typed by hand — still
+#: reaches the engine, so their briefs stay covered here.
 APP_ROOM_TYPES = [
     "Full Apartment", "Living Room", "Living + Dining", "Salon", "Bedroom",
     "Kitchen", "Bathroom", "Dining Room", "Balcony", "Closet", "Office",
