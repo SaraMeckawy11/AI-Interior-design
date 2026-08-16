@@ -81,6 +81,11 @@ router.get('/me', isAuthenticated, async (req, res) => {
 /**
  * Permanently delete the signed-in account and its user-owned data.
  * Shared walkthrough scene cache rows contain no user identity and are kept.
+ *
+ * The FreeDesignLedger row is deliberately kept too, and must stay that way: it
+ * is what stops deleting the account from restoring the free-design allowance,
+ * and it holds an HMAC of the address rather than the address, so keeping it
+ * removes nothing this deletion promised to remove. See services/freeDesigns.js.
  */
 router.delete('/me', isAuthenticated, async (req, res) => {
   try {

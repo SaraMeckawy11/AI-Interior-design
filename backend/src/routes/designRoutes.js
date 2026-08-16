@@ -5,6 +5,7 @@ import Design from "../models/Design.js";
 import User from "../models/User.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { FREE_DESIGNS, RENDER_LEASE_RENEW_MS, coinCost } from "../config/pricing.js";
+import { recordFreeDesignUsed } from "../services/freeDesigns.js";
 import {
   claimRenderSlot,
   refundRender,
@@ -397,6 +398,9 @@ router.post("/", isAuthenticated, async (req, res) => {
         // Still inside the free allowance → consume one, charge nothing.
         user.freeDesignsUsed += 1;
         await user.save();
+        // Recorded against the address as well as the account, so deleting the
+        // account and signing up again does not reset the allowance.
+        await recordFreeDesignUsed(user.email);
         held.freeDesign = true;
         console.log(`Used one free design for user ${user._id}. Total used: ${user.freeDesignsUsed}`);
       }

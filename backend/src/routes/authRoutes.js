@@ -6,6 +6,7 @@ import User, { normalizeEmail } from "../models/User.js";
 import PrePremium from "../models/PrePremium.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { sendToken } from "../../utils/sendToken.js";
+import { freeDesignsAlreadyUsed } from "../services/freeDesigns.js";
 
 const router = express.Router();
 
@@ -32,11 +33,69 @@ const isAllowedGoogleAudience = (audience, configuredAudiences) => {
   );
 };
 
+/**
+ * The name Apple sent, or nothing.
+ *
+ * Apple returns `fullName` on the *first* authorization for an Apple ID and
+ * never again — every later sign-in carries nulls, by design. This used to
+ * answer "Apple user" for that case, which is how a real name became a
+ * placeholder: the name arrived once, and any later sign-in overwrote nothing
+ * because there was nothing to distinguish "Apple told us nothing this time"
+ * from "this person is called Apple user". It returns null now, and the callers
+ * decide what to fall back to.
+ */
 const displayNameFromApple = (fullName) => {
-  if (!fullName || typeof fullName !== "object") return "Apple user";
-  return [fullName.givenName, fullName.middleName, fullName.familyName]
-    .filter(Boolean)
-    .join(" ") || "Apple user";
+  if (!fullName || typeof fullName !== "object") return null;
+  return (
+    [fullName.givenName, fullName.middleName, fullName.familyName]
+      .filter(Boolean)
+      .join(" ") || null
+  );
+};
+
+/** Names nobody chose, which a real one is always allowed to replace. */
+const PLACEHOLDER_NAMES = new Set(["apple user", "google user", "user"]);
+
+const isPlaceholderName = (name) =>
+  !name || PLACEHOLDER_NAMES.has(String(name).trim().toLowerCase());
+
+/**
+ * A readable name from an address, for when the provider gave none.
+ *
+ * Apple's private relay addresses are random hex at
+ * `@privaterelay.appleid.com`, so they are skipped — "K7x9m2qp" is not a better
+ * greeting than a generic one.
+ */
+const nameFromEmail = (email) => {
+  const local = String(email || "").split("@")[0];
+  const domain = String(email || "").split("@")[1] || "";
+  if (!local || domain.toLowerCase().endsWith("privaterelay.appleid.com")) return null;
+
+  const cleaned = local
+    .replace(/[._-]+/g, " ")
+    .replace(/\d+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!cleaned) return null;
+
+  return cleaned
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+/**
+ * Write a real name onto an account that is still carrying a placeholder.
+ *
+ * The name Apple sends once has to be captured whenever it arrives, because it
+ * will not arrive again. A real name already on the account is never touched —
+ * this only ever replaces a placeholder.
+ */
+const backfillName = async (user, incomingName) => {
+  if (!incomingName || !isPlaceholderName(user.username)) return user;
+  user.username = incomingName;
+  await user.save();
+  return user;
 };
 
 /**
@@ -58,7 +117,7 @@ const findOrCreateSocialUser = async ({
 }) => {
   const subjectField = provider === "apple" ? "appleSubject" : "googleSubject";
   let user = await User.findOne({ [subjectField]: subject });
-  if (user) return user;
+  if (user) return backfillName(user, username);
 
   const email = normalizeEmail(rawEmail);
   if (!email) {
@@ -67,22 +126,29 @@ const findOrCreateSocialUser = async ({
     throw error;
   }
 
+  const resolvedName = username || nameFromEmail(email) || `${provider} user`;
+
   user = await User.findByEmail(email);
   if (user) {
     user[subjectField] = subject;
     if (!user.profileImage && profileImage) user.profileImage = profileImage;
+    if (isPlaceholderName(user.username) && !isPlaceholderName(resolvedName)) {
+      user.username = resolvedName;
+    }
     await user.save();
     return user;
   }
 
   const prePremium = await PrePremium.findOne({ email });
+  const freeDesignsUsed = await freeDesignsAlreadyUsed(email);
   try {
     return await User.create({
-      username: username || `${provider} user`,
+      username: resolvedName,
       email,
       profileImage,
       [subjectField]: subject,
       isPremium: !!prePremium,
+      freeDesignsUsed,
     });
   } catch (error) {
     // Two devices completing the same first sign-in at once both reach this
@@ -126,6 +192,8 @@ router.post("/signup", async (req, res) => {
     }
 
     const prePremium = await PrePremium.findOne({ email });
+    // Where this address left off, not zero. See services/freeDesigns.js.
+    const freeDesignsUsed = await freeDesignsAlreadyUsed(email);
     let user;
     try {
       user = await User.create({
@@ -134,6 +202,7 @@ router.post("/signup", async (req, res) => {
         password,
         profileImage: "",
         isPremium: !!prePremium,
+        freeDesignsUsed,
       });
     } catch (error) {
       if (error?.code === 11000) {

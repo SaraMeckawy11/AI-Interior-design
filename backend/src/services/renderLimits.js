@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import User from '../models/User.js';
 import { MAX_RENDERS_PER_DAY, RENDER_LEASE_MS } from '../config/pricing.js';
+import { releaseFreeDesign } from './freeDesigns.js';
 
 /**
  * The guard behind "unlimited".
@@ -221,6 +222,11 @@ export async function refundRender(userId, { coins = 0, freeDesign = false, day 
         { _id: userId, freeDesignsUsed: { $gt: 0 } },
         { $inc: { freeDesignsUsed: -1 } },
       );
+      // The ledger is the copy that outlives the account, so it has to be
+      // refunded too — otherwise a failed render would permanently cost a free
+      // design that the account itself was given back.
+      const owner = await User.findById(userId).select("email").lean();
+      if (owner?.email) await releaseFreeDesign(owner.email);
     }
     if (day) {
       await User.updateOne(
