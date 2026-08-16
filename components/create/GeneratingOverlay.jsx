@@ -42,10 +42,14 @@ import { RADIUS, SHADOW, SPACING, TYPE, ms } from '../../constants/theme';
  *   slows as it approaches the ceiling, and a bar that has almost stopped looks
  *   broken; a continuous sweep says "still working" at a constant rate no
  *   matter what the bar is doing.
- * * **Elapsed time**, which costs nothing and answers "is this stuck?" without
- *   promising an end. Past the point where a render is genuinely unusual the
- *   subtitle says so, and says the render is not charged unless it finishes,
- *   because that is the live question when something paid is taking too long.
+ * * **No clock.** A timer counting up through an indeterminate wait invites
+ *   the reader to watch it, and time you are made to watch passes slower —
+ *   it reports duration, which is the one thing nobody waiting wants
+ *   emphasised. Elapsed seconds are still tracked, because they drive the
+ *   phases and the message below, but they are not shown. Past the point
+ *   where a render is genuinely unusual the subtitle says so, and says the
+ *   render is not charged unless it finishes, because that is the live
+ *   question when something paid is taking too long.
  *
  * There is deliberately no percentage. The backend submits and polls and cannot
  * report a true fraction, so a bar can honestly say "progressing" where a
@@ -82,12 +86,6 @@ const SLOW_SECONDS = 75;
 /** The bar never passes this until the render actually lands. */
 const CEILING = 0.92;
 
-const clock = (seconds) => {
-  const m = Math.floor(seconds / 60);
-  const s = String(seconds % 60).padStart(2, '0');
-  return `${m}:${s}`;
-};
-
 export default function GeneratingOverlay({
   visible,
   mode = 'interior',
@@ -114,8 +112,8 @@ export default function GeneratingOverlay({
     return () => { cancelled = true; sub?.remove?.(); };
   }, []);
 
-  // One second is the right tick: the captions change on that scale, and the
-  // clock only shows whole seconds.
+  // One second is the right tick: the phase captions change on that scale,
+  // and nothing here needs finer resolution than that.
   useEffect(() => {
     if (!visible) {
       setElapsed(0);
@@ -264,12 +262,9 @@ export default function GeneratingOverlay({
             </Animated.View>
           </View>
 
-          <View style={overlay.meta}>
-            <Text style={[overlay.subtitle, slow && overlay.subtitleSlow]}>
-              {subtitle}
-            </Text>
-            <Text style={overlay.clock}>{clock(elapsed)}</Text>
-          </View>
+          <Text style={[overlay.subtitle, slow && overlay.subtitleSlow]}>
+            {subtitle}
+          </Text>
         </View>
       </View>
     </Modal>
@@ -339,24 +334,12 @@ const overlay = StyleSheet.create({
     bottom: 0,
     width: ms(120),
   },
-  meta: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginTop: SPACING.sm,
-  },
   subtitle: {
     ...TYPE.small,
     color: COLORS.textSecondary,
-    flex: 1,
-    paddingRight: SPACING.sm,
+    marginTop: SPACING.sm,
   },
   subtitleSlow: {
     color: COLORS.textPrimary,
-  },
-  clock: {
-    ...TYPE.caption,
-    color: COLORS.textTertiary,
-    fontVariant: ['tabular-nums'],
   },
 });
