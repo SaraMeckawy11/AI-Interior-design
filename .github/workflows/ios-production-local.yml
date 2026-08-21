@@ -43,6 +43,12 @@ jobs:
       - name: Confirm Expo account
         run: eas whoami | grep --quiet '^sarameckawy'
 
+      - name: Select the reviewed Xcode toolchain
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.0.1.app/Contents/Developer
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "26.0"
+          xcodebuild -version
+
       - name: Build signed App Store IPA locally
         env:
           EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ runner.temp }}/eas-artifacts
