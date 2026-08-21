@@ -41,7 +41,7 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Confirm Expo account
-        run: test "$(eas whoami | head -n 1)" = "sarameckawy"
+        run: eas whoami | grep --quiet '^sarameckawy'
 
       - name: Build signed App Store IPA locally
         env:
