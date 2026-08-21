@@ -45,8 +45,8 @@ jobs:
 
       - name: Select the reviewed Xcode toolchain
         run: |
-          sudo xcode-select --switch /Applications/Xcode_26.0.1.app/Contents/Developer
-          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "26.0"
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "26.2"
           xcodebuild -version
 
       - name: Build signed App Store IPA locally
