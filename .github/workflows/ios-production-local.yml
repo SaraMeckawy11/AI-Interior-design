@@ -1,0 +1,88 @@
+name: Build and upload iOS production
+
+on:
+  push:
+    branches:
+      - codex/app-review-compliance
+    paths:
+      - .github/workflows/ios-production-local.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-production-build-23
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    name: Build 23 and upload to TestFlight
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out the reviewed source
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 22.0.0
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Confirm Expo account
+        run: test "$(eas whoami | head -n 1)" = "sarameckawy"
+
+      - name: Build signed App Store IPA locally
+        env:
+          EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ runner.temp }}/eas-artifacts
+        run: >-
+          eas build
+          --platform ios
+          --profile production
+          --local
+          --non-interactive
+          --output "${RUNNER_TEMP}/Livinai-1.0.0-23.ipa"
+
+      - name: Validate signed IPA identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          inspect_dir="$(mktemp -d)"
+          unzip -q "${RUNNER_TEMP}/Livinai-1.0.0-23.ipa" -d "$inspect_dir"
+          app_path="$(find "$inspect_dir/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist")"
+          build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Info.plist")"
+          short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Info.plist")"
+          test "$bundle_id" = "com.livinai.app"
+          test "$build_number" = "23"
+          test "$short_version" = "1.0.0"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+      - name: Preserve the production IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Livinai-iOS-production-build-23
+          path: ${{ runner.temp }}/Livinai-1.0.0-23.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the exact IPA to TestFlight
+        run: >-
+          eas submit
+          --platform ios
+          --profile production
+          --path "${RUNNER_TEMP}/Livinai-1.0.0-23.ipa"
+          --what-to-test "Fresh install: verify the App Tracking Transparency prompt appears before ads or tracking; then continue through onboarding, create a design, and verify ads, purchases, restore purchases, and account deletion."
+          --wait
+          --non-interactive
