@@ -23,6 +23,10 @@ import { TAB_BAR_CLEARANCE } from "../../components/navigation/FloatingTabBar";
 import { useAuthStore } from "../../authStore";
 import InteriorImg from "../../assets/images/onboarding/i2.png";
 import { apiUrl } from "../../configs/api";
+import {
+  shouldRequestNonPersonalizedAds,
+  useAdvertisingReady,
+} from "../../lib/adsPrivacy";
 
 // --- Google Mobile Ads (App Open) ---
 import { AppOpenAd, AdEventType, TestIds } from "react-native-google-mobile-ads";
@@ -33,10 +37,6 @@ const APP_OPEN_AD_UNIT_ID = __DEV__
       android: "ca-app-pub-4470538534931449/1696483792",
       ios: "ca-app-pub-4470538534931449/9217004258",
     });
-
-const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
-  requestNonPersonalizedAdsOnly: false,
-});
 
 /**
  * Three entry points, not four.
@@ -79,6 +79,7 @@ export default function Create() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { token } = useAuthStore();
+  const advertisingReady = useAdvertisingReady();
   const [isSubscribed, setIsSubscribed] = useState(null);
   const [isPremium, setIsPremium] = useState(null);
 
@@ -162,7 +163,11 @@ export default function Create() {
   useEffect(() => {
     if (isSubscribed === null || isPremium === null) return;
     if (isSubscribed || isPremium) return;
+    if (!advertisingReady) return;
 
+    const appOpenAd = AppOpenAd.createForAdRequest(APP_OPEN_AD_UNIT_ID, {
+      requestNonPersonalizedAdsOnly: shouldRequestNonPersonalizedAds(),
+    });
     let unsubscribe;
     (async () => {
       try {
@@ -179,7 +184,7 @@ export default function Create() {
     })();
 
     return () => unsubscribe?.();
-  }, [isSubscribed, isPremium]);
+  }, [advertisingReady, isSubscribed, isPremium]);
 
   const premium = isSubscribed || isPremium;
 

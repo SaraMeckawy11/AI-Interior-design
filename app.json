@@ -12,11 +12,18 @@
       "bundleIdentifier": "com.livinai.app",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {}
+        }
       }
     },
     "android": {
       "package": "com.livinai.app",
+      "permissions": [
+        "com.google.android.gms.permission.AD_ID"
+      ],
       "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon-square.png",
@@ -39,7 +46,9 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-4470538534931449~7850095110",
-          "iosAppId": "ca-app-pub-4470538534931449~6178305198"
+          "iosAppId": "ca-app-pub-4470538534931449~6178305198",
+          "delayAppMeasurementInit": true,
+          "userTrackingUsageDescription": "Your permission lets Livinai use activity from other companies' apps and websites to show more relevant ads and measure advertising performance."
         }
       ],
       "expo-router",
@@ -75,7 +84,7 @@
       [
         "expo-tracking-transparency",
         {
-          "userTrackingPermission": "Allow Livinai to use app activity to provide more relevant ads and measure advertising performance."
+          "userTrackingPermission": "Your permission lets Livinai use activity from other companies' apps and websites to show more relevant ads and measure advertising performance."
         }
       ],
       [
@@ -89,5 +98,10 @@
         }
       ]
    ]
+  },
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-4470538534931449~7850095110",
+    "ios_app_id": "ca-app-pub-4470538534931449~6178305198",
+    "delay_app_measurement_init": true
   }
 }

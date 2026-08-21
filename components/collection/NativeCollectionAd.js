@@ -1,6 +1,7 @@
 import React from "react";
 import { Platform, View, Text, StyleSheet } from "react-native";
 import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
+import { useAdvertisingReady } from "../../lib/adsPrivacy";
 
 
 const AD_UNIT_ID = __DEV__
@@ -11,6 +12,9 @@ const AD_UNIT_ID = __DEV__
     });
 
 export default function NativeCollectionAd() {
+  const advertisingReady = useAdvertisingReady();
+  if (!advertisingReady) return null;
+
   return (
     <View style={styles.container}>
       <Text style={styles.label}>Sponsored</Text>

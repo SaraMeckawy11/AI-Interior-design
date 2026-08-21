@@ -1,9 +1,11 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useAuthStore } from "../authStore";
 import { ensureRevenueCatConfigured } from "../lib/revenueCat";
+import { initializeAdvertisingPrivacy } from "../lib/adsPrivacy";
+import Loader from "../components/Loader";
 import AndroidBackGuard from "../components/navigation/AndroidBackGuard";
 import {
   Poppins_600SemiBold,
@@ -21,6 +23,7 @@ SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function RootLayout() {
   const { user, token, isCheckingAuth, checkAuth, fetchUser } = useAuthStore();
+  const [advertisingPrivacyResolved, setAdvertisingPrivacyResolved] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
@@ -39,6 +42,19 @@ export default function RootLayout() {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync().catch(() => undefined);
     }
+  }, [fontError, fontsLoaded]);
+
+  useEffect(() => {
+    if (!fontsLoaded && !fontError) return;
+
+    let cancelled = false;
+    initializeAdvertisingPrivacy().finally(() => {
+      if (!cancelled) setAdvertisingPrivacyResolved(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [fontError, fontsLoaded]);
 
   useEffect(() => {
@@ -75,6 +91,11 @@ export default function RootLayout() {
   const home = token ? "/create" : "/(routes)/onboarding";
 
   if (!fontsLoaded && !fontError) return null;
+
+  // Keeping the navigator behind this view is what makes the privacy ordering
+  // deterministic: no restored route, redirect, deep link, or ad component can
+  // mount until ATT/UMP has resolved and AdMob is safe to initialize.
+  if (!advertisingPrivacyResolved) return <Loader branded />;
 
   return (
     <SafeAreaProvider>

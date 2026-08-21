@@ -1,6 +1,10 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, Text, View } from 'react-native';
+import {
+  AdsConsent,
+  AdsConsentPrivacyOptionsRequirementStatus,
+} from 'react-native-google-mobile-ads';
 import Purchases from 'react-native-purchases';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from '../../assets/styles/profile.styles';
@@ -24,6 +28,41 @@ export default function Profile() {
   );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [privacyOptionsRequired, setPrivacyOptionsRequired] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    AdsConsent.getConsentInfo()
+      .then((consent) => {
+        if (mounted) {
+          setPrivacyOptionsRequired(
+            consent.privacyOptionsRequirementStatus
+              === AdsConsentPrivacyOptionsRequirementStatus.REQUIRED,
+          );
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const openAdvertisingPrivacy = async () => {
+    try {
+      const consent = await AdsConsent.showPrivacyOptionsForm();
+      setPrivacyOptionsRequired(
+        consent.privacyOptionsRequirementStatus
+          === AdsConsentPrivacyOptionsRequirementStatus.REQUIRED,
+      );
+    } catch {
+      Alert.alert(
+        'Privacy choices unavailable',
+        'Please check your connection and try again.',
+      );
+    }
+  };
 
   const deleteAccount = async () => {
     if (deleting) return;
@@ -146,6 +185,14 @@ export default function Profile() {
             label="Privacy Policy"
             onPress={() => router.push('/profile/privacy')}
           />
+          {privacyOptionsRequired ? (
+            <SettingsRow
+              icon="options-outline"
+              label="Advertising Privacy"
+              showDivider
+              onPress={openAdvertisingPrivacy}
+            />
+          ) : null}
           <SettingsRow
             icon="document-text-outline"
             label="Terms & Conditions"

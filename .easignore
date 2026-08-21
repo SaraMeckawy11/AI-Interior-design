@@ -15,6 +15,7 @@ expo-env.d.ts
 /android/app/.cxx
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
@@ -22,6 +23,7 @@ expo-env.d.ts
 credentials.json
 credentials/
 android/keystore.properties
+android/local.properties
 
 # Environment and local tooling files
 .env

@@ -23,7 +23,7 @@ const Terms = () => {
 
         <Section title="Use of the App">
           <Text style={styles.text}>
-            LIVINAI provides AI-powered interior design features for personal and non-commercial use. You agree to use the app legally and responsibly, without harming other users, LIVINAI’s functionality, or its integrity.
+            LIVINAI provides AI-powered design visualisation for personal and professional use. You agree to use the app legally and responsibly, without harming other users, LIVINAI’s functionality, or its integrity.
           </Text>
         </Section>
 
@@ -41,7 +41,7 @@ const Terms = () => {
 
         <Section title="User Content">
           <Text style={styles.text}>
-            You retain ownership of the content you upload, such as room images and preferences. By uploading content, you grant LIVINAI a non-exclusive, royalty-free license to use it for processing, design generation, and service improvement.
+            You retain ownership of the content you upload, such as room images and preferences. By uploading content, you grant LIVINAI a limited, non-exclusive license to process, store, and display it only as needed to generate and provide your requested designs and app features.
           </Text>
           <Text style={styles.text}>
             You must not upload any material that is unlawful, harmful, or infringes on third-party rights.

@@ -1,154 +1,115 @@
 import React from 'react';
-import { ScrollView, Text, StyleSheet, Linking, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import COLORS from '../../constants/colors';
+
 import ScreenHeader from '../../components/ScreenHeader';
+import COLORS from '../../constants/colors';
 import { SPACING, TYPE } from '../../constants/theme';
 
-const Privacy = () => {
-  return (
-    <LinearGradient
-      colors={[COLORS.background, '#ffffff']} // gradient background
-      style={styles.gradient}
-    >
-      <ScreenHeader title="Privacy Policy" />
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+const Privacy = () => (
+  <LinearGradient colors={[COLORS.background, COLORS.white]} style={styles.gradient}>
+    <ScreenHeader title="Privacy Policy" />
+    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <Text style={styles.effective}>Effective August 21, 2026</Text>
 
-        <Section title="General">
-          <Text style={styles.text}>
-            LIVINAI (“we,” “our,” or “us”) is committed to protecting your privacy. This Privacy Policy explains how your personal information is collected, used, and disclosed by LIVINAI.
-          </Text>
-          <Text style={styles.text}>
-            By accessing or using our mobile application, LIVINAI, you agree to the collection, storage, use, and disclosure of your personal information as described in this Privacy Policy and our Terms of Service.
-          </Text>
-        </Section>
+      <Section title="About this policy">
+        <Text style={styles.text}>
+          Livinai provides AI-powered interior, exterior, and 3D home-design tools. This policy explains what information we process, why it is needed, and the choices available to you.
+        </Text>
+      </Section>
 
-        <Section title="Definitions and Key Terms">
-          <Bullet text="Cookie: Small data file stored in your browser used to remember preferences or login info." />
-          <Bullet text="Personal Data: Any information that identifies you (name, email, device ID, etc.)." />
-          <Bullet text="Device: Any connected device (e.g., phone, tablet, computer) used to access LIVINAI." />
-          <Bullet text="Service: Refers to LIVINAI and its features." />
-        </Section>
+      <Section title="Information we process">
+        <Bullet text="Account: name, email address, authentication-provider identifier, and profile image when supplied by Sign in with Apple or Google. Livinai does not ask you to create a separate password." />
+        <Bullet text="Your content: images you select, design preferences, prompts, generated designs, saved projects, project titles, and floor-plan or 3D project data." />
+        <Bullet text="Purchases: product identifiers, transaction status, and subscription or entitlement state. Apple or Google processes payment details; Livinai does not receive your full card details." />
+        <Bullet text="App activity: design counts, feature interactions, rewarded-ad activity, device or app identifiers, diagnostics, and information needed to operate and secure the service." />
+        <Bullet text="Support: your email address and information you choose to include when contacting us." />
+      </Section>
 
-        <Section title="Information Automatically Collected">
-          <Text style={styles.text}>
-            We and our service providers may process IP address, coarse location inferred from IP, device identifiers and characteristics, OS version, app interactions, advertising activity, performance data, and crash diagnostics to operate, secure, measure, and improve Livinai.
-          </Text>
-        </Section>
+      <Section title="How we use information">
+        <Text style={styles.text}>
+          We use information to authenticate accounts; create, store, and display designs; operate subscriptions and coins; deliver and measure eligible advertising; award coins for completed rewarded ads; maintain security; diagnose problems; improve reliability; respond to support requests; and meet legal obligations.
+        </Text>
+        <Text style={styles.text}>
+          Uploaded and generated designs are private to your account unless you choose to share or export them. Livinai has no public gallery or social feed.
+        </Text>
+      </Section>
 
-        <Section title="Personal Data and Collection Methods">
-          <Bullet text="Identity: Name and email address" />
-          <Bullet text="Contact: Email address" />
-          <Bullet text="Device: IP address, device name, OS version, identifiers" />
-          <Bullet text="Content: Uploaded room photos, visual design preferences" />
-        </Section>
+      <Section title="Service providers">
+        <Bullet text="Apple and Google for authentication, and the device store for in-app purchases" />
+        <Bullet text="RevenueCat for purchase and subscription entitlement management" />
+        <Bullet text="Google AdMob for advertising, including optional rewarded ads" />
+        <Bullet text="Render and MongoDB Atlas for application hosting and data infrastructure" />
+        <Bullet text="Cloudinary for media storage and delivery" />
+        <Bullet text="Modal and RunPod for computing and AI design processing" />
+        <Text style={styles.text}>
+          We use providers whose contractual and privacy commitments require protections consistent with this policy and applicable law, and limit their access to what is needed to provide their services.
+        </Text>
+      </Section>
 
-        <Section title="Use of Information">
-          <Bullet text="Provide AI-generated interior design services" />
-          <Bullet text="Improve app functionality" />
-          <Bullet text="Process subscriptions and coin purchases and maintain entitlement status" />
-          <Bullet text="Show and measure advertising and award coins for eligible rewarded ads" />
-          <Bullet text="Respond to customer support requests" />
-          <Bullet text="Communicate important updates" />
-          <Bullet text="Comply with legal obligations" />
-        </Section>
+      <Section title="Advertising and tracking">
+        <Text style={styles.text}>
+          On iOS, Livinai requests permission through Apple&apos;s App Tracking Transparency prompt before allowing tracking across other companies&apos; apps or websites where permission is required. You may decline or change this choice in iOS Settings. Declining does not prevent use of Livinai&apos;s design features; ads may be less personalised.
+        </Text>
+        <Text style={styles.text}>
+          Where regional advertising consent rules require it, Profile &gt; Advertising Privacy lets you review or change your advertising choices.
+        </Text>
+      </Section>
 
-        <Section title="Third-Party Services and Sharing">
-          <Text style={styles.text}>
-            We do not sell your personal data. We may share data with trusted third parties including:
-          </Text>
-          <Bullet text="Cloud storage providers" />
-          <Bullet text="Analytics and crash reporting platforms" />
-          <Bullet text="AI model processing services" />
-          <Bullet text="Google AdMob for advertising and ad measurement" />
-          <Bullet text="RevenueCat for purchase and subscription entitlement management" />
-          <Bullet text="Apple and Google for authentication and in-app payment processing" />
-          <Bullet text="Legal authorities if required by law" />
-          <Text style={styles.text}>
-            All partners are contractually required to follow data privacy obligations.
-          </Text>
-        </Section>
+      <Section title="Sharing and sale">
+        <Text style={styles.text}>
+          We do not sell your personal information. We disclose information to service providers only as needed to operate Livinai, when required by law, to protect Livinai or others, or as part of a permitted business transfer.
+        </Text>
+      </Section>
 
-        <Section title="Data Retention">
-          <Text style={styles.text}>
-            We retain your data as long as needed to provide services and for legal compliance. You may request deletion of your data at any time.
-          </Text>
-        </Section>
+      <Section title="Retention and account deletion">
+        <Text style={styles.text}>
+          We retain information while your account is active and as needed to provide Livinai. Limited records may be retained for legal, fraud-prevention, security, dispute-resolution, or accounting obligations.
+        </Text>
+        <Text style={styles.text}>
+          To begin permanent deletion, open Profile &gt; Account &gt; Delete Account and confirm Delete Forever. Account deletion does not cancel a store subscription; cancel that separately from Manage Subscription.
+        </Text>
+      </Section>
 
-        <Section title="Security">
-          <Text style={styles.text}>
-            We use encryption, access control, and secure infrastructure to protect your data. Despite our efforts, no system is entirely secure.
-          </Text>
-        </Section>
+      <Section title="Your choices and rights">
+        <Text style={styles.text}>
+          You can manage photo and tracking permissions in device Settings, restore eligible purchases in Livinai, and manage subscriptions through your store account. Depending on where you live, you may request access, correction, deletion, restriction, objection, or a portable copy of certain personal information by contacting us.
+        </Text>
+      </Section>
 
-        <Section title="Children's Privacy">
-          <Text style={styles.text}>
-            We do not knowingly collect information from children under 13. If we become aware, we will delete it promptly.
-          </Text>
-        </Section>
+      <Section title="Children">
+        <Text style={styles.text}>
+          Livinai is not directed to children under 13, and we do not knowingly collect personal information from children under 13. Contact us if you believe a child has provided information.
+        </Text>
+      </Section>
 
-        <Section title="User Rights">
-          <Text style={styles.text}>
-            You can permanently delete your account and associated app data from Profile &gt; Account &gt; Delete Account. You may also ask to access, update, delete, or object to the processing of your data by contacting us at{' '}
-            <Text 
-              style={styles.link} 
-              onPress={() => Linking.openURL('mailto:livinai2025@gmail.com')}
-            >
-              livinai2025@gmail.com
-            </Text>.
-          </Text>
-        </Section>
+      <Section title="Security and international processing">
+        <Text style={styles.text}>
+          We use reasonable technical and organisational safeguards, including encrypted network connections and access controls. No storage or transmission method is completely secure. Livinai and its providers may process information in countries other than your own using safeguards required by applicable law.
+        </Text>
+      </Section>
 
-        <Section title="Data Breach Notification">
-          <Text style={styles.text}>
-            In the event of a data breach, we will notify affected users and relevant authorities as required by applicable law.
-          </Text>
-        </Section>
+      <Section title="Changes">
+        <Text style={styles.text}>
+          We may update this policy as Livinai, our providers, or legal requirements change. We will publish the revised policy and update its effective date.
+        </Text>
+      </Section>
 
-        <Section title="Cookies and Tracking">
-          <Text style={styles.text}>
-            We may use local storage and similar technologies for app functionality and performance. On iOS, Livinai asks for permission before allowing tracking across other companies&apos; apps or websites. Declining tracking does not prevent you from using the app. You can change tracking and photo permissions in iOS Settings.
-          </Text>
-        </Section>
-
-        <Section title="Push Notifications">
-          <Text style={styles.text}>
-            We may send push notifications. You may disable them through your device settings at any time.
-          </Text>
-        </Section>
-
-        <Section title="In-App Purchases">
-          <Text style={styles.text}>
-            Payments are processed securely through the Apple App Store or Google Play Store. LIVINAI does not store any credit card or payment details.
-          </Text>
-        </Section>
-
-        <Section title="Compliance">
-          <Text style={styles.text}>
-            This Privacy Policy is designed to comply with global privacy principles that promote transparency, fairness, and user control.
-          </Text>
-        </Section>
-
-        <Section title="Changes to this Policy">
-          <Text style={styles.text}>
-            We may revise this Privacy Policy from time to time. Significant changes will be communicated via app updates or email. Continued use of LIVINAI implies acceptance of any updates.
-          </Text>
-        </Section>
-
-        <Section title="Contact Us">
-          <Text style={styles.text}>
-            Email: <Text 
-              style={styles.link} 
-              onPress={() => Linking.openURL('mailto:livinai2025@gmail.com')}
-            >
-              livinai2025@gmail.com
-            </Text>{'\n'}
-          </Text>
-        </Section>
-      </ScrollView>
-    </LinearGradient>
-  );
-};
+      <Section title="Contact">
+        <Text style={styles.text}>
+          For privacy questions or requests, email{' '}
+          <Text
+            accessibilityRole="link"
+            style={styles.link}
+            onPress={() => Linking.openURL('mailto:livinai2025@gmail.com?subject=Livinai%20Privacy%20Request')}
+          >
+            livinai2025@gmail.com
+          </Text>.
+        </Text>
+      </Section>
+    </ScrollView>
+  </LinearGradient>
+);
 
 const Section = ({ title, children }) => (
   <View style={styles.section}>
@@ -165,15 +126,18 @@ const Bullet = ({ text }) => (
 );
 
 const styles = StyleSheet.create({
-  gradient: {
-    flex: 1,
-  },
-  // Legal copy is read, not skimmed: a single measure, generous line height and
-  // the app's own type ramp instead of raw font sizes that matched nothing else.
+  gradient: { flex: 1 },
   container: {
     paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.xxxl,
   },
+  effective: {
+    ...TYPE.caption,
+    color: COLORS.textTertiary,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  section: { marginBottom: SPACING.base },
   heading: {
     ...TYPE.h3,
     color: COLORS.textPrimary,
@@ -205,9 +169,6 @@ const styles = StyleSheet.create({
     ...TYPE.small,
     color: COLORS.textSecondary,
     lineHeight: 21,
-  },
-  section: {
-    marginBottom: SPACING.base,
   },
 });
 

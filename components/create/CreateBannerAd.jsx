@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { InteractionManager, Platform, View, Text, StyleSheet } from "react-native";
 import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
 import COLORS from "../../constants/colors";
+import { useAdvertisingReady } from "../../lib/adsPrivacy";
 
 const AD_UNIT_ID = __DEV__
   ? TestIds.BANNER
@@ -14,6 +15,7 @@ const AD_UNIT_ID = __DEV__
 const AD_HEIGHT = 250;
 
 export default function CreateBannerAd() {
+  const advertisingReady = useAdvertisingReady();
   // Mounting `BannerAd` attaches a native view and fires a network request. Doing
   // that in the first render put it on the JS thread while the navigator was
   // still animating the push from the hub, which is most of why opening Interior
@@ -22,9 +24,10 @@ export default function CreateBannerAd() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    if (!advertisingReady) return undefined;
     const task = InteractionManager.runAfterInteractions(() => setReady(true));
     return () => task.cancel();
-  }, []);
+  }, [advertisingReady]);
 
   return (
     <View style={styles.container}>
