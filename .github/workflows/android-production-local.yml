@@ -8,9 +8,11 @@ name: Build Android production AAB
 on:
   push:
     branches:
+      - main
       - codex/app-review-compliance
     paths:
       - .github/workflows/android-production-local.yml
+      - android/app/src/main/AndroidManifest.xml
   workflow_dispatch:
 
 permissions:
@@ -129,6 +131,26 @@ jobs:
           jarsigner -verify "$AAB_PATH" | tee /dev/stderr | grep -q "jar verified"
           echo "Signer certificate:"
           keytool -printcert -jarfile "$AAB_PATH" | grep -E "Owner|SHA256:"
+
+          # Google Play's photo and video permissions policy rejected version
+          # codes 42, 49 and 78 over READ_MEDIA_IMAGES / READ_MEDIA_VIDEO.
+          # expo-media-library still declares all four READ_MEDIA_* permissions
+          # in its own manifest, so this asserts that the tools:node="remove"
+          # entries in android/app/src/main/AndroidManifest.xml actually
+          # survived the merge into the shipped bundle.
+          java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest \
+            --bundle "$AAB_PATH" > "$RUNNER_TEMP/manifest.xml"
+
+          if grep -qE 'READ_MEDIA_(IMAGES|VIDEO|AUDIO|VISUAL_USER_SELECTED)' "$RUNNER_TEMP/manifest.xml"; then
+            echo "FAIL: a READ_MEDIA_* permission is still present in the bundle:"
+            grep -oE 'android\.permission\.READ_MEDIA[A-Z_]*' "$RUNNER_TEMP/manifest.xml" | sort -u
+            exit 1
+          fi
+          echo "OK: no READ_MEDIA_* permissions in the bundle."
+
+          echo "Permissions this bundle ships:"
+          grep -oE '(android|com\.google\.android\.gms)\.permission\.[A-Z_]+' \
+            "$RUNNER_TEMP/manifest.xml" | sort -u
 
           echo "AAB_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
 

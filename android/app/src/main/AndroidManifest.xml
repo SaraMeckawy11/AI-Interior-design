@@ -5,7 +5,38 @@
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
+  <!--
+    Google Play's photo and video permissions policy: an app targeting API 33+
+    may only request READ_MEDIA_IMAGES / READ_MEDIA_VIDEO when the system
+    pickers cannot provide core functionality. Livinai's do, so these are
+    removed. Version codes 42, 49 and 78 shipped them and were flagged.
+
+    They are not declared here — they merge in from expo-media-library's own
+    manifest, which unconditionally declares all four READ_MEDIA_* permissions.
+    Deleting a line from this file therefore does nothing; the permissions have
+    to be stripped at merge time, which is what tools:node="remove" does.
+
+    Nothing asks for them at runtime, so removing them costs no functionality:
+
+      - Choosing a photo goes through expo-image-picker, whose
+        getMediaLibraryPermissions() returns an empty array on API 33+ because
+        launchImageLibraryAsync uses the Android photo picker.
+      - Saving a render calls MediaLibrary.saveToLibraryAsync behind
+        requestPermissionsAsync(true) — writeOnly — and expo-media-library only
+        ever adds READ_MEDIA_* when writeOnly is false. On API 33+ its
+        hasWritePermissions() short-circuits to false, so a save needs no
+        permission at all.
+
+    READ_EXTERNAL_STORAGE and WRITE_EXTERNAL_STORAGE stay. Google did not flag
+    them, and on API 32 and below both modules still require them to pick and
+    to save; removing them would break Android 7 through 12.
+  -->
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+  <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+  <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>
+  <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" tools:node="remove"/>
+
   <!-- Android has no Apple ATT prompt. Google UMP resolves consent before the
        ad SDK starts, and this normal permission lets AdMob use Android's
        resettable Advertising ID only where the user and regional rules allow. -->
