@@ -1,0 +1,141 @@
+name: Build Android production AAB
+
+# Mirrors ios-production-local.yml: the build runs on a free GitHub runner with
+# `eas build --local`, so it consumes no EAS build credits. Signing still uses
+# the upload keystore stored on EAS, which is what builds 76-78 were signed
+# with, so the resulting bundle is accepted by the same Play listing.
+
+on:
+  push:
+    branches:
+      - codex/app-review-compliance
+    paths:
+      - .github/workflows/android-production-local.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-production-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build signed production app bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      AAB_PATH: ${{ github.workspace }}/artifacts/Livinai-production.aab
+
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v5
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install the Android SDK packages this project pins
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006" \
+            "cmake;3.22.1"
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 22.0.0
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Confirm Expo account
+        run: eas whoami | grep --quiet '^sarameckawy'
+
+      - name: Record the version code EAS will build
+        id: version
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$AAB_PATH")"
+          previous="$(eas build:version:get --platform android --non-interactive 2>/dev/null \
+            | grep -oE 'Android versionCode - [0-9]+' | grep -oE '[0-9]+$')"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "Remote version code before this build: $previous"
+
+      - name: Build the signed release bundle locally
+        env:
+          EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ runner.temp }}/eas-artifacts
+        run: >-
+          eas build
+          --platform android
+          --profile production
+          --local
+          --non-interactive
+          --output "$AAB_PATH"
+
+      - name: Verify the bundle is signed and correctly stamped
+        run: |
+          set -euo pipefail
+          test -s "$AAB_PATH"
+
+          curl -sSL -o "$RUNNER_TEMP/bundletool.jar" \
+            https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+
+          dump() {
+            java -jar "$RUNNER_TEMP/bundletool.jar" dump manifest \
+              --bundle "$AAB_PATH" --xpath "$1"
+          }
+
+          package="$(dump /manifest/@package)"
+          version_code="$(dump /manifest/@android:versionCode)"
+          version_name="$(dump /manifest/@android:versionName)"
+
+          echo "package=$package versionCode=$version_code versionName=$version_name"
+
+          test "$package" = "com.livinai.app"
+          test "$version_name" = "1.0.0"
+
+          # defaultConfig in android/app/build.gradle hardcodes versionCode 1.
+          # Seeing that value here would mean EAS never stamped the remote
+          # version, and Play would reject the upload as a duplicate.
+          previous="${{ steps.version.outputs.previous }}"
+          test "$version_code" -gt "$previous"
+
+          # An unsigned bundle is the other silent failure: build.gradle sets
+          # `signingConfig null` for release when no upload key is resolved.
+          jarsigner -verify "$AAB_PATH" | tee /dev/stderr | grep -q "jar verified"
+          echo "Signer certificate:"
+          keytool -printcert -jarfile "$AAB_PATH" | grep -E "Owner|SHA256:"
+
+          echo "AAB_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+
+      - name: Upload the production app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Livinai-android-production-${{ env.AAB_VERSION_CODE }}
+          path: ${{ env.AAB_PATH }}
+          if-no-files-found: error
+          retention-days: 14
